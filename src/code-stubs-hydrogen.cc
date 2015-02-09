@@ -9,12 +9,13 @@
 #include "src/hydrogen.h"
 #include "src/ic/ic.h"
 #include "src/lithium.h"
+#include "src/low-chunk.h"
 
 namespace v8 {
 namespace internal {
 
 
-static LChunk* OptimizeGraph(HGraph* graph) {
+static LowChunk* OptimizeGraph(HGraph* graph) {
   DisallowHeapAllocation no_allocation;
   DisallowHandleAllocation no_handles;
   DisallowHandleDereference no_deref;
@@ -24,7 +25,7 @@ static LChunk* OptimizeGraph(HGraph* graph) {
   if (!graph->Optimize(&bailout_reason)) {
     FATAL(GetBailoutReason(bailout_reason));
   }
-  LChunk* chunk = LChunk::NewChunk(graph);
+  LowChunk* chunk = LChunk::NewChunk(graph);
   if (chunk == NULL) {
     FATAL(GetBailoutReason(graph->info()->bailout_reason()));
   }
@@ -299,7 +300,7 @@ static Handle<Code> DoGenerateCode(Stub* stub) {
   Zone zone;
   CompilationInfo info(stub, isolate, &zone);
   CodeStubGraphBuilder<Stub> builder(&info);
-  LChunk* chunk = OptimizeGraph(builder.CreateGraph());
+  LowChunk* chunk = OptimizeGraph(builder.CreateGraph());
   Handle<Code> code = chunk->Codegen();
   if (FLAG_profile_hydrogen_code_stub_compilation) {
     OFStream os(stdout);

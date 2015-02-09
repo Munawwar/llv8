@@ -848,6 +848,8 @@
         '../../src/log.h',
         '../../src/lookup.cc',
         '../../src/lookup.h',
+        '../../src/low-chunk.cc',
+        '../../src/low-chunk.h',
         '../../src/macro-assembler.h',
         '../../src/messages.cc',
         '../../src/messages.h',

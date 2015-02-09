@@ -261,9 +261,8 @@ int StackSlotOffset(int index) {
 
 
 LChunk::LChunk(CompilationInfo* info, HGraph* graph)
-    : spill_slot_count_(0),
-      info_(info),
-      graph_(graph),
+    : LowChunk(info, graph),
+      spill_slot_count_(0),
       instructions_(32, info->zone()),
       pointer_maps_(8, info->zone()),
       inlined_functions_(1, info->zone()),
@@ -272,7 +271,7 @@ LChunk::LChunk(CompilationInfo* info, HGraph* graph)
 
 
 LLabel* LChunk::GetLabel(int block_id) const {
-  HBasicBlock* block = graph_->blocks()->at(block_id);
+  HBasicBlock* block = graph()->blocks()->at(block_id);
   int first_instruction = block->first_instruction_index();
   return LLabel::cast(instructions_[first_instruction]);
 }
@@ -396,13 +395,13 @@ void LChunk::AddGapMove(int index, LOperand* from, LOperand* to) {
 
 
 HConstant* LChunk::LookupConstant(LConstantOperand* operand) const {
-  return HConstant::cast(graph_->LookupValue(operand->index()));
+  return HConstant::cast(graph()->LookupValue(operand->index()));
 }
 
 
 Representation LChunk::LookupLiteralRepresentation(
     LConstantOperand* operand) const {
-  return graph_->LookupValue(operand->index())->representation();
+  return graph()->LookupValue(operand->index())->representation();
 }
 
 
@@ -470,7 +469,7 @@ void LChunk::CommitDependencies(Handle<Code> code) const {
     Map::AddDependentCode(map, DependentCode::kPrototypeCheckGroup, code);
   }
 
-  info_->dependencies()->Commit(code);
+  info()->dependencies()->Commit(code);
   RegisterWeakObjectsInOptimizedCode(code);
 }
 

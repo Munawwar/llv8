@@ -12,6 +12,7 @@
 #include "src/hydrogen.h"
 #include "src/safepoint-table.h"
 #include "src/zone-allocator.h"
+#include "src/low-chunk.h"
 
 namespace v8 {
 namespace internal {
@@ -627,8 +628,12 @@ class LLabel;
 
 // Superclass providing data and behavior common to all the
 // arch-specific LPlatformChunk classes.
-class LChunk : public ZoneObject {
+class LChunk : public LowChunk {
  public:
+  // FIXME: shall we add the actual code for the destructor
+  // or the Zone takes care of everything?
+  // FIXME: should it be public?
+  ~LChunk() override {}
   static LChunk* NewChunk(HGraph* graph);
 
   void AddInstruction(LInstruction* instruction, HBasicBlock* block);
@@ -639,9 +644,6 @@ class LChunk : public ZoneObject {
   int ParameterAt(int index);
   int GetParameterStackSlot(int index) const;
   int spill_slot_count() const { return spill_slot_count_; }
-  CompilationInfo* info() const { return info_; }
-  HGraph* graph() const { return graph_; }
-  Isolate* isolate() const { return graph_->isolate(); }
   const ZoneList<LInstruction*>* instructions() const { return &instructions_; }
   void AddGapMove(int index, LOperand* from, LOperand* to);
   LGap* GetGapAt(int index) const;
@@ -664,20 +666,18 @@ class LChunk : public ZoneObject {
   void AddDeprecationDependency(Handle<Map> map) {
     DCHECK(!map->is_deprecated());
     if (!map->CanBeDeprecated()) return;
-    DCHECK(!info_->IsStub());
+    DCHECK(!info()->IsStub());
     deprecation_dependencies_.Add(map, zone());
   }
 
   void AddStabilityDependency(Handle<Map> map) {
     DCHECK(map->is_stable());
     if (!map->CanTransition()) return;
-    DCHECK(!info_->IsStub());
+    DCHECK(!info()->IsStub());
     stability_dependencies_.Add(map, zone());
   }
 
-  Zone* zone() const { return info_->zone(); }
-
-  Handle<Code> Codegen();
+  Handle<Code> Codegen() override;
 
   void set_allocated_double_registers(BitVector* allocated_registers);
   BitVector* allocated_double_registers() {
@@ -693,8 +693,6 @@ class LChunk : public ZoneObject {
   void RegisterWeakObjectsInOptimizedCode(Handle<Code> code) const;
   void CommitDependencies(Handle<Code> code) const;
 
-  CompilationInfo* info_;
-  HGraph* const graph_;
   BitVector* allocated_double_registers_;
   ZoneList<LInstruction*> instructions_;
   ZoneList<LPointerMap*> pointer_maps_;
