@@ -25,7 +25,7 @@ static LowChunk* OptimizeGraph(HGraph* graph) {
   if (!graph->Optimize(&bailout_reason)) {
     FATAL(GetBailoutReason(bailout_reason));
   }
-  LowChunk* chunk = LChunk::NewChunk(graph);
+  LowChunk* chunk = LChunk::NewChunk(graph); // TODO(llvm): or LLVMChunk::NewChunk()
   if (chunk == NULL) {
     FATAL(GetBailoutReason(graph->info()->bailout_reason()));
   }

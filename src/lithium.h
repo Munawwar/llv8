@@ -10,9 +10,9 @@
 #include "src/allocation.h"
 #include "src/bailout-reason.h"
 #include "src/hydrogen.h"
+#include "src/low-chunk.h"
 #include "src/safepoint-table.h"
 #include "src/zone-allocator.h"
-#include "src/low-chunk.h"
 
 namespace v8 {
 namespace internal {
@@ -702,17 +702,14 @@ class LChunk : public LowChunk {
 };
 
 
-class LChunkBuilderBase BASE_EMBEDDED {
+class LChunkBuilderBase : public LowChunkBuilderBase {
  public:
   explicit LChunkBuilderBase(CompilationInfo* info, HGraph* graph)
-      : argument_count_(0),
-        chunk_(NULL),
-        info_(info),
-        graph_(graph),
-        status_(UNUSED),
-        zone_(graph->zone()) {}
+      : LowChunkBuilderBase(info, graph),
+        argument_count_(0),
+        status_(UNUSED) {}
 
-  virtual ~LChunkBuilderBase() { }
+  ~LChunkBuilderBase() override {}
 
   void Abort(BailoutReason reason);
   void Retry(BailoutReason reason);
@@ -720,12 +717,8 @@ class LChunkBuilderBase BASE_EMBEDDED {
  protected:
   enum Status { UNUSED, BUILDING, DONE, ABORTED };
 
-  LPlatformChunk* chunk() const { return chunk_; }
-  CompilationInfo* info() const { return info_; }
-  HGraph* graph() const { return graph_; }
+  LPlatformChunk* chunk() const override { return static_cast<LPlatformChunk*>(chunk_); }
   int argument_count() const { return argument_count_; }
-  Isolate* isolate() const { return graph_->isolate(); }
-  Heap* heap() const { return isolate()->heap(); }
 
   bool is_unused() const { return status_ == UNUSED; }
   bool is_building() const { return status_ == BUILDING; }
@@ -743,16 +736,9 @@ class LChunkBuilderBase BASE_EMBEDDED {
                               ZoneList<HValue*>* objects_to_materialize,
                               LEnvironment* result);
 
-  Zone* zone() const { return zone_; }
-
   int argument_count_;
-  LPlatformChunk* chunk_;
-  CompilationInfo* info_;
-  HGraph* const graph_;
   Status status_;
 
- private:
-  Zone* zone_;
 };
 
 
@@ -766,13 +752,13 @@ enum NumberUntagDMode {
 
 class LPhase : public CompilationPhase {
  public:
-  LPhase(const char* name, LChunk* chunk)
+  LPhase(const char* name, LowChunk* chunk)
       : CompilationPhase(name, chunk->info()),
         chunk_(chunk) { }
   ~LPhase();
 
  private:
-  LChunk* chunk_;
+  LowChunk* chunk_;
 
   DISALLOW_COPY_AND_ASSIGN(LPhase);
 };

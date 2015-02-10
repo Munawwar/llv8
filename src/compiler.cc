@@ -546,7 +546,7 @@ OptimizedCompileJob::Status OptimizedCompileJob::OptimizeGraph() {
   BailoutReason bailout_reason = kNoReason;
 
   if (graph_->Optimize(&bailout_reason)) {
-    chunk_ = LChunk::NewChunk(graph_);
+    chunk_ = LChunk::NewChunk(graph_); // TODO(llvm): or LLVMChunk::NewChunk()
     if (chunk_ != NULL) return SetLastStatus(SUCCEEDED);
   } else if (bailout_reason != kNoReason) {
     graph_builder_->Bailout(bailout_reason);

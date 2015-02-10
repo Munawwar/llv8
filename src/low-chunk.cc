@@ -12,5 +12,4 @@ LowChunk::LowChunk(CompilationInfo* info, HGraph* graph)
       graph_(graph) {}
 
 
-}  // namespace v8
-}  // namespace internal
+} }  // namespace v8::internal

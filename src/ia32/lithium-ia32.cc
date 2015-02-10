@@ -456,7 +456,7 @@ LPlatformChunk* LChunkBuilder::Build() {
 
   // Reserve the first spill slot for the state of dynamic alignment.
   if (info()->IsOptimizing()) {
-    int alignment_state_index = chunk_->GetNextSpillIndex(GENERAL_REGISTERS);
+    int alignment_state_index = chunk()->GetNextSpillIndex(GENERAL_REGISTERS);
     DCHECK_EQ(alignment_state_index, 0);
     USE(alignment_state_index);
   }
@@ -465,7 +465,7 @@ LPlatformChunk* LChunkBuilder::Build() {
   // which will be subsumed into this frame.
   if (graph()->has_osr()) {
     for (int i = graph()->osr()->UnoptimizedFrameSlots(); i > 0; i--) {
-      chunk_->GetNextSpillIndex(GENERAL_REGISTERS);
+      chunk()->GetNextSpillIndex(GENERAL_REGISTERS);
     }
   }
 
@@ -477,7 +477,7 @@ LPlatformChunk* LChunkBuilder::Build() {
     if (is_aborted()) return NULL;
   }
   status_ = DONE;
-  return chunk_;
+  return chunk();
 }
 
 
@@ -537,14 +537,14 @@ static inline bool CanBeImmediateConstant(HValue* value) {
 
 LOperand* LChunkBuilder::UseOrConstant(HValue* value) {
   return CanBeImmediateConstant(value)
-      ? chunk_->DefineConstantOperand(HConstant::cast(value))
+      ? chunk()->DefineConstantOperand(HConstant::cast(value))
       : Use(value);
 }
 
 
 LOperand* LChunkBuilder::UseOrConstantAtStart(HValue* value) {
   return CanBeImmediateConstant(value)
-      ? chunk_->DefineConstantOperand(HConstant::cast(value))
+      ? chunk()->DefineConstantOperand(HConstant::cast(value))
       : UseAtStart(value);
 }
 
@@ -552,33 +552,33 @@ LOperand* LChunkBuilder::UseOrConstantAtStart(HValue* value) {
 LOperand* LChunkBuilder::UseFixedOrConstant(HValue* value,
                                             Register fixed_register) {
   return CanBeImmediateConstant(value)
-      ? chunk_->DefineConstantOperand(HConstant::cast(value))
+      ? chunk()->DefineConstantOperand(HConstant::cast(value))
       : UseFixed(value, fixed_register);
 }
 
 
 LOperand* LChunkBuilder::UseRegisterOrConstant(HValue* value) {
   return CanBeImmediateConstant(value)
-      ? chunk_->DefineConstantOperand(HConstant::cast(value))
+      ? chunk()->DefineConstantOperand(HConstant::cast(value))
       : UseRegister(value);
 }
 
 
 LOperand* LChunkBuilder::UseRegisterOrConstantAtStart(HValue* value) {
   return CanBeImmediateConstant(value)
-      ? chunk_->DefineConstantOperand(HConstant::cast(value))
+      ? chunk()->DefineConstantOperand(HConstant::cast(value))
       : UseRegisterAtStart(value);
 }
 
 
 LOperand* LChunkBuilder::UseConstant(HValue* value) {
-  return chunk_->DefineConstantOperand(HConstant::cast(value));
+  return chunk()->DefineConstantOperand(HConstant::cast(value));
 }
 
 
 LOperand* LChunkBuilder::UseAny(HValue* value) {
   return value->IsConstant()
-      ? chunk_->DefineConstantOperand(HConstant::cast(value))
+      ? chunk()->DefineConstantOperand(HConstant::cast(value))
       :  Use(value, new(zone()) LUnallocated(LUnallocated::ANY));
 }
 
@@ -742,7 +742,7 @@ LInstruction* LChunkBuilder::DoShift(Token::Value op,
     bool does_deopt = false;
     if (right_value->IsConstant()) {
       HConstant* constant = HConstant::cast(right_value);
-      right = chunk_->DefineConstantOperand(constant);
+      right = chunk()->DefineConstantOperand(constant);
       constant_value = constant->Integer32Value() & 0x1f;
       // Left shifts can deoptimize if we shift by > 0 and the result cannot be
       // truncated to smi.
@@ -851,7 +851,7 @@ void LChunkBuilder::DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block) {
     argument_count_ = pred->argument_count();
   }
   HInstruction* current = block->first();
-  int start = chunk_->instructions()->length();
+  int start = chunk()->instructions()->length();
   while (current != NULL && !is_aborted()) {
     // Code for constants in registers is generated lazily.
     if (!current->EmitAtUses()) {
@@ -859,7 +859,7 @@ void LChunkBuilder::DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block) {
     }
     current = current->next();
   }
-  int end = chunk_->instructions()->length() - 1;
+  int end = chunk()->instructions()->length() - 1;
   if (end >= start) {
     block->set_first_instruction_index(start);
     block->set_last_instruction_index(end);
@@ -888,7 +888,7 @@ void LChunkBuilder::VisitInstruction(HInstruction* current) {
       LInstruction* dummy =
           new(zone()) LDummyUse(UseAny(current->OperandAt(i)));
       dummy->set_hydrogen_value(current);
-      chunk_->AddInstruction(dummy, current_block_);
+      chunk()->AddInstruction(dummy, current_block_);
     }
   } else {
     HBasicBlock* successor;
@@ -954,7 +954,7 @@ void LChunkBuilder::AddInstruction(LInstruction* instr,
   if (FLAG_stress_environments && !instr->HasEnvironment()) {
     instr = AssignEnvironment(instr);
   }
-  chunk_->AddInstruction(instr, current_block_);
+  chunk()->AddInstruction(instr, current_block_);
 
   if (instr->IsCall() || instr->IsPrologue()) {
     HValue* hydrogen_value_for_lazy_bailout = hydrogen_val;

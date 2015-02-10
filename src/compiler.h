@@ -10,6 +10,7 @@
 #include "src/bailout-reason.h"
 #include "src/compilation-dependencies.h"
 #include "src/signature.h"
+//#include "src/low-chunk.h"
 #include "src/zone.h"
 
 namespace v8 {
@@ -540,6 +541,7 @@ class CompilationHandleScope BASE_EMBEDDED {
 class HGraph;
 class HOptimizedGraphBuilder;
 class LChunk;
+class LowChunk;
 
 // A helper class that calls the three compilation phases in
 // Crankshaft and keeps track of its state.  The three phases
@@ -590,7 +592,7 @@ class OptimizedCompileJob: public ZoneObject {
   CompilationInfo* info_;
   HOptimizedGraphBuilder* graph_builder_;
   HGraph* graph_;
-  LChunk* chunk_;
+  LowChunk* chunk_;
   base::TimeDelta time_taken_to_create_graph_;
   base::TimeDelta time_taken_to_optimize_;
   base::TimeDelta time_taken_to_codegen_;

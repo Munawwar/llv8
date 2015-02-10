@@ -5,9 +5,9 @@
 #ifndef V8_LOWCHUNK_H_
 #define V8_LOWCHUNK_H_
 
-#include "zone.h"
+//#include "compiler.h"
 #include "hydrogen.h"
-#include "compiler.h"
+//#include "zone.h"
 
 
 namespace v8 {
@@ -32,7 +32,31 @@ class LowChunk : public ZoneObject {
     HGraph* const graph_;
 };
 
-}  // namespace v8
-}  // namespace internal
+class LowChunkBuilderBase BASE_EMBEDDED {
+  public:
+    virtual ~LowChunkBuilderBase() {}
+    explicit LowChunkBuilderBase(CompilationInfo* info, HGraph* graph)
+        : chunk_(nullptr),
+          info_(info),
+          graph_(graph),
+          zone_(graph->zone()) {}
+
+  protected:
+    virtual LowChunk* chunk() const { return chunk_; }
+    CompilationInfo* info() const { return info_; }
+    HGraph* graph() const { return graph_; }
+    Isolate* isolate() const { return graph_->isolate(); }
+    Heap* heap() const { return isolate()->heap(); }
+    Zone* zone() const { return zone_; }
+
+    LowChunk* chunk_;
+    CompilationInfo* info_;
+    HGraph* const graph_;
+
+  private:
+   Zone* zone_;
+};
+
+} }  // namespace v8::internal
 
 #endif  // V8_LOWCHUNK_H_

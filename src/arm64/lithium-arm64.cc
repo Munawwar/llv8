@@ -434,7 +434,7 @@ LOperand* LChunkBuilder::UseRegisterOrConstantAtStart(HValue* value) {
 
 
 LConstantOperand* LChunkBuilder::UseConstant(HValue* value) {
-  return chunk_->DefineConstantOperand(HConstant::cast(value));
+  return chunk()->DefineConstantOperand(HConstant::cast(value));
 }
 
 
@@ -588,7 +588,7 @@ LPlatformChunk* LChunkBuilder::Build() {
     // TODO(all): GetNextSpillIndex just increments a field. It has no other
     // side effects, so we should get rid of this loop.
     for (int i = graph()->osr()->UnoptimizedFrameSlots(); i > 0; i--) {
-      chunk_->GetNextSpillIndex();
+      chunk()->GetNextSpillIndex();
     }
   }
 
@@ -598,7 +598,7 @@ LPlatformChunk* LChunkBuilder::Build() {
     if (is_aborted()) return NULL;
   }
   status_ = DONE;
-  return chunk_;
+  return chunk();
 }
 
 
@@ -653,7 +653,7 @@ void LChunkBuilder::DoBasicBlock(HBasicBlock* block) {
 
   // Translate hydrogen instructions to lithium ones for the current block.
   HInstruction* current = block->first();
-  int start = chunk_->instructions()->length();
+  int start = chunk()->instructions()->length();
   while ((current != NULL) && !is_aborted()) {
     // Code for constants in registers is generated lazily.
     if (!current->EmitAtUses()) {
@@ -661,7 +661,7 @@ void LChunkBuilder::DoBasicBlock(HBasicBlock* block) {
     }
     current = current->next();
   }
-  int end = chunk_->instructions()->length() - 1;
+  int end = chunk()->instructions()->length() - 1;
   if (end >= start) {
     block->set_first_instruction_index(start);
     block->set_last_instruction_index(end);
@@ -689,7 +689,7 @@ void LChunkBuilder::VisitInstruction(HInstruction* current) {
       LInstruction* dummy =
           new(zone()) LDummyUse(UseAny(current->OperandAt(i)));
       dummy->set_hydrogen_value(current);
-      chunk_->AddInstruction(dummy, current_block_);
+      chunk()->AddInstruction(dummy, current_block_);
     }
   } else {
     HBasicBlock* successor;
@@ -755,7 +755,7 @@ void LChunkBuilder::AddInstruction(LInstruction* instr,
   if (FLAG_stress_environments && !instr->HasEnvironment()) {
     instr = AssignEnvironment(instr);
   }
-  chunk_->AddInstruction(instr, current_block_);
+  chunk()->AddInstruction(instr, current_block_);
 
   if (instr->IsCall() || instr->IsPrologue()) {
     HValue* hydrogen_value_for_lazy_bailout = hydrogen_val;
@@ -2007,7 +2007,7 @@ LInstruction* LChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
 LInstruction* LChunkBuilder::DoParameter(HParameter* instr) {
   LParameter* result = new(zone()) LParameter;
   if (instr->kind() == HParameter::STACK_PARAMETER) {
-    int spill_index = chunk_->GetParameterStackSlot(instr->index());
+    int spill_index = chunk()->GetParameterStackSlot(instr->index());
     return DefineAsSpilled(result, spill_index);
   } else {
     DCHECK(info()->IsStub());
@@ -2718,7 +2718,7 @@ LInstruction* LChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
   int env_index = instr->index();
   int spill_index = 0;
   if (instr->environment()->is_parameter_index(env_index)) {
-    spill_index = chunk_->GetParameterStackSlot(env_index);
+    spill_index = chunk()->GetParameterStackSlot(env_index);
   } else {
     spill_index = env_index - instr->environment()->first_local_index();
     if (spill_index > LUnallocated::kMaxFixedSlotIndex) {
