@@ -446,7 +446,7 @@ void LTransitionElementsKind::PrintDataTo(StringStream* stream) {
 LPlatformChunk* LChunkBuilder::Build() {
   DCHECK(is_unused());
   chunk_ = new(zone()) LPlatformChunk(info(), graph());
-  LPhase phase("L_Building chunk", chunk_);
+  LPhase phase("L_Building chunk", chunk());
   status_ = BUILDING;
 
   // If compiling for OSR, reserve space for the unoptimized frame,

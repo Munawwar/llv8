@@ -717,7 +717,7 @@ class LChunkBuilderBase : public LowChunkBuilderBase {
  protected:
   enum Status { UNUSED, BUILDING, DONE, ABORTED };
 
-  LPlatformChunk* chunk() const override { return static_cast<LPlatformChunk*>(chunk_); }
+  LPlatformChunk* chunk() const; // FIXME(llvm): shadows chunk() in LowChunk. Should probably be virtual
   int argument_count() const { return argument_count_; }
 
   bool is_unused() const { return status_ == UNUSED; }
@@ -752,13 +752,13 @@ enum NumberUntagDMode {
 
 class LPhase : public CompilationPhase {
  public:
-  LPhase(const char* name, LowChunk* chunk)
+  LPhase(const char* name, LChunk* chunk)
       : CompilationPhase(name, chunk->info()),
         chunk_(chunk) { }
   ~LPhase();
 
  private:
-  LowChunk* chunk_;
+  LChunk* chunk_;
 
   DISALLOW_COPY_AND_ASSIGN(LPhase);
 };

@@ -551,6 +551,9 @@ void LChunk::set_allocated_double_registers(BitVector* allocated_registers) {
   }
 }
 
+LPlatformChunk* LChunkBuilderBase::chunk() const {
+  return static_cast<LPlatformChunk*>(chunk_);
+}
 
 void LChunkBuilderBase::Abort(BailoutReason reason) {
   info()->AbortOptimization(reason);

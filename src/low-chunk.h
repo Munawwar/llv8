@@ -42,7 +42,7 @@ class LowChunkBuilderBase BASE_EMBEDDED {
           zone_(graph->zone()) {}
 
   protected:
-    virtual LowChunk* chunk() const { return chunk_; }
+    LowChunk* chunk() const { return chunk_; }
     CompilationInfo* info() const { return info_; }
     HGraph* graph() const { return graph_; }
     Isolate* isolate() const { return graph_->isolate(); }
