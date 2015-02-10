@@ -400,6 +400,10 @@ DEFINE_BOOL(omit_map_checks_for_leaf_maps, true,
             "do not emit check maps for constant values that have a leaf map, "
             "deoptimize the optimized code if the layout of the maps changes.")
 
+// Flags for LLVM
+DEFINE_STRING(llvm_filter, "~", "filter for functions to be lowered to "
+    "llvm instead of Lithium")
+
 // Flags for TurboFan.
 DEFINE_BOOL(turbo, false, "enable TurboFan compiler")
 DEFINE_BOOL(turbo_shipping, true, "enable TurboFan compiler on subset")
