@@ -73,14 +73,8 @@ class LCodeGen: public LCodeGenBase {
   Handle<Object> ToHandle(LConstantOperand* op) const;
   Operand ToOperand(LOperand* op) const;
 
-  // Try to generate code for the entire chunk, but it may fail if the
-  // chunk contains constructs we cannot handle. Returns true if the
-  // code generation attempt succeeded.
-  bool GenerateCode();
-
-  // Finish the code by setting stack height, safepoint, and bailout
-  // information on it.
-  void FinishCode(Handle<Code> code);
+  bool GenerateCode() override;
+  void FinishCode(Handle<Code> code) override;
 
   // Deferred code support.
   void DoDeferredNumberTagD(LNumberTagD* instr);
@@ -119,9 +113,9 @@ class LCodeGen: public LCodeGenBase {
  private:
   LanguageMode language_mode() const { return info()->language_mode(); }
 
-  LPlatformChunk* chunk() const { return chunk_; }
+//  LPlatformChunk* chunk() const { return chunk_; }
   Scope* scope() const { return scope_; }
-  HGraph* graph() const { return chunk()->graph(); }
+//  HGraph* graph() const { return chunk()->graph(); }
 
   XMMRegister double_scratch0() const { return xmm0; }
 

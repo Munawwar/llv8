@@ -40,6 +40,7 @@ class LowChunkBuilderBase BASE_EMBEDDED {
           info_(info),
           graph_(graph),
           zone_(graph->zone()) {}
+    virtual LowChunk* Build() = 0;
 
   protected:
     LowChunk* chunk() const { return chunk_; }
@@ -55,6 +56,36 @@ class LowChunkBuilderBase BASE_EMBEDDED {
 
   private:
    Zone* zone_;
+};
+
+class LowCodeGenBase BASE_EMBEDDED {
+  public:
+    LowCodeGenBase(LowChunk* chunk, CompilationInfo* info)
+        : chunk_(chunk),
+          info_(info),
+          zone_(info->zone()) {}
+    virtual ~LowCodeGenBase() {}
+
+    LowChunk* chunk() const { return chunk_; }
+    HGraph* graph() const { return chunk()->graph(); }
+    Zone* zone() const { return zone_; }
+    CompilationInfo* info() const { return info_; }
+    Isolate* isolate() const { return info_->isolate(); }
+    Factory* factory() const { return isolate()->factory(); }
+    Heap* heap() const { return isolate()->heap(); }
+
+    // Try to generate native code for the entire chunk, but it may fail if the
+    // chunk contains constructs we cannot handle. Returns true if the
+    // code generation attempt succeeded.
+    virtual bool GenerateCode() = 0;
+
+    // Finish the code by setting stack height, safepoint, and bailout
+    // information on it.
+    virtual void FinishCode(Handle<Code> code) = 0;
+  protected:
+    LowChunk* const chunk_;
+    CompilationInfo* const info_;
+    Zone* zone_;
 };
 
 } }  // namespace v8::internal

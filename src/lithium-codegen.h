@@ -7,6 +7,7 @@
 
 #include "src/bailout-reason.h"
 #include "src/compiler.h"
+#include "src/low-chunk.h"
 #include "src/deoptimizer.h"
 
 namespace v8 {
@@ -16,22 +17,16 @@ class LEnvironment;
 class LInstruction;
 class LPlatformChunk;
 
-class LCodeGenBase BASE_EMBEDDED {
+class LCodeGenBase : public LowCodeGenBase {
  public:
   LCodeGenBase(LChunk* chunk,
                MacroAssembler* assembler,
                CompilationInfo* info);
-  virtual ~LCodeGenBase() {}
+  ~LCodeGenBase() override {}
 
   // Simple accessors.
   MacroAssembler* masm() const { return masm_; }
-  CompilationInfo* info() const { return info_; }
-  Isolate* isolate() const { return info_->isolate(); }
-  Factory* factory() const { return isolate()->factory(); }
-  Heap* heap() const { return isolate()->heap(); }
-  Zone* zone() const { return zone_; }
-  LPlatformChunk* chunk() const { return chunk_; }
-  HGraph* graph() const;
+  LPlatformChunk* chunk() const; // shadows base chunk()
 
   void FPRINTF_CHECKING Comment(const char* format, ...);
   void DeoptComment(const Deoptimizer::DeoptInfo& deopt_info);
@@ -66,10 +61,8 @@ class LCodeGenBase BASE_EMBEDDED {
     ABORTED
   };
 
-  LPlatformChunk* const chunk_;
   MacroAssembler* const masm_;
-  CompilationInfo* const info_;
-  Zone* zone_;
+
   Status status_;
   int current_block_;
   int current_instruction_;

@@ -458,7 +458,7 @@ XMMRegister LCodeGen::ToDoubleRegister(LOperand* op) const {
 
 
 bool LCodeGen::IsInteger32Constant(LConstantOperand* op) const {
-  return chunk_->LookupLiteralRepresentation(op).IsSmiOrInteger32();
+  return chunk()->LookupLiteralRepresentation(op).IsSmiOrInteger32();
 }
 
 
@@ -469,12 +469,12 @@ bool LCodeGen::IsExternalConstant(LConstantOperand* op) const {
 
 bool LCodeGen::IsDehoistedKeyConstant(LConstantOperand* op) const {
   return op->IsConstantOperand() &&
-      chunk_->IsDehoistedKey(chunk_->LookupConstant(op));
+      chunk()->IsDehoistedKey(chunk()->LookupConstant(op));
 }
 
 
 bool LCodeGen::IsSmiConstant(LConstantOperand* op) const {
-  return chunk_->LookupLiteralRepresentation(op).IsSmi();
+  return chunk()->LookupLiteralRepresentation(op).IsSmi();
 }
 
 
@@ -485,7 +485,7 @@ int32_t LCodeGen::ToInteger32(LConstantOperand* op) const {
 
 int32_t LCodeGen::ToRepresentation(LConstantOperand* op,
                                    const Representation& r) const {
-  HConstant* constant = chunk_->LookupConstant(op);
+  HConstant* constant = chunk()->LookupConstant(op);
   int32_t value = constant->Integer32Value();
   if (r.IsInteger32()) return value;
   DCHECK(SmiValuesAre31Bits() && r.IsSmiOrTagged());
@@ -494,28 +494,28 @@ int32_t LCodeGen::ToRepresentation(LConstantOperand* op,
 
 
 Smi* LCodeGen::ToSmi(LConstantOperand* op) const {
-  HConstant* constant = chunk_->LookupConstant(op);
+  HConstant* constant = chunk()->LookupConstant(op);
   return Smi::FromInt(constant->Integer32Value());
 }
 
 
 double LCodeGen::ToDouble(LConstantOperand* op) const {
-  HConstant* constant = chunk_->LookupConstant(op);
+  HConstant* constant = chunk()->LookupConstant(op);
   DCHECK(constant->HasDoubleValue());
   return constant->DoubleValue();
 }
 
 
 ExternalReference LCodeGen::ToExternalReference(LConstantOperand* op) const {
-  HConstant* constant = chunk_->LookupConstant(op);
+  HConstant* constant = chunk()->LookupConstant(op);
   DCHECK(constant->HasExternalReferenceValue());
   return constant->ExternalReferenceValue();
 }
 
 
 Handle<Object> LCodeGen::ToHandle(LConstantOperand* op) const {
-  HConstant* constant = chunk_->LookupConstant(op);
-  DCHECK(chunk_->LookupLiteralRepresentation(op).IsSmiOrTagged());
+  HConstant* constant = chunk()->LookupConstant(op);
+  DCHECK(chunk()->LookupLiteralRepresentation(op).IsSmiOrTagged());
   return constant->handle(isolate());
 }
 
@@ -684,7 +684,7 @@ void LCodeGen::LoadContextFromDeferred(LOperand* context) {
     __ movp(rsi, ToOperand(context));
   } else if (context->IsConstantOperand()) {
     HConstant* constant =
-        chunk_->LookupConstant(LConstantOperand::cast(context));
+        chunk()->LookupConstant(LConstantOperand::cast(context));
     __ Move(rsi, Handle<Object>::cast(constant->handle(isolate())));
   } else {
     UNREACHABLE();
@@ -2073,21 +2073,21 @@ void LCodeGen::DoArithmeticT(LArithmeticT* instr) {
 
 template<class InstrType>
 void LCodeGen::EmitBranch(InstrType instr, Condition cc) {
-  int left_block = instr->TrueDestination(chunk_);
-  int right_block = instr->FalseDestination(chunk_);
+  int left_block = instr->TrueDestination(chunk());
+  int right_block = instr->FalseDestination(chunk());
 
   int next_block = GetNextEmittedBlock();
 
   if (right_block == left_block || cc == no_condition) {
     EmitGoto(left_block);
   } else if (left_block == next_block) {
-    __ j(NegateCondition(cc), chunk_->GetAssemblyLabel(right_block));
+    __ j(NegateCondition(cc), chunk()->GetAssemblyLabel(right_block));
   } else if (right_block == next_block) {
-    __ j(cc, chunk_->GetAssemblyLabel(left_block));
+    __ j(cc, chunk()->GetAssemblyLabel(left_block));
   } else {
-    __ j(cc, chunk_->GetAssemblyLabel(left_block));
+    __ j(cc, chunk()->GetAssemblyLabel(left_block));
     if (cc != always) {
-      __ jmp(chunk_->GetAssemblyLabel(right_block));
+      __ jmp(chunk()->GetAssemblyLabel(right_block));
     }
   }
 }
@@ -2102,8 +2102,8 @@ void LCodeGen::EmitTrueBranch(InstrType instr, Condition cc) {
 
 template <class InstrType>
 void LCodeGen::EmitFalseBranch(InstrType instr, Condition cc) {
-  int false_block = instr->FalseDestination(chunk_);
-  __ j(cc, chunk_->GetAssemblyLabel(false_block));
+  int false_block = instr->FalseDestination(chunk());
+  __ j(cc, chunk()->GetAssemblyLabel(false_block));
 }
 
 
@@ -2164,27 +2164,27 @@ void LCodeGen::DoBranch(LBranch* instr) {
       if (expected.Contains(ToBooleanStub::UNDEFINED)) {
         // undefined -> false.
         __ CompareRoot(reg, Heap::kUndefinedValueRootIndex);
-        __ j(equal, instr->FalseLabel(chunk_));
+        __ j(equal, instr->FalseLabel(chunk()));
       }
       if (expected.Contains(ToBooleanStub::BOOLEAN)) {
         // true -> true.
         __ CompareRoot(reg, Heap::kTrueValueRootIndex);
-        __ j(equal, instr->TrueLabel(chunk_));
+        __ j(equal, instr->TrueLabel(chunk()));
         // false -> false.
         __ CompareRoot(reg, Heap::kFalseValueRootIndex);
-        __ j(equal, instr->FalseLabel(chunk_));
+        __ j(equal, instr->FalseLabel(chunk()));
       }
       if (expected.Contains(ToBooleanStub::NULL_TYPE)) {
         // 'null' -> false.
         __ CompareRoot(reg, Heap::kNullValueRootIndex);
-        __ j(equal, instr->FalseLabel(chunk_));
+        __ j(equal, instr->FalseLabel(chunk()));
       }
 
       if (expected.Contains(ToBooleanStub::SMI)) {
         // Smis: 0 -> false, all other -> true.
         __ Cmp(reg, Smi::FromInt(0));
-        __ j(equal, instr->FalseLabel(chunk_));
-        __ JumpIfSmi(reg, instr->TrueLabel(chunk_));
+        __ j(equal, instr->FalseLabel(chunk()));
+        __ JumpIfSmi(reg, instr->TrueLabel(chunk()));
       } else if (expected.NeedsMap()) {
         // If we need a map later and have a Smi -> deopt.
         __ testb(reg, Immediate(kSmiTagMask));
@@ -2199,14 +2199,14 @@ void LCodeGen::DoBranch(LBranch* instr) {
           // Undetectable -> false.
           __ testb(FieldOperand(map, Map::kBitFieldOffset),
                    Immediate(1 << Map::kIsUndetectable));
-          __ j(not_zero, instr->FalseLabel(chunk_));
+          __ j(not_zero, instr->FalseLabel(chunk()));
         }
       }
 
       if (expected.Contains(ToBooleanStub::SPEC_OBJECT)) {
         // spec object -> true.
         __ CmpInstanceType(map, FIRST_SPEC_OBJECT_TYPE);
-        __ j(above_equal, instr->TrueLabel(chunk_));
+        __ j(above_equal, instr->TrueLabel(chunk()));
       }
 
       if (expected.Contains(ToBooleanStub::STRING)) {
@@ -2215,15 +2215,15 @@ void LCodeGen::DoBranch(LBranch* instr) {
         __ CmpInstanceType(map, FIRST_NONSTRING_TYPE);
         __ j(above_equal, &not_string, Label::kNear);
         __ cmpp(FieldOperand(reg, String::kLengthOffset), Immediate(0));
-        __ j(not_zero, instr->TrueLabel(chunk_));
-        __ jmp(instr->FalseLabel(chunk_));
+        __ j(not_zero, instr->TrueLabel(chunk()));
+        __ jmp(instr->FalseLabel(chunk()));
         __ bind(&not_string);
       }
 
       if (expected.Contains(ToBooleanStub::SYMBOL)) {
         // Symbol value -> true.
         __ CmpInstanceType(map, SYMBOL_TYPE);
-        __ j(equal, instr->TrueLabel(chunk_));
+        __ j(equal, instr->TrueLabel(chunk()));
       }
 
       if (expected.Contains(ToBooleanStub::SIMD_VALUE)) {
@@ -2240,8 +2240,8 @@ void LCodeGen::DoBranch(LBranch* instr) {
         XMMRegister xmm_scratch = double_scratch0();
         __ xorps(xmm_scratch, xmm_scratch);
         __ ucomisd(xmm_scratch, FieldOperand(reg, HeapNumber::kValueOffset));
-        __ j(zero, instr->FalseLabel(chunk_));
-        __ jmp(instr->TrueLabel(chunk_));
+        __ j(zero, instr->FalseLabel(chunk()));
+        __ jmp(instr->TrueLabel(chunk()));
         __ bind(&not_heap_number);
       }
 
@@ -2257,7 +2257,7 @@ void LCodeGen::DoBranch(LBranch* instr) {
 
 void LCodeGen::EmitGoto(int block) {
   if (!IsNextEmittedBlock(block)) {
-    __ jmp(chunk_->GetAssemblyLabel(chunk_->LookupDestination(block)));
+    __ jmp(chunk()->GetAssemblyLabel(chunk()->LookupDestination(block)));
   }
 }
 
@@ -2313,14 +2313,14 @@ void LCodeGen::DoCompareNumericAndBranch(LCompareNumericAndBranch* instr) {
     double left_val = ToDouble(LConstantOperand::cast(left));
     double right_val = ToDouble(LConstantOperand::cast(right));
     int next_block = EvalComparison(instr->op(), left_val, right_val) ?
-        instr->TrueDestination(chunk_) : instr->FalseDestination(chunk_);
+        instr->TrueDestination(chunk()) : instr->FalseDestination(chunk());
     EmitGoto(next_block);
   } else {
     if (instr->is_double()) {
       // Don't base result on EFLAGS when a NaN is involved. Instead
       // jump to the false block.
       __ ucomisd(ToDoubleRegister(left), ToDoubleRegister(right));
-      __ j(parity_even, instr->FalseLabel(chunk_));
+      __ j(parity_even, instr->FalseLabel(chunk()));
     } else {
       int32_t value;
       if (right->IsConstantOperand()) {
@@ -2450,7 +2450,7 @@ void LCodeGen::DoIsStringAndBranch(LIsStringAndBranch* instr) {
           ? OMIT_SMI_CHECK : INLINE_SMI_CHECK;
 
   Condition true_cond = EmitIsString(
-      reg, temp, instr->FalseLabel(chunk_), check_needed);
+      reg, temp, instr->FalseLabel(chunk()), check_needed);
 
   EmitBranch(instr, true_cond);
 }
@@ -2474,7 +2474,7 @@ void LCodeGen::DoIsUndetectableAndBranch(LIsUndetectableAndBranch* instr) {
   Register temp = ToRegister(instr->temp());
 
   if (!instr->hydrogen()->value()->type().IsHeapObject()) {
-    __ JumpIfSmi(input, instr->FalseLabel(chunk_));
+    __ JumpIfSmi(input, instr->FalseLabel(chunk()));
   }
   __ movp(temp, FieldOperand(input, HeapObject::kMapOffset));
   __ testb(FieldOperand(temp, Map::kBitFieldOffset),
@@ -2520,7 +2520,7 @@ void LCodeGen::DoHasInstanceTypeAndBranch(LHasInstanceTypeAndBranch* instr) {
   Register input = ToRegister(instr->value());
 
   if (!instr->hydrogen()->value()->type().IsHeapObject()) {
-    __ JumpIfSmi(input, instr->FalseLabel(chunk_));
+    __ JumpIfSmi(input, instr->FalseLabel(chunk()));
   }
 
   __ CmpObjectType(input, TestType(instr->hydrogen()), kScratchRegister);
@@ -2624,7 +2624,7 @@ void LCodeGen::DoClassOfTestAndBranch(LClassOfTestAndBranch* instr) {
   Register temp2 = ToRegister(instr->temp2());
   Handle<String> class_name = instr->hydrogen()->class_name();
 
-  EmitClassOfTest(instr->TrueLabel(chunk_), instr->FalseLabel(chunk_),
+  EmitClassOfTest(instr->TrueLabel(chunk()), instr->FalseLabel(chunk()),
       class_name, input, temp, temp2);
 
   EmitBranch(instr, equal);
@@ -5532,11 +5532,11 @@ void LCodeGen::DoTypeofIsAndBranch(LTypeofIsAndBranch* instr) {
 
 
 Condition LCodeGen::EmitTypeofIs(LTypeofIsAndBranch* instr, Register input) {
-  Label* true_label = instr->TrueLabel(chunk_);
-  Label* false_label = instr->FalseLabel(chunk_);
+  Label* true_label = instr->TrueLabel(chunk());
+  Label* false_label = instr->FalseLabel(chunk());
   Handle<String> type_name = instr->type_literal();
-  int left_block = instr->TrueDestination(chunk_);
-  int right_block = instr->FalseDestination(chunk_);
+  int left_block = instr->TrueDestination(chunk());
+  int right_block = instr->FalseDestination(chunk());
   int next_block = GetNextEmittedBlock();
 
   Label::Distance true_distance = left_block == next_block ? Label::kNear

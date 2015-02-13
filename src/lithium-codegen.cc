@@ -43,12 +43,12 @@ HGraph* LCodeGenBase::graph() const {
 }
 
 
-LCodeGenBase::LCodeGenBase(LChunk* chunk, MacroAssembler* assembler,
+LCodeGenBase::LCodeGenBase(LChunk* chunk,
+                           MacroAssembler* assembler,
                            CompilationInfo* info)
-    : chunk_(static_cast<LPlatformChunk*>(chunk)),
+    : LowCodeGenBase(chunk, info),
+//      chunk_(static_cast<LPlatformChunk*>(chunk)),
       masm_(assembler),
-      info_(info),
-      zone_(info->zone()),
       status_(UNUSED),
       current_block_(-1),
       current_instruction_(-1),
@@ -56,6 +56,9 @@ LCodeGenBase::LCodeGenBase(LChunk* chunk, MacroAssembler* assembler,
       deoptimization_literals_(8, info->zone()),
       last_lazy_deopt_pc_(0) {}
 
+LPlatformChunk* LCodeGenBase::chunk() const {
+  return static_cast<LPlatformChunk*>(chunk_);
+}
 
 bool LCodeGenBase::GenerateBody() {
   DCHECK(is_generating());
@@ -157,7 +160,7 @@ void LCodeGenBase::DeoptComment(const Deoptimizer::DeoptInfo& deopt_info) {
 int LCodeGenBase::GetNextEmittedBlock() const {
   for (int i = current_block_ + 1; i < graph()->blocks()->length(); ++i) {
     if (!graph()->blocks()->at(i)->IsReachable()) continue;
-    if (!chunk_->GetLabel(i)->HasReplacement()) return i;
+    if (!chunk()->GetLabel(i)->HasReplacement()) return i;
   }
   return -1;
 }
@@ -177,13 +180,13 @@ void LCodeGenBase::Retry(BailoutReason reason) {
 
 void LCodeGenBase::AddDeprecationDependency(Handle<Map> map) {
   if (map->is_deprecated()) return Retry(kMapBecameDeprecated);
-  chunk_->AddDeprecationDependency(map);
+  chunk()->AddDeprecationDependency(map);
 }
 
 
 void LCodeGenBase::AddStabilityDependency(Handle<Map> map) {
   if (!map->is_stable()) return Retry(kMapBecameUnstable);
-  chunk_->AddStabilityDependency(map);
+  chunk()->AddStabilityDependency(map);
 }
 
 
