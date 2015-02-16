@@ -63,7 +63,7 @@ class LCodeGenBase : public LowCodeGenBase {
 
   MacroAssembler* const masm_;
 
-  Status status_;
+  Status status_; // TODO(llvm) consider pulling up this field and the enum
   int current_block_;
   int current_instruction_;
   const ZoneList<LInstruction*>* instructions_;

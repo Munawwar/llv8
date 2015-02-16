@@ -20,6 +20,8 @@
 #include "src/interpreter/interpreter.h"
 #include "src/isolate-inl.h"
 #include "src/lithium.h"
+#include "src/liveedit.h"
+#include "src/llvm/llvm-chunk.h"
 #include "src/log-inl.h"
 #include "src/messages.h"
 #include "src/parser.h"
@@ -546,7 +548,13 @@ OptimizedCompileJob::Status OptimizedCompileJob::OptimizeGraph() {
   BailoutReason bailout_reason = kNoReason;
 
   if (graph_->Optimize(&bailout_reason)) {
-    chunk_ = LChunk::NewChunk(graph_); // TODO(llvm): or LLVMChunk::NewChunk()
+    if (!graph_->info()->closure().is_null() &&
+        graph_->info()->closure()->PassesFilter(FLAG_llvm_filter)) {
+      chunk_ = LLVMChunk::NewChunk(graph_);
+      // TODO(llvm): add logging
+    } else {
+      chunk_ = LChunk::NewChunk(graph_);
+    }
     if (chunk_ != NULL) return SetLastStatus(SUCCEEDED);
   } else if (bailout_reason != kNoReason) {
     graph_builder_->Bailout(bailout_reason);

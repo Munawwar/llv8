@@ -9,6 +9,7 @@
 #include "src/hydrogen.h"
 #include "src/ic/ic.h"
 #include "src/lithium.h"
+#include "src/llvm/llvm-chunk.h"
 #include "src/low-chunk.h"
 
 namespace v8 {
@@ -25,7 +26,14 @@ static LowChunk* OptimizeGraph(HGraph* graph) {
   if (!graph->Optimize(&bailout_reason)) {
     FATAL(GetBailoutReason(bailout_reason));
   }
-  LowChunk* chunk = LChunk::NewChunk(graph); // TODO(llvm): or LLVMChunk::NewChunk()
+  LowChunk* chunk;
+  if (!graph->info()->closure().is_null() &&
+      graph->info()->closure()->PassesFilter(FLAG_llvm_filter)) {
+    chunk = LLVMChunk::NewChunk(graph);
+    // TODO(llvm): add logging
+  } else {
+    chunk = LChunk::NewChunk(graph);
+  }
   if (chunk == NULL) {
     FATAL(GetBailoutReason(graph->info()->bailout_reason()));
   }

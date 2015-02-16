@@ -39,10 +39,13 @@ class LowChunkBuilderBase BASE_EMBEDDED {
         : chunk_(nullptr),
           info_(info),
           graph_(graph),
+          status_(UNUSED),
           zone_(graph->zone()) {}
     virtual LowChunk* Build() = 0;
 
   protected:
+    enum Status { UNUSED, BUILDING, DONE, ABORTED };
+
     LowChunk* chunk() const { return chunk_; }
     CompilationInfo* info() const { return info_; }
     HGraph* graph() const { return graph_; }
@@ -50,9 +53,15 @@ class LowChunkBuilderBase BASE_EMBEDDED {
     Heap* heap() const { return isolate()->heap(); }
     Zone* zone() const { return zone_; }
 
+    bool is_unused() const { return status_ == UNUSED; }
+    bool is_building() const { return status_ == BUILDING; }
+    bool is_done() const { return status_ == DONE; }
+    bool is_aborted() const { return status_ == ABORTED; }
+
     LowChunk* chunk_;
     CompilationInfo* info_;
     HGraph* const graph_;
+    Status status_;
 
   private:
    Zone* zone_;

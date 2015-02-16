@@ -113,9 +113,7 @@ class LCodeGen: public LCodeGenBase {
  private:
   LanguageMode language_mode() const { return info()->language_mode(); }
 
-//  LPlatformChunk* chunk() const { return chunk_; }
   Scope* scope() const { return scope_; }
-//  HGraph* graph() const { return chunk()->graph(); }
 
   XMMRegister double_scratch0() const { return xmm0; }
 

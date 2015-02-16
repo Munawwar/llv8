@@ -47,7 +47,6 @@ LCodeGenBase::LCodeGenBase(LChunk* chunk,
                            MacroAssembler* assembler,
                            CompilationInfo* info)
     : LowCodeGenBase(chunk, info),
-//      chunk_(static_cast<LPlatformChunk*>(chunk)),
       masm_(assembler),
       status_(UNUSED),
       current_block_(-1),

@@ -706,8 +706,7 @@ class LChunkBuilderBase : public LowChunkBuilderBase {
  public:
   explicit LChunkBuilderBase(CompilationInfo* info, HGraph* graph)
       : LowChunkBuilderBase(info, graph),
-        argument_count_(0),
-        status_(UNUSED) {}
+        argument_count_(0) {}
 
   ~LChunkBuilderBase() override {}
 
@@ -715,15 +714,8 @@ class LChunkBuilderBase : public LowChunkBuilderBase {
   void Retry(BailoutReason reason);
 
  protected:
-  enum Status { UNUSED, BUILDING, DONE, ABORTED };
-
   LPlatformChunk* chunk() const; // FIXME(llvm): shadows chunk() in LowChunk. Should probably be virtual
   int argument_count() const { return argument_count_; }
-
-  bool is_unused() const { return status_ == UNUSED; }
-  bool is_building() const { return status_ == BUILDING; }
-  bool is_done() const { return status_ == DONE; }
-  bool is_aborted() const { return status_ == ABORTED; }
 
   // An input operand in register, stack slot or a constant operand.
   // Will not be moved to a register even if one is freely available.
@@ -737,8 +729,6 @@ class LChunkBuilderBase : public LowChunkBuilderBase {
                               LEnvironment* result);
 
   int argument_count_;
-  Status status_;
-
 };
 
 
