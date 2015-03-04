@@ -58,6 +58,47 @@ LLVMChunk* LLVMChunkBuilder::Build() {
   return chunk();
 }
 
+void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
+  HInstruction* old_current = current_instruction_;
+  current_instruction_ = current;
+
+  LInstruction* instr = NULL;
+  if (current->CanReplaceWithDummyUses()) {
+    if (current->OperandCount() == 0) {
+      instr = DefineAsRegister(new(zone()) LDummy());
+    } else {
+      DCHECK(!current->OperandAt(0)->IsControlInstruction());
+      instr = DefineAsRegister(new(zone())
+          LDummyUse(UseAny(current->OperandAt(0))));
+    }
+    for (int i = 1; i < current->OperandCount(); ++i) {
+      if (current->OperandAt(i)->IsControlInstruction()) continue;
+      LInstruction* dummy =
+          new(zone()) LDummyUse(UseAny(current->OperandAt(i)));
+      dummy->set_hydrogen_value(current);
+      chunk()->AddInstruction(dummy, current_block_);
+    }
+  } else {
+    HBasicBlock* successor;
+    if (current->IsControlInstruction() &&
+        HControlInstruction::cast(current)->KnownSuccessorBlock(&successor) &&
+        successor != NULL) {
+      instr = new(zone()) LGoto(successor);
+    } else {
+      instr = current->CompileToLLVM(this);
+    }
+  }
+
+  argument_count_ += current->argument_delta();
+  DCHECK(argument_count_ >= 0);
+
+  if (instr != NULL) {
+    AddInstruction(instr, current);
+  }
+
+  current_instruction_ = old_current;
+}
+
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
   DCHECK(is_building());

@@ -1116,6 +1116,8 @@ class HInstruction : public HValue {
   bool CanTruncateToInt32() const { return CheckFlag(kTruncatingToInt32); }
 
   virtual LInstruction* CompileToLithium(LChunkBuilder* builder) = 0;
+  // TODO(llvm): return type?
+  virtual LLVMInstruction* CompileToLLVM(LLVMChunkBuilder* builder) = 0;
 
 #ifdef DEBUG
   void Verify() override;

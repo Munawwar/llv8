@@ -630,9 +630,9 @@ class LLabel;
 // arch-specific LPlatformChunk classes.
 class LChunk : public LowChunk {
  public:
-  // FIXME: shall we add the actual code for the destructor
+  // FIXME(llvm): shall we add the actual code for the destructor
   // or the Zone takes care of everything?
-  // FIXME: should it be public?
+  // FIXME(llvm): should it be public?
   ~LChunk() override {}
   static LChunk* NewChunk(HGraph* graph);
 

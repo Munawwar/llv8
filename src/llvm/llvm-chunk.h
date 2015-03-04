@@ -9,9 +9,31 @@
 #include "../lithium.h"
 #include "llvm-headers.h"
 
+#include <memory>
+
 namespace v8 {
 namespace internal {
 
+class LLVMGranularity FINAL {
+ public:
+  static LLVMGranularity& getInstance() {
+    static LLVMGranularity instance;
+    return instance;
+  }
+  LLVMContext& context() const { return context_; }
+  llvm::Module* module() { return module_; } // FIXME!!
+
+ private:
+  LLVMContext context_;
+  llvm::Module* module_;
+
+  LLVMGranularity()
+    : context_(),
+      module_(new llvm::Module("v8-llvm", context_)) {}
+
+
+  DISALLOW_COPY_AND_ASSIGN(LLVMGranularity);
+};
 
 class LLVMChunk FINAL : public LowChunk {
  public:
@@ -21,18 +43,17 @@ class LLVMChunk FINAL : public LowChunk {
 
   static LLVMChunk* NewChunk(HGraph *graph);
 
-  const ZoneList<LInstruction*>* instructions() const { return &instructions_; }
   Handle<Code> Codegen() override;
-
- private:
-  ZoneList<LLVMInstruction*> instructions_; // TODO(llvm): find out a suitable class for it in LLVM infrastructure
 };
 
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
  public:
   // TODO(llvm): add LLVMAllocator param to constructor (sibling of LAllocator)
   LLVMChunkBuilder(CompilationInfo* info, HGraph* graph)
-      : LowChunkBuilderBase(info, graph) {}
+      : LowChunkBuilderBase(info, graph),
+        current_instruction_(nullptr),
+        current_block_(nullptr),
+        next_block_(nullptr) {}
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
@@ -40,8 +61,12 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
 
  private:
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
-  void VisitInstruction(HInstruction* current); // TODO(llvm): implement
+  void VisitInstruction(HInstruction* current);
 
+  HBasicBlock* current_block_;
+  HBasicBlock* next_block_;
+  // TODO(llvm): probably pull these up to LowChunkBuilderBase
+  HInstruction* current_instruction_;
   HBasicBlock* current_block_;
   HBasicBlock* next_block_;
 };
