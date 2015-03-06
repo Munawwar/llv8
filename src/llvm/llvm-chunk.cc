@@ -56,6 +56,11 @@ LLVMChunk* LLVMChunkBuilder::Build() {
 // function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
   // now, the problem is: get the parameters...
   // but what are they? Let's take a look at Hydrogen nodes.
+  // (and also see the IRs in c1visualiser)
+
+  // We can skip params and consider only funtions
+  // with no arguments for now.
+  // And come back later when it's figured out.
 
   const ZoneList<HBasicBlock*>* blocks = graph()->blocks();
   for (int i = 0; i < blocks->length(); i++) {
