@@ -21,6 +21,8 @@ class LLVMGranularity FINAL {
     return instance;
   }
 
+  LLVMContext& context() { return context_; }
+
   std::unique_ptr<llvm::Module> CreateModule(std::string name = "") {
     if ("" == name) {
       name = GenerateName();
@@ -28,7 +30,7 @@ class LLVMGranularity FINAL {
     return llvm::make_unique<llvm::Module>(name, context_);
   }
 
-  llvm::Function* AddFunction(std::unique_ptr<llvm::Module> module) {
+  void AddModule(std::unique_ptr<llvm::Module> module) {
     if (!engine_) {
       engine_ = llvm::EngineBuilder(std::move(module))
         .setEngineKind(llvm::EngineKind::JIT)
@@ -41,13 +43,11 @@ class LLVMGranularity FINAL {
   }
  private:
   LLVMContext context_;
-  std::unique_ptr<llvm::Module> module_;
   std::unique_ptr<llvm::ExecutionEngine> engine_; // FIXME(llvm): is it unique? //probably it is shared...
   int count_;
 
   LLVMGranularity()
     : context_(),
-      module_(llvm::make_unique<llvm::Module>("v8-llvm", context_)),
       engine_(nullptr),
       count_(0) {}
 
@@ -63,28 +63,29 @@ class LLVMChunk FINAL : public LowChunk {
   virtual ~LLVMChunk() {}
   LLVMChunk(CompilationInfo* info, HGraph* graph)
     : LowChunk(info, graph) {
-//    module_ = LLVMGranularity::getInstance().CreateModule();
+    module_ = LLVMGranularity::getInstance().CreateModule();
   }
 
   static LLVMChunk* NewChunk(HGraph *graph);
+  llvm::Module* module() { return module_.get(); } // not to be owned
 
   Handle<Code> Codegen() override;
  private:
   // TODO(llvm): make module_ a unique_ptr if possible
   // after the module is constructed, ownership is transfered to the ExecutionEngine
   // (via a call to AddModule())
-//  std::shared_ptr<llvm::Module> module_;
-  // now all functions will be in one module
+  std::unique_ptr<llvm::Module> module_;
 };
 
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
  public:
-  // TODO(llvm): add LLVMAllocator param to constructor (sibling of LAllocator)
   LLVMChunkBuilder(CompilationInfo* info, HGraph* graph)
       : LowChunkBuilderBase(info, graph),
         current_instruction_(nullptr),
         current_block_(nullptr),
-        next_block_(nullptr) {}
+        next_block_(nullptr),
+        module_(nullptr),
+        function_(nullptr) {}
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
@@ -100,6 +101,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;
   HBasicBlock* next_block_;
+  llvm::Module* module_; // non-owning ptr. TODO(llvm): consider weak_ptr
+  std::unique_ptr<llvm::Function> function_; // the essence
 };
 
 

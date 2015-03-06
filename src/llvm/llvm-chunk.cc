@@ -37,6 +37,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 
 LLVMChunk* LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
+  module_ = chunk()->module();
   status_ = BUILDING;
 
 //  // If compiling for OSR, reserve space for the unoptimized frame,
@@ -46,6 +47,15 @@ LLVMChunk* LLVMChunkBuilder::Build() {
 //      chunk()->GetNextSpillIndex(GENERAL_REGISTERS);
 //    }
 //  }
+
+  // here goes module_->AddFunction or so
+//  llvm::Function raw_function_ptr =
+//    cast<Function>(module_->getOrInsertFunction("", Type::getInt32Ty(Context),
+//                                          Type::getInt32Ty(Context),
+//                                          (Type *)0));
+// function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
+  // now, the problem is: get the parameters...
+  // but what are they? Let's take a look at Hydrogen nodes.
 
   const ZoneList<HBasicBlock*>* blocks = graph()->blocks();
   for (int i = 0; i < blocks->length(); i++) {
