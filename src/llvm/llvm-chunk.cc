@@ -85,7 +85,7 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
         successor != NULL) {
       instr = new(zone()) LGoto(successor);
     } else {
-      instr = current->CompileToLLVM(this);
+      instr = current->CompileToLLVM(this); // the meat
     }
   }
 
