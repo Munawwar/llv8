@@ -5,6 +5,8 @@
 #ifndef V8_LLVM_CHUNK_H_
 #define V8_LLVM_CHUNK_H_
 
+#include "../hydrogen.h"
+#include "../hydrogen-instructions.h"
 #include "../handles.h"
 #include "../lithium.h"
 #include "llvm-headers.h"
@@ -90,6 +92,11 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
   LLVMChunk* Build() override;
+
+  // Declare methods that deal with the individual node types.
+#define DECLARE_DO(type) void Do##type(H##type* node);
+  HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)
+#undef DECLARE_DO
 
  private:
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);

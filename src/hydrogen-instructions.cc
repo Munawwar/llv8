@@ -9,6 +9,8 @@
 #include "src/elements.h"
 #include "src/factory.h"
 #include "src/hydrogen-infer-representation.h"
+#include "src/llvm/llvm-chunk.h"
+#include "src/property-details-inl.h"
 
 #if V8_TARGET_ARCH_IA32
 #include "src/ia32/lithium-ia32.h"  // NOLINT
@@ -42,6 +44,12 @@ namespace internal {
 HYDROGEN_CONCRETE_INSTRUCTION_LIST(DEFINE_COMPILE)
 #undef DEFINE_COMPILE
 
+#define DEFINE_COMPILE(type)                                \
+  void H##type::CompileToLLVM(LLVMChunkBuilder* builder) {  \
+    builder->Do##type(this);                                \
+  }
+HYDROGEN_CONCRETE_INSTRUCTION_LIST(DEFINE_COMPILE)
+#undef DEFINE_COMPILE
 
 Isolate* HValue::isolate() const {
   DCHECK(block() != NULL);

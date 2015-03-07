@@ -15,6 +15,7 @@
 #include "src/conversions.h"
 #include "src/deoptimizer.h"
 #include "src/hydrogen-types.h"
+#include "src/llvm/llvm-chunk.h"
 #include "src/small-pointer-list.h"
 #include "src/unique.h"
 #include "src/utils.h"
@@ -1117,7 +1118,7 @@ class HInstruction : public HValue {
 
   virtual LInstruction* CompileToLithium(LChunkBuilder* builder) = 0;
   // TODO(llvm): return type?
-  virtual LLVMInstruction* CompileToLLVM(LLVMChunkBuilder* builder) = 0;
+  virtual void CompileToLLVM(LLVMChunkBuilder* builder) = 0;
 
 #ifdef DEBUG
   void Verify() override;
