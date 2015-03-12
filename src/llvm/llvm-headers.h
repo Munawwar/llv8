@@ -21,14 +21,10 @@
 //
 //#include <llvm-c/IRReader.h>
 
-#ifndef V8_HAS_CXX11_FINAL
-#error "Doesn't have C++11 final!\n"
-#endif
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/ExecutionEngine/MCJIT.h>
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -37,6 +33,7 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+#include <llvm/ExecutionEngine/MCJIT.h>
 
 namespace v8 {
 namespace internal {

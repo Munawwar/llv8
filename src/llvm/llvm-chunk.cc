@@ -8,6 +8,13 @@
 namespace v8 {
 namespace internal {
 
+LLVMChunk::~LLVMChunk() {}
+
+Handle<Code> LLVMChunk::Codegen() {
+  UNIMPLEMENTED();
+  return Handle<Code>();
+}
+
 LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   DisallowHandleAllocation no_handles;
   DisallowHeapAllocation no_gc;

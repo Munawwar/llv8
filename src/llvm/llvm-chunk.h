@@ -52,7 +52,11 @@ class LLVMGranularity FINAL {
   LLVMGranularity()
     : context_(),
       engine_(nullptr),
-      count_(0) {}
+      count_(0) {
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmPrinter();
+    llvm::InitializeNativeTargetAsmParser();
+  }
 
   std::string GenerateName() {
     return std::to_string(count_++);
@@ -63,7 +67,7 @@ class LLVMGranularity FINAL {
 
 class LLVMChunk FINAL : public LowChunk {
  public:
-  virtual ~LLVMChunk() {}
+  virtual ~LLVMChunk();
   LLVMChunk(CompilationInfo* info, HGraph* graph)
     : LowChunk(info, graph) {
     module_ = LLVMGranularity::getInstance().CreateModule();

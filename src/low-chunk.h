@@ -15,7 +15,7 @@ namespace internal {
 
 class LowChunk : public ZoneObject {
   public:
-    virtual ~LowChunk() {}
+    virtual ~LowChunk();
     //virtual LowChunk* NewChunk(HGraph *graph) = 0;
     virtual Handle<Code> Codegen() = 0;
     Zone* zone() const { return info_->zone(); }
