@@ -12,7 +12,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   DisallowHandleAllocation no_handles;
   DisallowHeapAllocation no_gc;
   graph->DisallowAddingNewValues();
-  int values = graph->GetMaximumValueID();
+//  int values = graph->GetMaximumValueID();
   CompilationInfo* info = graph->info();
 
 //  if (values > LUnallocated::kMaxVirtualRegisters) {
@@ -77,7 +77,7 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
   HInstruction* old_current = current_instruction_;
   current_instruction_ = current;
 
-  LInstruction* instr = NULL;
+//  LInstruction* instr = NULL;
   if (current->CanReplaceWithDummyUses()) {
     if (current->OperandCount() == 0) {
 //      instr = DefineAsRegister(new(zone()) LDummy());
@@ -115,7 +115,7 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
 //    AddInstruction(instr, current);
 //  }
 //
-//  current_instruction_ = old_current;
+  current_instruction_ = old_current;
 }
 
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
@@ -163,7 +163,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
     block->UpdateEnvironment(last_environment);
   }
   HInstruction* current = block->first();
-  int start = chunk()->instructions()->length();
+//  int start = chunk()->instructions()->length();
   while (current != NULL && !is_aborted()) {
     // Code for constants in registers is generated lazily.
     if (!current->EmitAtUses()) {
@@ -171,492 +171,492 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
     }
     current = current->next();
   }
-  int end = chunk()->instructions()->length() - 1;
-  if (end >= start) {
-    block->set_first_instruction_index(start);
-    block->set_last_instruction_index(end);
-  }
+//  int end = chunk()->instructions()->length() - 1;
+//  if (end >= start) {
+//    block->set_first_instruction_index(start);
+//    block->set_last_instruction_index(end);
+//  }
   next_block_ = NULL;
   current_block_ = NULL;
 }
 
-void LLLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
+void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
 //  return new(zone()) LLabel(instr->block());
 }
 
-void LLLVMChunkBuilder::DoContext(HContext* instr) {
+void LLVMChunkBuilder::DoContext(HContext* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoParameter(HParameter* instr) {
+void LLVMChunkBuilder::DoParameter(HParameter* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoArgumentsObject(HArgumentsObject* instr) {
+void LLVMChunkBuilder::DoArgumentsObject(HArgumentsObject* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoGoto(HGoto* instr) {
+void LLVMChunkBuilder::DoGoto(HGoto* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoSimulate(HSimulate* instr) {
+void LLVMChunkBuilder::DoSimulate(HSimulate* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
+void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoConstant(HConstant* instr) {
+void LLVMChunkBuilder::DoConstant(HConstant* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoReturn(HReturn* instr) {
+void LLVMChunkBuilder::DoReturn(HReturn* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoAbnormalExit(HAbnormalExit* instr) {
+void LLVMChunkBuilder::DoAbnormalExit(HAbnormalExit* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
+void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoAdd(HAdd* instr) {
+void LLVMChunkBuilder::DoAdd(HAdd* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
+void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoAllocate(HAllocate* instr) {
+void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
+void LLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoArgumentsElements(HArgumentsElements* instr) {
+void LLVMChunkBuilder::DoArgumentsElements(HArgumentsElements* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoArgumentsLength(HArgumentsLength* instr) {
+void LLVMChunkBuilder::DoArgumentsLength(HArgumentsLength* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoBitwise(HBitwise* instr) {
+void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
+void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexInformation* instr) {
+void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexInformation* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoBranch(HBranch* instr) {
+void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
+void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
+void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
+void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCallNew(HCallNew* instr) {
+void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
+void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCallRuntime(HCallRuntime* instr) {
+void LLVMChunkBuilder::DoCallRuntime(HCallRuntime* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCallStub(HCallStub* instr) {
+void LLVMChunkBuilder::DoCallStub(HCallStub* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
+void LLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoChange(HChange* instr) {
+void LLVMChunkBuilder::DoChange(HChange* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
+void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
+void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
+void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCheckMapValue(HCheckMapValue* instr) {
+void LLVMChunkBuilder::DoCheckMapValue(HCheckMapValue* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCheckSmi(HCheckSmi* instr) {
+void LLVMChunkBuilder::DoCheckSmi(HCheckSmi* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCheckValue(HCheckValue* instr) {
+void LLVMChunkBuilder::DoCheckValue(HCheckValue* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoClampToUint8(HClampToUint8* instr) {
+void LLVMChunkBuilder::DoClampToUint8(HClampToUint8* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
+void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr) {
+void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCompareHoleAndBranch(HCompareHoleAndBranch* instr) {
+void LLVMChunkBuilder::DoCompareHoleAndBranch(HCompareHoleAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
+void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCompareMinusZeroAndBranch(HCompareMinusZeroAndBranch* instr) {
+void LLVMChunkBuilder::DoCompareMinusZeroAndBranch(HCompareMinusZeroAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* instr) {
+void LLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
+void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
+void LLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoDateField(HDateField* instr) {
+void LLVMChunkBuilder::DoDateField(HDateField* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoDebugBreak(HDebugBreak* instr) {
+void LLVMChunkBuilder::DoDebugBreak(HDebugBreak* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoDeclareGlobals(HDeclareGlobals* instr) {
+void LLVMChunkBuilder::DoDeclareGlobals(HDeclareGlobals* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
+void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoDiv(HDiv* instr) {
+void LLVMChunkBuilder::DoDiv(HDiv* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoDoubleBits(HDoubleBits* instr) {
+void LLVMChunkBuilder::DoDoubleBits(HDoubleBits* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoDummyUse(HDummyUse* instr) {
+void LLVMChunkBuilder::DoDummyUse(HDummyUse* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoEnterInlined(HEnterInlined* instr) {
+void LLVMChunkBuilder::DoEnterInlined(HEnterInlined* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoEnvironmentMarker(HEnvironmentMarker* instr) {
+void LLVMChunkBuilder::DoEnvironmentMarker(HEnvironmentMarker* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoForceRepresentation(HForceRepresentation* instr) {
+void LLVMChunkBuilder::DoForceRepresentation(HForceRepresentation* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
+void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
+void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoFunctionLiteral(HFunctionLiteral* instr) {
+void LLVMChunkBuilder::DoFunctionLiteral(HFunctionLiteral* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoGetCachedArrayIndex(HGetCachedArrayIndex* instr) {
+void LLVMChunkBuilder::DoGetCachedArrayIndex(HGetCachedArrayIndex* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoHasCachedArrayIndexAndBranch(HHasCachedArrayIndexAndBranch* instr) {
+void LLVMChunkBuilder::DoHasCachedArrayIndexAndBranch(HHasCachedArrayIndexAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* instr) {
+void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoInnerAllocatedObject(HInnerAllocatedObject* instr) {
+void LLVMChunkBuilder::DoInnerAllocatedObject(HInnerAllocatedObject* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoInstanceOf(HInstanceOf* instr) {
+void LLVMChunkBuilder::DoInstanceOf(HInstanceOf* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoInstanceOfKnownGlobal(HInstanceOfKnownGlobal* instr) {
+void LLVMChunkBuilder::DoInstanceOfKnownGlobal(HInstanceOfKnownGlobal* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
+void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoIsConstructCallAndBranch(HIsConstructCallAndBranch* instr) {
+void LLVMChunkBuilder::DoIsConstructCallAndBranch(HIsConstructCallAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoIsObjectAndBranch(HIsObjectAndBranch* instr) {
+void LLVMChunkBuilder::DoIsObjectAndBranch(HIsObjectAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoIsStringAndBranch(HIsStringAndBranch* instr) {
+void LLVMChunkBuilder::DoIsStringAndBranch(HIsStringAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
+void LLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr) {
+void LLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
+void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
+void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
+void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
+void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
+void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
+void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
+void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
+void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
+void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
+void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
+void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoMapEnumLength(HMapEnumLength* instr) {
+void LLVMChunkBuilder::DoMapEnumLength(HMapEnumLength* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoMathFloorOfDiv(HMathFloorOfDiv* instr) {
+void LLVMChunkBuilder::DoMathFloorOfDiv(HMathFloorOfDiv* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
+void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoMod(HMod* instr) {
+void LLVMChunkBuilder::DoMod(HMod* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoMul(HMul* instr) {
+void LLVMChunkBuilder::DoMul(HMul* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
+void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoPower(HPower* instr) {
+void LLVMChunkBuilder::DoPower(HPower* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
+void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
+void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoRor(HRor* instr) {
+void LLVMChunkBuilder::DoRor(HRor* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoSar(HSar* instr) {
+void LLVMChunkBuilder::DoSar(HSar* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoSeqStringGetChar(HSeqStringGetChar* instr) {
+void LLVMChunkBuilder::DoSeqStringGetChar(HSeqStringGetChar* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoSeqStringSetChar(HSeqStringSetChar* instr) {
+void LLVMChunkBuilder::DoSeqStringSetChar(HSeqStringSetChar* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoShl(HShl* instr) {
+void LLVMChunkBuilder::DoShl(HShl* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoShr(HShr* instr) {
+void LLVMChunkBuilder::DoShr(HShr* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreCodeEntry(HStoreCodeEntry* instr) {
+void LLVMChunkBuilder::DoStoreCodeEntry(HStoreCodeEntry* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
+void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
+void LLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
+void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
+void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
+void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
+void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
+void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
+void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
+void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
+void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
+void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoSub(HSub* instr) {
+void LLVMChunkBuilder::DoSub(HSub* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoTailCallThroughMegamorphicCache(HTailCallThroughMegamorphicCache* instr) {
+void LLVMChunkBuilder::DoTailCallThroughMegamorphicCache(HTailCallThroughMegamorphicCache* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoThisFunction(HThisFunction* instr) {
+void LLVMChunkBuilder::DoThisFunction(HThisFunction* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoToFastProperties(HToFastProperties* instr) {
+void LLVMChunkBuilder::DoToFastProperties(HToFastProperties* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoTransitionElementsKind(HTransitionElementsKind* instr) {
+void LLVMChunkBuilder::DoTransitionElementsKind(HTransitionElementsKind* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoTrapAllocationMemento(HTrapAllocationMemento* instr) {
+void LLVMChunkBuilder::DoTrapAllocationMemento(HTrapAllocationMemento* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoTypeof(HTypeof* instr) {
+void LLVMChunkBuilder::DoTypeof(HTypeof* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
+void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
+void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
+void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoUseConst(HUseConst* instr) {
+void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {
   UNIMPLEMENTED();
 }
 
-void LLLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
+void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
   UNIMPLEMENTED();
 }
 

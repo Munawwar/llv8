@@ -42,7 +42,7 @@ namespace v8 {
 namespace internal {
 
 using llvm::LLVMContext;
-using llvm::Module;
+//using llvm::Module;
 
 }  // namespace internal
 }  // namespace v8

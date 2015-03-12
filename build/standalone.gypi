@@ -669,7 +669,7 @@
         'ldflags': [
            '-pthread',
             #FIXME(llvm): libs and ldflags should probably be in different places
-           '<!@(<(llvm_config) --ldflags --libs core mcjit interpreter analysis native --system-libs',  
+           '<!@(<(llvm_config) --ldflags --libs core mcjit interpreter analysis native --system-libs)',  
         ],
         'conditions': [
           [ 'clang==1 and (v8_target_arch=="x64" or v8_target_arch=="arm64" \

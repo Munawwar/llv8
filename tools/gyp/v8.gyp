@@ -377,20 +377,17 @@
         # TODO(jochen): Remove again after this is globally turned on.
         'V8_IMMINENT_DEPRECATION_WARNINGS',
       ],
-      'cflags_cc': [
+      'cflags_cc+': [
         "<!@(<(llvm_config) --cxxflags)",
-        "HELLO HACKER",
       ],
-      'cflags': [
-        "HELLO",
+      'cflags+': [
       ],
-      'defines': [ # works
-        "__STDC_LIMIT_MACROS=1",
-        "__STDC_CONSTANT_MACROS=1",
-      ],
+#      'defines': [ # works
+#        "__STDC_LIMIT_MACROS=1",
+#        "__STDC_CONSTANT_MACROS=1",
+#      ],
      "ldflags+": [
-        "<!@(<(llvm_config) --ldflags --system-libs)",
-        "<!@(<(llvm_config) --libs core mcjit native)"
+        "<!@(<(llvm_config) --cxxflags --ldflags --libs core mcjit interpreter analysis native --system-libs)",
       ],
 #     "libraries": [
 #       "<!@(<(llvm_config) --ldflags --system-libs)",

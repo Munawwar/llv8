@@ -34,10 +34,11 @@ class LLVMGranularity FINAL {
 
   void AddModule(std::unique_ptr<llvm::Module> module) {
     if (!engine_) {
-      engine_ = llvm::EngineBuilder(std::move(module))
+      llvm::ExecutionEngine* raw = llvm::EngineBuilder(std::move(module))
         .setEngineKind(llvm::EngineKind::JIT)
         .setOptLevel(llvm::CodeGenOpt::Aggressive)
         .create(); // TODO(llvm): add options
+      engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
       CHECK(engine_);
     } else {
       engine_->addModule(std::move(module));
@@ -102,8 +103,6 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
 
-  HBasicBlock* current_block_;
-  HBasicBlock* next_block_;
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;

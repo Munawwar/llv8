@@ -7,7 +7,7 @@
 namespace v8 {
 namespace internal {
 
-explicit LowChunkBuilderBase::LowChunkBuilderBase(CompilationInfo* info, HGraph* graph)
+LowChunkBuilderBase::LowChunkBuilderBase(CompilationInfo* info, HGraph* graph)
     : chunk_(nullptr),
       info_(info),
       graph_(graph),
