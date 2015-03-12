@@ -35,6 +35,7 @@
     'v8_extra_library_files%': [],
     'v8_experimental_extra_library_files%': [],
     'mksnapshot_exec': '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)mksnapshot<(EXECUTABLE_SUFFIX)',
+    'llvm_config': 'llvm-config',
   },
   'includes': ['../../build/toolchain.gypi', '../../build/features.gypi'],
   'targets': [
@@ -81,7 +82,7 @@
           'conditions': [
             ['OS=="mac"', {
               'xcode_settings': {
-                'OTHER_LDFLAGS': ['-dynamiclib', '-all_load']
+                'OTHER_LDFLAGS': ['-dynamiclib', '-all_load', "-Hello",] # TODO(llvm): triggers later
               },
             }],
             ['soname_version!=""', {
@@ -369,11 +370,32 @@
       },
       'include_dirs+': [
         '../..',
+        '<!@(<(llvm_config) --includedir)',
+        #'asdfasdf', TODO(llvm): this works!
       ],
       'defines': [
         # TODO(jochen): Remove again after this is globally turned on.
         'V8_IMMINENT_DEPRECATION_WARNINGS',
       ],
+      'cflags_cc': [
+        "<!@(<(llvm_config) --cxxflags)",
+        "HELLO HACKER",
+      ],
+      'cflags': [
+        "HELLO",
+      ],
+      'defines': [ # works
+        "__STDC_LIMIT_MACROS=1",
+        "__STDC_CONSTANT_MACROS=1",
+      ],
+     "ldflags+": [
+        "<!@(<(llvm_config) --ldflags --system-libs)",
+        "<!@(<(llvm_config) --libs core mcjit native)"
+      ],
+#     "libraries": [
+#       "<!@(<(llvm_config) --ldflags --system-libs)",
+#       "<!@(<(llvm_config) --libs core mcjit native)"
+#     ],
       'sources': [  ### gcmole(all) ###
         '../../include/v8-debug.h',
         '../../include/v8-platform.h',
@@ -1456,6 +1478,7 @@
       },
       'include_dirs+': [
         '../..',
+        'Hello2',
       ],
       'sources': [
         '../../src/base/adapters.h',

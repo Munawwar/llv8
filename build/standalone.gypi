@@ -47,6 +47,7 @@
     'msvs_multi_core_compile%': '1',
     'mac_deployment_target%': '10.5',
     'release_extra_cflags%': '',
+    'llvm_config': 'llvm-config',
     'variables': {
       'variables': {
         'variables': {
@@ -908,6 +909,7 @@
           'SYMROOT': '<(DEPTH)/xcodebuild',
           'USE_HEADERMAP': 'NO',
           'OTHER_CFLAGS': [
+           "<!@(<(llvm_config) --cxxflags)", #works!
             '-fno-strict-aliasing',
           ],
           'WARNING_CFLAGS': [
@@ -927,7 +929,7 @@
           ['clang==1', {
             'xcode_settings': {
               'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-              'CLANG_CXX_LANGUAGE_STANDARD': 'gnu++0x',  # -std=gnu++0x
+              'CLANG_CXX_LANGUAGE_STANDARD': 'c++11',  # -std=gnu++0x
             },
             'conditions': [
               ['v8_target_arch=="x64" or v8_target_arch=="arm64" \

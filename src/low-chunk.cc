@@ -7,9 +7,23 @@
 namespace v8 {
 namespace internal {
 
+explicit LowChunkBuilderBase::LowChunkBuilderBase(CompilationInfo* info, HGraph* graph)
+    : chunk_(nullptr),
+      info_(info),
+      graph_(graph),
+      status_(UNUSED),
+      zone_(graph->zone()) {}
+
+Isolate* LowChunkBuilderBase::isolate() const {
+  return graph_->isolate();
+}
+
 LowChunk::LowChunk(CompilationInfo* info, HGraph* graph)
     : info_(info),
       graph_(graph) {}
 
+Isolate* LowChunk::isolate() const {
+  return graph_->isolate();
+}
 
 } }  // namespace v8::internal

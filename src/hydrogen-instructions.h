@@ -15,7 +15,6 @@
 #include "src/conversions.h"
 #include "src/deoptimizer.h"
 #include "src/hydrogen-types.h"
-#include "src/llvm/llvm-chunk.h"
 #include "src/small-pointer-list.h"
 #include "src/unique.h"
 #include "src/utils.h"
@@ -36,6 +35,7 @@ class HStoreNamedField;
 class HValue;
 class LInstruction;
 class LChunkBuilder;
+class LLVMChunkBuilder;
 
 #define HYDROGEN_ABSTRACT_INSTRUCTION_LIST(V) \
   V(ArithmeticBinaryOperation)                \
@@ -200,6 +200,7 @@ class LChunkBuilder;
 
 #define DECLARE_CONCRETE_INSTRUCTION(type)                      \
   LInstruction* CompileToLithium(LChunkBuilder* builder) final; \
+  void CompileToLLVM(LLVMChunkBuilder* builder) final;          \
   static H##type* cast(HValue* value) {                         \
     DCHECK(value->Is##type());                                  \
     return reinterpret_cast<H##type*>(value);                   \

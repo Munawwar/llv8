@@ -21,10 +21,13 @@
 //
 //#include <llvm-c/IRReader.h>
 
+#ifndef V8_HAS_CXX11_FINAL
+#error "Doesn't have C++11 final!\n"
+#endif
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/ADT/STLExtras.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/IR/Constants.h"

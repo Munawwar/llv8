@@ -22,7 +22,7 @@ class LowChunk : public ZoneObject {
 
     CompilationInfo* info() const { return info_; }
     HGraph* graph() const { return graph_; }
-    Isolate* isolate() const { return graph_->isolate(); }
+    Isolate* isolate() const;
 
   protected:
     LowChunk(CompilationInfo* info, HGraph* graph);
@@ -35,12 +35,7 @@ class LowChunk : public ZoneObject {
 class LowChunkBuilderBase BASE_EMBEDDED {
   public:
     virtual ~LowChunkBuilderBase() {}
-    explicit LowChunkBuilderBase(CompilationInfo* info, HGraph* graph)
-        : chunk_(nullptr),
-          info_(info),
-          graph_(graph),
-          status_(UNUSED),
-          zone_(graph->zone()) {}
+    explicit LowChunkBuilderBase(CompilationInfo* info, HGraph* graph);
     virtual LowChunk* Build() = 0;
 
   protected:
@@ -49,7 +44,7 @@ class LowChunkBuilderBase BASE_EMBEDDED {
     LowChunk* chunk() const { return chunk_; }
     CompilationInfo* info() const { return info_; }
     HGraph* graph() const { return graph_; }
-    Isolate* isolate() const { return graph_->isolate(); }
+    Isolate* isolate() const;
     Heap* heap() const { return isolate()->heap(); }
     Zone* zone() const { return zone_; }
 
