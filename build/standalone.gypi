@@ -664,8 +664,13 @@
           '-fno-exceptions',
           '-fno-rtti',
           '-std=gnu++0x',
+          '<!@(<(llvm_config) --cxxflags)', #TODO(llvm)
         ],
-        'ldflags': [ '-pthread', ],
+        'ldflags': [
+           '-pthread',
+            #FIXME(llvm): libs and ldflags should probably be in different places
+           '<!@(<(llvm_config) --ldflags --libs core mcjit interpreter analysis native --system-libs',  
+        ],
         'conditions': [
           [ 'clang==1 and (v8_target_arch=="x64" or v8_target_arch=="arm64" \
             or v8_target_arch=="mips64el")', {
