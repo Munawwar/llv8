@@ -44,7 +44,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 
 LLVMChunk* LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
-  module_ = chunk()->module();
+  module_ = LLVMGranularity::getInstance().CreateModule();
   status_ = BUILDING;
 
 //  // If compiling for OSR, reserve space for the unoptimized frame,
@@ -55,17 +55,20 @@ LLVMChunk* LLVMChunkBuilder::Build() {
 //    }
 //  }
 
-  // here goes module_->AddFunction or so
-//  llvm::Function raw_function_ptr =
-//    cast<Function>(module_->getOrInsertFunction("", Type::getInt32Ty(Context),
-//                                          Type::getInt32Ty(Context),
-//                                          (Type *)0));
-// function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
+  // TODO(llvm): return type in general case is a tagged value
+  LLVMContext& context = LLVMGranularity::getInstance().context();
+  llvm::Function* raw_function_ptr = llvm::cast<llvm::Function>(
+      module_->getOrInsertFunction("", llvm::Type::getVoidTy(context),
+                                   llvm::Type::getInt32Ty(context),
+                                   (llvm::Type *)0));
+  function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
+
   // now, the problem is: get the parameters...
   // but what are they? Let's take a look at Hydrogen nodes.
-  // (and also see the IRs in c1visualiser)
+  // (and also see the IRs in c1visualizer)
+  // UPD: probably they are added as everything else
 
-  // We can skip params and consider only funtions
+  // We can skip params and consider only funtcions
   // with no arguments for now.
   // And come back later when it's figured out.
 
@@ -76,6 +79,7 @@ LLVMChunk* LLVMChunkBuilder::Build() {
     DoBasicBlock(blocks->at(i), next);
     if (is_aborted()) return NULL;
   }
+  LLVMGranularity::getInstance().AddModule(std::move(module_));
   status_ = DONE;
   return chunk();
 }
@@ -188,11 +192,19 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 }
 
 void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
-//  return new(zone()) LLabel(instr->block());
+  llvm::BasicBlock *block = llvm::BasicBlock::Create(
+      LLVMGranularity::getInstance().context(), "BlockEntry", function_.get());
+  USE(block);
+  // TODO(llvm): LGap & parallel moves (OSR support)
+  // return new(zone()) LLabel(instr->block());
 }
 
 void LLVMChunkBuilder::DoContext(HContext* instr) {
-  UNIMPLEMENTED();
+  if (instr->HasNoUses()) return;
+  if (info()->IsStub()) {
+    UNIMPLEMENTED();
+  }
+  return DefineAsRegister(new(zone()) LContext);
 }
 
 void LLVMChunkBuilder::DoParameter(HParameter* instr) {
@@ -208,7 +220,13 @@ void LLVMChunkBuilder::DoGoto(HGoto* instr) {
 }
 
 void LLVMChunkBuilder::DoSimulate(HSimulate* instr) {
-  UNIMPLEMENTED();
+//  The “Simulate” instructions are for keeping track of what the stack
+//  machine state would be, in case we need to bail out and start using
+//  unoptimized code. They don’t generate any actual machine instructions.
+
+  // TODO(llvm): we need to implement this for deoptimization support.
+  // seems to be the right implementation (same as for Lithium)
+  instr->ReplayEnvironment(current_block_->last_environment());
 }
 
 void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
