@@ -11,6 +11,7 @@
 #include "src/bailout-reason.h"
 #include "src/compiler.h"
 #include "src/hydrogen-instructions.h"
+#include "src/llvm/llvm-headers.h"
 #include "src/scopes.h"
 #include "src/zone.h"
 
@@ -63,6 +64,8 @@ class HBasicBlock final : public ZoneObject {
     deleted_phis_.Add(merge_index, zone());
   }
   HBasicBlock* dominator() const { return dominator_; }
+  llvm::BasicBlock* llvm_basic_block() const { return llvm_basic_block_; }
+  void set_llvm_basic_block(llvm::BasicBlock* block) { llvm_basic_block_ = block; }
   HEnvironment* last_environment() const { return last_environment_; }
   int argument_count() const { return argument_count_; }
   void set_argument_count(int count) { argument_count_ = count; }
@@ -201,6 +204,7 @@ class HBasicBlock final : public ZoneObject {
   HBasicBlock* parent_loop_header_;
   // For blocks marked as inline return target: the block with HEnterInlined.
   HBasicBlock* inlined_entry_block_;
+  llvm::BasicBlock* llvm_basic_block_;
   bool is_inline_return_target_ : 1;
   bool is_reachable_ : 1;
   bool dominates_loop_successors_ : 1;

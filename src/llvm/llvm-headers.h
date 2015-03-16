@@ -6,6 +6,7 @@
 #define V8_LLVM_HEADERS_H_
 
 // FIXME(llvm): remove unneeded headers
+#include <iostream>
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/ADT/STLExtras.h>

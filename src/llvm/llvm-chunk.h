@@ -70,19 +70,11 @@ class LLVMChunk FINAL : public LowChunk {
   virtual ~LLVMChunk();
   LLVMChunk(CompilationInfo* info, HGraph* graph)
     : LowChunk(info, graph) {
-//    module_ = LLVMGranularity::getInstance().CreateModule();
   }
 
   static LLVMChunk* NewChunk(HGraph *graph);
-//  llvm::Module* module() { return module_.get(); } // not to be owned
 
   Handle<Code> Codegen() override;
-// private:
-  // TODO(llvm): make module_ a unique_ptr if possible
-  // after the module is constructed, ownership is transfered to the ExecutionEngine
-  // (via a call to AddModule())
-  // upd: I think chunk doesn't need a module. LLVMChunkBuilder will posess it.
-//  std::unique_ptr<llvm::Module> module_;
 };
 
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
@@ -93,7 +85,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         current_block_(nullptr),
         next_block_(nullptr),
         module_(nullptr),
-        function_(nullptr) {}
+        function_(nullptr),
+        llvm_ir_builder_(nullptr) {}
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
@@ -107,6 +100,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
  private:
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
+  // if the llvm counterpart of the block does not exist, create it
+  void CreateBasicBlock(HBasicBlock* block);
 
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
@@ -114,6 +109,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   HBasicBlock* next_block_;
   std::unique_ptr<llvm::Module> module_;
   std::unique_ptr<llvm::Function> function_; // the essence
+  std::unique_ptr<llvm::IRBuilder<>> llvm_ir_builder_;
 };
 
 

@@ -42,6 +42,15 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   return chunk;
 }
 
+void LLVMChunkBuilder::CreateBasicBlock(HBasicBlock* block) {
+  if (!block->llvm_basic_block()) {
+    llvm::BasicBlock *llvm_block = llvm::BasicBlock::Create(
+        LLVMGranularity::getInstance().context(),
+        "BlockEntry", function_.get());
+    block->set_llvm_basic_block(llvm_block);
+  }
+}
+
 LLVMChunk* LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
   module_ = LLVMGranularity::getInstance().CreateModule();
@@ -112,7 +121,8 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
     if (current->IsControlInstruction() &&
         HControlInstruction::cast(current)->KnownSuccessorBlock(&successor) &&
         successor != NULL) {
-//      instr = new(zone()) LGoto(successor);
+      // Goto(successor)
+      llvm_ir_builder_-> // TODO(llvm): emit goto the llvm counterpart of the successor
       UNIMPLEMENTED();
     } else {
       current->CompileToLLVM(this); // the meat
@@ -132,6 +142,8 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
   DCHECK(is_building());
+  CreateBasicBlock(block);
+  llvm_ir_builder_ = llvm::IRBuilder<>(block->llvm_basic_block());
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
@@ -192,27 +204,41 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 }
 
 void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
-  llvm::BasicBlock *block = llvm::BasicBlock::Create(
-      LLVMGranularity::getInstance().context(), "BlockEntry", function_.get());
-  USE(block);
+  CreateBasicBlock(instr->block());
   // TODO(llvm): LGap & parallel moves (OSR support)
   // return new(zone()) LLabel(instr->block());
 }
 
 void LLVMChunkBuilder::DoContext(HContext* instr) {
   if (instr->HasNoUses()) return;
+//  std::cerr << "#Uses == " << instr->UseCount() << std::endl;
   if (info()->IsStub()) {
     UNIMPLEMENTED();
   }
-  return DefineAsRegister(new(zone()) LContext);
+//  FIXME(llvm): we need it for bailouts and such
+//  UNIMPLEMENTED();
+//  return DefineAsRegister(new(zone()) LContext);
 }
 
 void LLVMChunkBuilder::DoParameter(HParameter* instr) {
-  UNIMPLEMENTED();
+// TODO(llvm)
+//  for functions w/o parameters there is nonetheless
+//  always a parameter
+//  Parameter 0 type:Tagged
+//  which is not important for as right now
+//  since all it's usages are ArgumentsObject and Simulate
+//  which also are not implemented at the moment
+
+//  So for now we consider only parameterless functions.
+//  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoArgumentsObject(HArgumentsObject* instr) {
-  UNIMPLEMENTED();
+  // There are no real uses of the arguments object.
+  // arguments.length and element access are supported directly on
+  // stack arguments, and any real arguments object use causes a bailout.
+  // So this value is never used.
+  return;
 }
 
 void LLVMChunkBuilder::DoGoto(HGoto* instr) {
@@ -230,7 +256,7 @@ void LLVMChunkBuilder::DoSimulate(HSimulate* instr) {
 }
 
 void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
-  UNIMPLEMENTED();
+//  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
