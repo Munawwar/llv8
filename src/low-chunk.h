@@ -47,6 +47,7 @@ class LowChunkBuilderBase BASE_EMBEDDED {
     Isolate* isolate() const;
     Heap* heap() const { return isolate()->heap(); }
     Zone* zone() const { return zone_; }
+    int argument_count() const { return argument_count_; }
 
     bool is_unused() const { return status_ == UNUSED; }
     bool is_building() const { return status_ == BUILDING; }
@@ -57,6 +58,7 @@ class LowChunkBuilderBase BASE_EMBEDDED {
     CompilationInfo* info_;
     HGraph* const graph_;
     Status status_;
+    int argument_count_;
 
   private:
    Zone* zone_;

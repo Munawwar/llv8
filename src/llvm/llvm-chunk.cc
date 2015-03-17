@@ -122,8 +122,8 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
         HControlInstruction::cast(current)->KnownSuccessorBlock(&successor) &&
         successor != NULL) {
       // Goto(successor)
-      llvm_ir_builder_-> // TODO(llvm): emit goto the llvm counterpart of the successor
-      UNIMPLEMENTED();
+      CreateBasicBlock(successor);
+      llvm_ir_builder_->CreateBr(successor->llvm_basic_block());
     } else {
       current->CompileToLLVM(this); // the meat
     }
@@ -141,13 +141,16 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
 
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
+  std::cerr << __FUNCTION__ << std::endl;
   DCHECK(is_building());
   CreateBasicBlock(block);
-  llvm_ir_builder_ = llvm::IRBuilder<>(block->llvm_basic_block());
+  llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
+      block->llvm_basic_block());
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
     block->UpdateEnvironment(graph_->start_environment());
+    argument_count_ = 0;
   } else if (block->predecessors()->length() == 1) {
     // We have a single predecessor => copy environment and outgoing
     // argument count from the predecessor.
@@ -166,6 +169,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
     }
     block->UpdateEnvironment(last_environment);
     DCHECK(pred->argument_count() >= 0);
+    argument_count_ = pred->argument_count();
   } else {
     // We are at a state join => process phis.
     HBasicBlock* pred = block->predecessors()->at(0);
@@ -184,6 +188,8 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
       }
     }
     block->UpdateEnvironment(last_environment);
+    // Pick up the outgoing argument count of one of the predecessors.
+    argument_count_ = pred->argument_count();
   }
   HInstruction* current = block->first();
 //  int start = chunk()->instructions()->length();
@@ -199,6 +205,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 //    block->set_first_instruction_index(start);
 //    block->set_last_instruction_index(end);
 //  }
+  block->set_argument_count(argument_count_);
   next_block_ = NULL;
   current_block_ = NULL;
 }
@@ -264,7 +271,18 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
 }
 
 void LLVMChunkBuilder::DoReturn(HReturn* instr) {
-  UNIMPLEMENTED();
+  if (info()->IsStub()) {
+    UNIMPLEMENTED();
+  }
+  if (instr->parameter_count()) {
+    std::cerr << __FUNCTION__ << " " << instr->parameter_count() << std::endl;
+    UNIMPLEMENTED();
+  }
+  if (info()->saves_caller_doubles()) {
+    UNIMPLEMENTED();
+  }
+  std::cerr << __FUNCTION__ << std::endl;
+//  llvm_ir_builder_->CreateRet();
 }
 
 void LLVMChunkBuilder::DoAbnormalExit(HAbnormalExit* instr) {

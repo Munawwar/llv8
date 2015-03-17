@@ -705,8 +705,7 @@ class LChunk : public LowChunk {
 class LChunkBuilderBase : public LowChunkBuilderBase {
  public:
   explicit LChunkBuilderBase(CompilationInfo* info, HGraph* graph)
-      : LowChunkBuilderBase(info, graph),
-        argument_count_(0) {}
+      : LowChunkBuilderBase(info, graph) {}
 
   ~LChunkBuilderBase() override {}
 
@@ -715,8 +714,6 @@ class LChunkBuilderBase : public LowChunkBuilderBase {
 
  protected:
   LPlatformChunk* chunk() const; // FIXME(llvm): shadows chunk() in LowChunk. Should probably be virtual
-  int argument_count() const { return argument_count_; }
-
   // An input operand in register, stack slot or a constant operand.
   // Will not be moved to a register even if one is freely available.
   virtual MUST_USE_RESULT LOperand* UseAny(HValue* value) = 0;
@@ -727,8 +724,6 @@ class LChunkBuilderBase : public LowChunkBuilderBase {
   void AddObjectToMaterialize(HValue* value,
                               ZoneList<HValue*>* objects_to_materialize,
                               LEnvironment* result);
-
-  int argument_count_;
 };
 
 
