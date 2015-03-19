@@ -64,13 +64,22 @@ LLVMChunk* LLVMChunkBuilder::Build() {
 //    }
 //  }
 
-  // TODO(llvm): return type in general case is a tagged value
   LLVMContext& context = LLVMGranularity::getInstance().context();
+
+  // For now everything is Int64. Probably it is even right for x64.
+  // So in that case we are going to do come casts AFAIK
+  // First param is context (v8, js context) which goes to esi,
+  // second param is the callee's JSFunction object (edi),
+  // third param is Parameter 0 which is I am not sure what
+  // TODO(llvm): return type for void JS functions?
   llvm::Function* raw_function_ptr = llvm::cast<llvm::Function>(
-      module_->getOrInsertFunction("", llvm::Type::getVoidTy(context),
-                                   llvm::Type::getInt32Ty(context),
+      module_->getOrInsertFunction("", llvm::Type::getInt64Ty(context),
+                                   llvm::Type::getInt64Ty(context),
+                                   llvm::Type::getInt64Ty(context),
+//                                   llvm::Type::getInt64Ty(context),
                                    (llvm::Type *)0));
   function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
+  function_->setCallingConv(llvm::CallingConv::X86_64_V8);
 
   // now, the problem is: get the parameters...
   // but what are they? Let's take a look at Hydrogen nodes.
@@ -232,7 +241,7 @@ void LLVMChunkBuilder::DoParameter(HParameter* instr) {
 //  for functions w/o parameters there is nonetheless
 //  always a parameter
 //  Parameter 0 type:Tagged
-//  which is not important for as right now
+//  which is not important for us right now
 //  since all it's usages are ArgumentsObject and Simulate
 //  which also are not implemented at the moment
 
@@ -267,6 +276,7 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
+  // Note: constants might have EmitAtUses() == true
   UNIMPLEMENTED();
 }
 
@@ -274,15 +284,19 @@ void LLVMChunkBuilder::DoReturn(HReturn* instr) {
   if (info()->IsStub()) {
     UNIMPLEMENTED();
   }
-  if (instr->parameter_count()) {
-    std::cerr << __FUNCTION__ << " " << instr->parameter_count() << std::endl;
-    UNIMPLEMENTED();
-  }
   if (info()->saves_caller_doubles()) {
     UNIMPLEMENTED();
   }
-  std::cerr << __FUNCTION__ << std::endl;
-//  llvm_ir_builder_->CreateRet();
+  // see NeedsEagerFrame() in lithium-codegen. For now here it's always true.
+  DCHECK(!info()->IsStub());
+  // I don't know what the absence (= 0) of this field means
+  DCHECK(instr->parameter_count());
+  if (instr->parameter_count()->IsConstant()) {
+    llvm::Value* retVal = instr->value()->llvm_value(); // TODO(llvm, aram): implement
+    llvm_ir_builder_->CreateRet(retVal);
+  } else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoAbnormalExit(HAbnormalExit* instr) {
