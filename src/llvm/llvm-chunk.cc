@@ -243,8 +243,12 @@ void LLVMChunkBuilder::DoParameter(HParameter* instr) {
 //  which is not important for us right now
 //  since all it's usages are ArgumentsObject and Simulate
 //  which also are not implemented at the moment
+  int index = instr->index();
+  std::cerr << "Parameter #" << index << std::endl;
 
-//  So for now we consider only parameterless functions.
+  llvm::Function::arg_iterator it = function_->arg_begin();
+  while (index-- > 0) ++it;
+  instr->set_llvm_value(it);
 //  UNIMPLEMENTED();
 }
 
