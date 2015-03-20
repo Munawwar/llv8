@@ -66,29 +66,28 @@ LLVMChunk* LLVMChunkBuilder::Build() {
 
   LLVMContext& context = LLVMGranularity::getInstance().context();
 
-  // For now everything is Int64. Probably it is even right for x64.
-  // So in that case we are going to do come casts AFAIK
   // First param is context (v8, js context) which goes to esi,
   // second param is the callee's JSFunction object (edi),
   // third param is Parameter 0 which is I am not sure what
+  int num_parameters = info()->num_parameters() + 3;
+
+  llvm::Type* params[num_parameters];
+  for (auto i = 0; i < num_parameters; i++) {
+    // For now everything is Int64. Probably it is even right for x64.
+    // So in that case we are going to do come casts AFAIK
+    params[i] = llvm::Type::getInt64Ty(context);
+  }
+  llvm::ArrayRef<llvm::Type*> paramsRef(params);
+  llvm::FunctionType *function_type = llvm::FunctionType::get(
+      llvm::Type::getInt64Ty(context), params, false);
+
   // TODO(llvm): return type for void JS functions?
+  // I think it's all right, because undefined is a tagged value
   llvm::Function* raw_function_ptr = llvm::cast<llvm::Function>(
-      module_->getOrInsertFunction("", llvm::Type::getInt64Ty(context),
-                                   llvm::Type::getInt64Ty(context),
-                                   llvm::Type::getInt64Ty(context),
-//                                   llvm::Type::getInt64Ty(context),
-                                   (llvm::Type *)0));
+      module_->getOrInsertFunction("", function_type));
+
   function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
   function_->setCallingConv(llvm::CallingConv::X86_64_V8);
-
-  // now, the problem is: get the parameters...
-  // but what are they? Let's take a look at Hydrogen nodes.
-  // (and also see the IRs in c1visualizer)
-  // UPD: probably they are added as everything else
-
-  // We can skip params and consider only funtcions
-  // with no arguments for now.
-  // And come back later when it's figured out.
 
   const ZoneList<HBasicBlock*>* blocks = graph()->blocks();
   for (int i = 0; i < blocks->length(); i++) {
