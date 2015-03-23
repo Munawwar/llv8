@@ -507,7 +507,8 @@ class HValue : public ZoneObject {
 #ifdef DEBUG
         range_poisoned_(false),
 #endif
-        flags_(0) {}
+        flags_(0),
+        llvm_value_(nullptr) {}
   virtual ~HValue() {}
 
   virtual SourcePosition position() const { return SourcePosition::Unknown(); }
@@ -523,6 +524,11 @@ class HValue : public ZoneObject {
 
   int id() const { return id_; }
   void set_id(int id) { id_ = id; }
+
+  llvm::Value* llvm_value() const { return llvm_value_; }
+  void set_llvm_value(llvm::Value* llvm_instruction) {
+    llvm_value_ = llvm_instruction;
+  }
 
   HUseIterator uses() const { return HUseIterator(use_list_); }
 
@@ -865,6 +871,7 @@ class HValue : public ZoneObject {
   int flags_;
   GVNFlagSet changes_flags_;
   GVNFlagSet depends_on_flags_;
+  llvm::Value* llvm_value_;
 
  private:
   virtual bool IsDeletable() const { return false; }
@@ -1072,17 +1079,12 @@ class HInstruction : public HValue {
  public:
   HInstruction* next() const { return next_; }
   HInstruction* previous() const { return previous_; }
-  llvm::Value* llvm_value() const { return llvm_value_; }
 
   std::ostream& PrintTo(std::ostream& os) const override;          // NOLINT
   virtual std::ostream& PrintDataTo(std::ostream& os) const;       // NOLINT
 
   bool IsLinked() const { return block() != NULL; }
   void Unlink();
-
-  void set_llvm_value(llvm::Value* llvm_instruction) {
-    llvm_value_ = llvm_instruction;
-  }
 
   void InsertBefore(HInstruction* next);
 
@@ -1144,8 +1146,7 @@ class HInstruction : public HValue {
       : HValue(type),
         next_(NULL),
         previous_(NULL),
-        position_(RelocInfo::kNoPosition),
-        llvm_value_(NULL)  {
+        position_(RelocInfo::kNoPosition) {
     SetDependsOnFlag(kOsrEntries);
   }
 
@@ -1160,7 +1161,6 @@ class HInstruction : public HValue {
   HInstruction* next_;
   HInstruction* previous_;
   HPositionInfo position_;
-  llvm::Value* llvm_value_;
 
   friend class HBasicBlock;
 };

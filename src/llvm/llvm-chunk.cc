@@ -71,7 +71,7 @@ LLVMChunk* LLVMChunkBuilder::Build() {
   // third param is Parameter 0 which is I am not sure what
   int num_parameters = info()->num_parameters() + 3;
 
-  llvm::Type* params[num_parameters];
+  std::vector<llvm::Type*> params(num_parameters, nullptr);
   for (auto i = 0; i < num_parameters; i++) {
     // For now everything is Int64. Probably it is even right for x64.
     // So in that case we are going to do come casts AFAIK
