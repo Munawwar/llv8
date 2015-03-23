@@ -10,6 +10,7 @@
 
 #include "src/v8.h"
 
+
 #include "src/allocation.h"
 #include "src/base/bits.h"
 #include "src/bit-vector.h"
@@ -22,6 +23,9 @@
 #include "src/unique.h"
 #include "src/utils.h"
 #include "src/zone.h"
+#include "llvm/IR/Value.h"
+
+ 
 
 namespace v8 {
 namespace internal {
@@ -1081,10 +1085,17 @@ class HInstruction : public HValue {
   HInstruction* previous() const { return previous_; }
 
   std::ostream& PrintTo(std::ostream& os) const override;          // NOLINT
+
+  llvm::Value* llvm_value() const { return llvm_value_; }
+  
   virtual std::ostream& PrintDataTo(std::ostream& os) const;       // NOLINT
 
   bool IsLinked() const { return block() != NULL; }
   void Unlink();
+  
+  void set_llvm_value(llvm::Value* llvm_instruction) {
+    llvm_value_ = llvm_instruction;  
+  } 
 
   void InsertBefore(HInstruction* next);
 
@@ -1146,7 +1157,8 @@ class HInstruction : public HValue {
       : HValue(type),
         next_(NULL),
         previous_(NULL),
-        position_(RelocInfo::kNoPosition) {
+        position_(RelocInfo::kNoPosition),  
+	llvm_value_(NULL)  {
     SetDependsOnFlag(kOsrEntries);
   }
 
@@ -1161,6 +1173,7 @@ class HInstruction : public HValue {
   HInstruction* next_;
   HInstruction* previous_;
   HPositionInfo position_;
+  llvm::Value* llvm_value_;
 
   friend class HBasicBlock;
 };
