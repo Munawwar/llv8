@@ -96,6 +96,8 @@ LLVMChunk* LLVMChunkBuilder::Build() {
     DoBasicBlock(blocks->at(i), next);
     if (is_aborted()) return NULL;
   }
+  DCHECK(module_);
+  llvm::outs() << *(module_.get());
   LLVMGranularity::getInstance().AddModule(std::move(module_));
   status_ = DONE;
   return chunk();
@@ -145,6 +147,14 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
 //  }
 //
   current_instruction_ = old_current;
+}
+
+llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
+  if (value->EmitAtUses() && !value->llvm_value()) {
+    HInstruction* instr = HInstruction::cast(value);
+    VisitInstruction(instr);
+  }
+  return value->llvm_value();
 }
 
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
@@ -280,7 +290,33 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
   // Note: constants might have EmitAtUses() == true
-  UNIMPLEMENTED();
+  Representation r = instr->representation();
+  if (r.IsSmi()) {
+    // TODO(llvm): use/write a function for that
+    // FIXME(llvm): this block was not tested
+    int64_t int32_value = instr->Integer32Value();
+    llvm::Value* value = llvm_ir_builder_->getInt64(int32_value << (kSmiTagSize + kSmiShiftSize));
+    instr->set_llvm_value(value);
+  } else if (r.IsInteger32()) {
+    UNIMPLEMENTED();
+  } else if (r.IsDouble()) {
+    UNIMPLEMENTED();
+  } else if (r.IsExternal()) {
+    UNIMPLEMENTED();
+  } else if (r.IsTagged()) {
+    Handle<Object> object = instr->handle(isolate());
+    if (object->IsSmi()) {
+      // TODO(llvm): use/write a function for that
+      Smi* smi = Smi::cast(*object);
+      intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
+      llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+      instr->set_llvm_value(value);
+    } else {
+      UNIMPLEMENTED();
+    }
+  } else {
+    UNREACHABLE();
+  }
 }
 
 void LLVMChunkBuilder::DoReturn(HReturn* instr) {
@@ -295,8 +331,8 @@ void LLVMChunkBuilder::DoReturn(HReturn* instr) {
   // I don't know what the absence (= 0) of this field means
   DCHECK(instr->parameter_count());
   if (instr->parameter_count()->IsConstant()) {
-    llvm::Value* retVal = instr->value()->llvm_value(); // TODO(llvm, aram): implement
-    llvm_ir_builder_->CreateRet(retVal);
+    llvm::Value* ret_val = Use(instr->value());
+    llvm_ir_builder_->CreateRet(ret_val);
   } else {
     UNIMPLEMENTED();
   }
