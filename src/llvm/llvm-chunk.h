@@ -41,14 +41,13 @@ class LLVMGranularity FINAL {
         .setOptLevel(llvm::CodeGenOpt::Aggressive)
         .create(); // TODO(llvm): add options
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
-      engine_->DisableLazyCompilation(false); // FIXME(llvm): remove
       CHECK(engine_);
     } else {
       engine_->addModule(std::move(module));
     }
-      // Finalize each time after adding a new module
-      // (assuming the added module is constructed and won't change)
-      engine_->finalizeObject();
+    // Finalize each time after adding a new module
+    // (assuming the added module is constructed and won't change)
+    engine_->finalizeObject();
   }
 
   uint64_t GetFunctionAddress(int id) {
