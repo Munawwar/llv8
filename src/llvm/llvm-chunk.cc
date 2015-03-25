@@ -11,6 +11,12 @@ namespace internal {
 LLVMChunk::~LLVMChunk() {}
 
 Handle<Code> LLVMChunk::Codegen() {
+  uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
+      llvm_function_id_);
+  std::cerr << "address == " <<  address << std::endl;
+
+  //FIXME(llvm): it is debug output (which is empty if there's no error)
+  LLVMGranularity::getInstance().Err();
   UNIMPLEMENTED();
   return Handle<Code>();
 }
@@ -84,7 +90,7 @@ LLVMChunk* LLVMChunkBuilder::Build() {
   // TODO(llvm): return type for void JS functions?
   // I think it's all right, because undefined is a tagged value
   llvm::Function* raw_function_ptr = llvm::cast<llvm::Function>(
-      module_->getOrInsertFunction("", function_type));
+      module_->getOrInsertFunction(module_->getModuleIdentifier(), function_type));
 
   function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
   function_->setCallingConv(llvm::CallingConv::X86_64_V8);
@@ -97,7 +103,7 @@ LLVMChunk* LLVMChunkBuilder::Build() {
     if (is_aborted()) return NULL;
   }
   DCHECK(module_);
-  llvm::outs() << *(module_.get());
+  chunk()->set_llvm_function_id(std::stoi(module_->getModuleIdentifier()));
   LLVMGranularity::getInstance().AddModule(std::move(module_));
   status_ = DONE;
   return chunk();
@@ -159,7 +165,6 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
 
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
-  std::cerr << __FUNCTION__ << std::endl;
   DCHECK(is_building());
   CreateBasicBlock(block);
   llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
@@ -246,20 +251,13 @@ void LLVMChunkBuilder::DoContext(HContext* instr) {
 }
 
 void LLVMChunkBuilder::DoParameter(HParameter* instr) {
-// TODO(llvm)
-//  for functions w/o parameters there is nonetheless
-//  always a parameter
-//  Parameter 0 type:Tagged
-//  which is not important for us right now
-//  since all it's usages are ArgumentsObject and Simulate
-//  which also are not implemented at the moment
   int index = instr->index();
   std::cerr << "Parameter #" << index << std::endl;
 
   llvm::Function::arg_iterator it = function_->arg_begin();
-  while (index-- > 0) ++it;
+  // Skip first 2 parameters: context (esi) and callee's JSFunction object (edi)
+  while (2 + index-- > 0) ++it;
   instr->set_llvm_value(it);
-//  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoArgumentsObject(HArgumentsObject* instr) {

@@ -33,26 +33,43 @@ class LLVMGranularity FINAL {
   }
 
   void AddModule(std::unique_ptr<llvm::Module> module) {
+    llvm::outs() << "Adding module " << *(module.get());
     if (!engine_) {
       llvm::ExecutionEngine* raw = llvm::EngineBuilder(std::move(module))
+        .setErrorStr(&err_str_)
         .setEngineKind(llvm::EngineKind::JIT)
         .setOptLevel(llvm::CodeGenOpt::Aggressive)
         .create(); // TODO(llvm): add options
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
+      engine_->DisableLazyCompilation(false); // FIXME(llvm): remove
       CHECK(engine_);
     } else {
       engine_->addModule(std::move(module));
     }
+      // Finalize each time after adding a new module
+      // (assuming the added module is constructed and won't change)
+      engine_->finalizeObject();
+  }
+
+  uint64_t GetFunctionAddress(int id) {
+    DCHECK(engine_);
+    return engine_->getFunctionAddress(std::to_string(id));
+  }
+
+  void Err() {
+    std::cerr << err_str_ << std::endl;
   }
  private:
   LLVMContext context_;
   std::unique_ptr<llvm::ExecutionEngine> engine_; // FIXME(llvm): is it unique? //probably it is shared...
   int count_;
+  std::string err_str_;
 
   LLVMGranularity()
     : context_(),
       engine_(nullptr),
-      count_(0) {
+      count_(0),
+      err_str_() {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
@@ -69,12 +86,18 @@ class LLVMChunk FINAL : public LowChunk {
  public:
   virtual ~LLVMChunk();
   LLVMChunk(CompilationInfo* info, HGraph* graph)
-    : LowChunk(info, graph) {
-  }
+    : LowChunk(info, graph),
+      llvm_function_id_(-1) {}
 
   static LLVMChunk* NewChunk(HGraph *graph);
 
   Handle<Code> Codegen() override;
+
+  void set_llvm_function_id(int id) { llvm_function_id_ = id; }
+  int llvm_function_id() { return llvm_function_id_; }
+
+ private:
+  int llvm_function_id_;
 };
 
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
