@@ -345,7 +345,19 @@ void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
 }
 
 void LLVMChunkBuilder::DoAdd(HAdd* instr) {
-  UNIMPLEMENTED();
+  if(instr->representation().IsInteger32()) {
+    DCHECK(instr->left()->representation().Equals(instr->representation()));
+    DCHECK(instr->right()->representation().Equals(instr->representation()));
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    CHECK(left->llvm_value());
+    CHECK(right->llvm_value());
+    llvm::Value* Add = llvm_ir_builder_->CreateAdd(left->llvm_value(), right->llvm_value(),"");
+    instr->set_llvm_value(Add);
+  } 
+  else {    
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {

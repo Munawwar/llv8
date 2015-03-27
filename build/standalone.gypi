@@ -666,6 +666,7 @@
           '-std=gnu++0x',
           '<!@(<(llvm_config) --cxxflags)', #TODO(llvm)
         ],
+        'cflags_cc!': [ '-Wcast-qual', '-O3', '-Wformat-pedantic', ], #FIXME(llvm): this must be conditional
         'ldflags': [
            '-pthread',
             #FIXME(llvm): libs and ldflags should probably be in different places
