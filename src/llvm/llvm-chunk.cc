@@ -13,10 +13,31 @@ LLVMChunk::~LLVMChunk() {}
 Handle<Code> LLVMChunk::Codegen() {
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
-  std::cerr << "address == " <<  address << std::endl;
 
-  //FIXME(llvm): it is debug output (which is empty if there's no error)
+#ifdef DEBUG
+  std::cerr << "address == " <<  address << std::endl;
   LLVMGranularity::getInstance().Err();
+#endif
+
+//  Isolate* isolate = info->isolate();
+//
+//  // Allocate and install the code.
+//  CodeDesc desc;
+//  bool is_crankshafted =
+//      Code::ExtractKindFromFlags(flags) == Code::OPTIMIZED_FUNCTION ||
+//      info->IsStub();
+//  masm->GetCode(&desc);
+//  Handle<Code> code =
+//      isolate->factory()->NewCode(desc, flags, masm->CodeObject(),
+//                                  false, is_crankshafted,
+//                                  info->prologue_offset(),
+//                                  info->is_debug() && !is_crankshafted);
+//  isolate->counters()->total_compiled_code_size()->Increment(
+//      code->instruction_size());
+//  isolate->heap()->IncrementCodeGeneratedBytes(is_crankshafted,
+//      code->instruction_size());
+//  return code;
+
   UNIMPLEMENTED();
   return Handle<Code>();
 }
@@ -252,7 +273,9 @@ void LLVMChunkBuilder::DoContext(HContext* instr) {
 
 void LLVMChunkBuilder::DoParameter(HParameter* instr) {
   int index = instr->index();
+#ifdef DEBUG
   std::cerr << "Parameter #" << index << std::endl;
+#endif
 
   llvm::Function::arg_iterator it = function_->arg_begin();
   // Skip first 2 parameters: context (esi) and callee's JSFunction object (edi)
