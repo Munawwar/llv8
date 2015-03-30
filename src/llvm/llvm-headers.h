@@ -6,6 +6,7 @@
 #define V8_LLVM_HEADERS_H_
 
 // FIXME(llvm): remove unneeded headers
+// FIXME(llvm): sort headers (style)
 #include <iostream>
 
 #include <llvm/IR/IRBuilder.h>
@@ -22,6 +23,7 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include <llvm/ExecutionEngine/MCJIT.h>
+#include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
 
 namespace v8 {
 namespace internal {

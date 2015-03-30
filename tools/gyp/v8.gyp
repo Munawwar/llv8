@@ -865,6 +865,8 @@
         '../../src/llvm/llvm-chunk.cc',
         '../../src/llvm/llvm-chunk.h',
         '../../src/llvm/llvm-headers.h',
+        '../../src/llvm/mcjit-memory-manager.cc',
+        '../../src/llvm/mcjit-memory-manager.h',
         '../../src/log-inl.h',
         '../../src/log-utils.cc',
         '../../src/log-utils.h',
