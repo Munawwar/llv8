@@ -537,6 +537,12 @@ class Factory final {
                        int prologue_offset = Code::kPrologueOffsetNotSet,
                        bool is_debug = false);
 
+  Handle<Code> NewLLVMCode(const CodeDesc& desc,
+                           Code::Flags flags,
+                           bool immovable = false,
+                           int prologue_offset = Code::kPrologueOffsetNotSet,
+                           bool is_debug = false);
+
   Handle<Code> CopyCode(Handle<Code> code);
 
   Handle<Code> CopyCode(Handle<Code> code, Vector<byte> reloc_info);

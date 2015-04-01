@@ -10,6 +10,7 @@
 #include "../handles.h"
 #include "../lithium.h"
 #include "llvm-headers.h"
+#include "mcjit-memory-manager.h"
 
 #include <memory>
 
@@ -24,6 +25,7 @@ class LLVMGranularity FINAL {
   }
 
   LLVMContext& context() { return context_; }
+  MCJITMemoryManager* memory_manager_ref() { return memory_manager_ref_; }
 
   std::unique_ptr<llvm::Module> CreateModule(std::string name = "") {
     if ("" == name) {
@@ -35,7 +37,10 @@ class LLVMGranularity FINAL {
   void AddModule(std::unique_ptr<llvm::Module> module) {
     llvm::outs() << "Adding module " << *(module.get());
     if (!engine_) {
+      std::unique_ptr<MCJITMemoryManager>manager = MCJITMemoryManager::Create();
+      memory_manager_ref_ = manager.get(); // non-owning!
       llvm::ExecutionEngine* raw = llvm::EngineBuilder(std::move(module))
+        .setMCJITMemoryManager(std::move(manager))
         .setErrorStr(&err_str_)
         .setEngineKind(llvm::EngineKind::JIT)
         .setOptLevel(llvm::CodeGenOpt::Aggressive)
@@ -62,13 +67,15 @@ class LLVMGranularity FINAL {
   LLVMContext context_;
   std::unique_ptr<llvm::ExecutionEngine> engine_; // FIXME(llvm): is it unique? //probably it is shared...
   int count_;
+  MCJITMemoryManager* memory_manager_ref_; // non-owning ptr
   std::string err_str_;
 
   LLVMGranularity()
-    : context_(),
-      engine_(nullptr),
-      count_(0),
-      err_str_() {
+      : context_(),
+        engine_(nullptr),
+        count_(0),
+        memory_manager_ref_(nullptr),
+        err_str_() {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();

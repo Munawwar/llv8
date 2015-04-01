@@ -15,31 +15,25 @@ Handle<Code> LLVMChunk::Codegen() {
       llvm_function_id_);
 
 #ifdef DEBUG
-  std::cerr << "address == " <<  address << std::endl;
+  std::cerr << "\taddress == " <<  address << std::endl;
+  std::cerr << "\tlast code allocated == "
+      << reinterpret_cast<uint64_t>(
+          LLVMGranularity::getInstance()
+            .memory_manager_ref()
+            ->LastAllocatedCode()
+            .buffer)
+      << std::endl;
   LLVMGranularity::getInstance().Err();
 #endif
 
-//  Isolate* isolate = info->isolate();
-//
-//  // Allocate and install the code.
-//  CodeDesc desc;
-//  bool is_crankshafted =
-//      Code::ExtractKindFromFlags(flags) == Code::OPTIMIZED_FUNCTION ||
-//      info->IsStub();
-//  masm->GetCode(&desc);
-//  Handle<Code> code =
-//      isolate->factory()->NewCode(desc, flags, masm->CodeObject(),
-//                                  false, is_crankshafted,
-//                                  info->prologue_offset(),
-//                                  info->is_debug() && !is_crankshafted);
-//  isolate->counters()->total_compiled_code_size()->Increment(
-//      code->instruction_size());
-//  isolate->heap()->IncrementCodeGeneratedBytes(is_crankshafted,
-//      code->instruction_size());
-//  return code;
-
-  UNIMPLEMENTED();
-  return Handle<Code>();
+  Isolate* isolate = info()->isolate();
+  // Allocate and install the code.
+  Handle<Code> code = isolate->factory()->NewLLVMCode(
+      LLVMGranularity::getInstance().memory_manager_ref()->LastAllocatedCode(),
+      info()->flags());
+  isolate->counters()->total_compiled_code_size()->Increment(
+      code->instruction_size());
+  return code;
 }
 
 LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
