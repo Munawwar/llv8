@@ -368,7 +368,7 @@ void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
 }
 
 void LLVMChunkBuilder::DoAdd(HAdd* instr) {
-  if(instr->representation().IsInteger32()) {
+  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
     DCHECK(instr->left()->representation().Equals(instr->representation()));
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
@@ -377,6 +377,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     CHECK(right->llvm_value());
     llvm::Value* Add = llvm_ir_builder_->CreateAdd(left->llvm_value(), right->llvm_value(),"");
     instr->set_llvm_value(Add);
+    llvm::outs() << "Adding module " << *(module_.get());
   } 
   else {    
     UNIMPLEMENTED();
@@ -452,7 +453,10 @@ void LLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
 }
 
 void LLVMChunkBuilder::DoChange(HChange* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  HValue* op = instr->value();
+  instr->set_llvm_value(op->llvm_value()); 
+  return;
 }
 
 void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
@@ -676,7 +680,20 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoMul(HMul* instr) {
-  UNIMPLEMENTED();
+  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+    DCHECK(instr->left()->representation().Equals(instr->representation()));
+    DCHECK(instr->right()->representation().Equals(instr->representation()));
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    CHECK(left->llvm_value());
+    CHECK(right->llvm_value());
+    llvm::Value* Mul = llvm_ir_builder_->CreateMul(left->llvm_value(), right->llvm_value(),"");
+    instr->set_llvm_value(Mul);
+    llvm::outs() << "Adding module " << *(module_.get()); 
+  }
+  else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
@@ -768,7 +785,20 @@ void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) 
 }
 
 void LLVMChunkBuilder::DoSub(HSub* instr) {
-  UNIMPLEMENTED();
+  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+    DCHECK(instr->left()->representation().Equals(instr->representation()));
+    DCHECK(instr->right()->representation().Equals(instr->representation()));
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    CHECK(left->llvm_value());
+    CHECK(right->llvm_value());
+    llvm::Value* Sub = llvm_ir_builder_->CreateSub(left->llvm_value(), right->llvm_value(),"");
+    instr->set_llvm_value(Sub);
+    llvm::outs() << "Adding module " << *(module_.get());
+  }
+  else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoTailCallThroughMegamorphicCache(HTailCallThroughMegamorphicCache* instr) {
