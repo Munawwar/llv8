@@ -67,7 +67,7 @@ void LLVMChunkBuilder::CreateBasicBlock(HBasicBlock* block) {
   if (!block->llvm_basic_block()) {
     llvm::BasicBlock *llvm_block = llvm::BasicBlock::Create(
         LLVMGranularity::getInstance().context(),
-        "BlockEntry", function_.get());
+        "BlockEntry", function_);
     block->set_llvm_basic_block(llvm_block);
   }
 }
@@ -104,10 +104,10 @@ LLVMChunk* LLVMChunkBuilder::Build() {
 
   // TODO(llvm): return type for void JS functions?
   // I think it's all right, because undefined is a tagged value
-  llvm::Function* raw_function_ptr = llvm::cast<llvm::Function>(
-      module_->getOrInsertFunction(module_->getModuleIdentifier(), function_type));
+  function_ = llvm::cast<llvm::Function>(
+      module_->getOrInsertFunction(module_->getModuleIdentifier(),
+                                   function_type));
 
-  function_ = std::unique_ptr<llvm::Function>(raw_function_ptr);
   function_->setCallingConv(llvm::CallingConv::X86_64_V8);
 
   const ZoneList<HBasicBlock*>* blocks = graph()->blocks();

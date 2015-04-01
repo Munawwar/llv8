@@ -137,8 +137,12 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;
   HBasicBlock* next_block_;
+  // module_ ownership is later passed to the execution engine (MCJIT)
   std::unique_ptr<llvm::Module> module_;
-  std::unique_ptr<llvm::Function> function_; // the essence
+  // Non-owning pointer to the function inside llvm module.
+  // Not to be used for fetching the actual native code,
+  // since the corresponding methods are deprecated.
+  llvm::Function* function_;
   std::unique_ptr<llvm::IRBuilder<>> llvm_ir_builder_;
 };
 
