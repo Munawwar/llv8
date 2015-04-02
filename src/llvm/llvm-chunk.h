@@ -127,9 +127,12 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
 #undef DECLARE_DO
 
  private:
+  static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
+
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
   llvm::Value* Use(HValue* value);
+  llvm::Value* SmiToInteger32(HValue* value);
   // if the llvm counterpart of the block does not exist, create it
   void CreateBasicBlock(HBasicBlock* block);
 

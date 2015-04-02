@@ -178,8 +178,23 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
   return value->llvm_value();
 }
 
+llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
+  llvm::Value* res = nullptr;
+  if (SmiValuesAre32Bits()) {
+    res = llvm_ir_builder_->CreateLShr(Use(value), kSmiShift);
+  } else {
+    DCHECK(SmiValuesAre31Bits());
+    UNIMPLEMENTED();
+    // TODO(llvm): just implement sarl(dst, Immediate(kSmiShift));
+  }
+  return res;
+}
+
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
+#ifdef DEBUG
+  std::cerr << __FUNCTION__ << std::endl;
+#endif
   DCHECK(is_building());
   CreateBasicBlock(block);
   llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
@@ -317,7 +332,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     // TODO(llvm): use/write a function for that
     // FIXME(llvm): this block was not tested
     int64_t int32_value = instr->Integer32Value();
-    llvm::Value* value = llvm_ir_builder_->getInt64(int32_value << (kSmiTagSize + kSmiShiftSize));
+    llvm::Value* value = llvm_ir_builder_->getInt64(int32_value << (kSmiShift));
     instr->set_llvm_value(value);
   } else if (r.IsInteger32()) {
     UNIMPLEMENTED();
@@ -454,10 +469,45 @@ void LLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
 }
 
 void LLVMChunkBuilder::DoChange(HChange* instr) {
-  //UNIMPLEMENTED();
-  HValue* op = instr->value();
-  instr->set_llvm_value(op->llvm_value()); 
-  return;
+  Representation from = instr->from();
+  Representation to = instr->to();
+  HValue* val = instr->value();
+  if (from.IsSmi()) {
+    if (to.IsTagged()) {
+      instr->set_llvm_value(Use(val));
+      return;
+    }
+    from = Representation::Tagged();
+  }
+  if (from.IsTagged()) {
+    if (to.IsDouble()) {
+      UNIMPLEMENTED();
+    } else if (to.IsSmi()) {
+      if (!val->type().IsSmi()) {
+        // TODO(llvm): environment
+        // TODO(llvm): checkSmi, bailout
+      }
+      instr->set_llvm_value(Use(val));
+    } else {
+      DCHECK(to.IsInteger32());
+      if (val->type().IsSmi() || val->representation().IsSmi()) {
+        // convert smi to int32, no need to perform smi check
+        // lithium codegen does __ AssertSmi(input)
+        instr->set_llvm_value(SmiToInteger32(val));
+      } else {
+        // TODO(llvm): perform smi check, bailout if not a smi
+        // see LCodeGen::DoTaggedToI
+        instr->set_llvm_value(SmiToInteger32(val));
+      }
+    }
+  } else if (from.IsDouble()) {
+    UNIMPLEMENTED();
+  } else if (from.IsInteger32()) {
+    UNIMPLEMENTED();
+  } else {
+    DCHECK(to.IsDouble());
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
