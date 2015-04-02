@@ -271,9 +271,16 @@ void LLVMChunkBuilder::DoParameter(HParameter* instr) {
   std::cerr << "Parameter #" << index << std::endl;
 #endif
 
+  int num_parameters = info()->num_parameters() + 3;
   llvm::Function::arg_iterator it = function_->arg_begin();
-  // Skip first 2 parameters: context (esi) and callee's JSFunction object (edi)
-  while (2 + index-- > 0) ++it;
+  // First off, skip first 2 parameters: context (esi)
+  // and callee's JSFunction object (edi).
+  // Now, I couldn't find a way to tweak the calling convention through LLVM
+  // in a way that parameters are passed left-to-right on the stack.
+  // So for now they are passed right-to-left, as in cdecl.
+  // And therefore we do the magic here.
+  index = -index;
+  while (--index + num_parameters > 0) ++it;
   instr->set_llvm_value(it);
 }
 
