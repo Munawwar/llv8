@@ -63,15 +63,6 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   return chunk;
 }
 
-void LLVMChunkBuilder::CreateBasicBlock(HBasicBlock* block) {
-  if (!block->llvm_basic_block()) {
-    llvm::BasicBlock *llvm_block = llvm::BasicBlock::Create(
-        LLVMGranularity::getInstance().context(),
-        "BlockEntry", function_);
-    block->set_llvm_basic_block(llvm_block);
-  }
-}
-
 LLVMChunk* LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
   module_ = LLVMGranularity::getInstance().CreateModule();
@@ -153,8 +144,7 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
         HControlInstruction::cast(current)->KnownSuccessorBlock(&successor) &&
         successor != NULL) {
       // Goto(successor)
-      CreateBasicBlock(successor);
-      llvm_ir_builder_->CreateBr(successor->llvm_basic_block());
+      llvm_ir_builder_->CreateBr(Use(successor));
     } else {
       current->CompileToLLVM(this); // the meat
     }
@@ -168,6 +158,16 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
 //  }
 //
   current_instruction_ = old_current;
+}
+
+llvm::BasicBlock* LLVMChunkBuilder::Use(HBasicBlock* block) {
+  if (!block->llvm_basic_block()) {
+    llvm::BasicBlock *llvm_block = llvm::BasicBlock::Create(
+        LLVMGranularity::getInstance().context(),
+        "BlockEntry", function_);
+    block->set_llvm_basic_block(llvm_block);
+  }
+  return block->llvm_basic_block();
 }
 
 llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
@@ -195,13 +195,45 @@ llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
   return llvm_ir_builder_->CreateShl(Use(value), kSmiShift);
 }
 
+llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
+                                                            bool is_unsigned) {
+  llvm::CmpInst::Predicate pred = llvm::CmpInst::BAD_FCMP_PREDICATE;
+  switch (op) {
+    case Token::EQ:
+    case Token::EQ_STRICT:
+      pred = llvm::CmpInst::ICMP_EQ;
+      break;
+    case Token::NE:
+    case Token::NE_STRICT:
+      pred = llvm::CmpInst::ICMP_NE;
+      break;
+    case Token::LT:
+      pred = is_unsigned ? llvm::CmpInst::ICMP_ULT : llvm::CmpInst::ICMP_SLT;
+      break;
+    case Token::GT:
+      pred = is_unsigned ? llvm::CmpInst::ICMP_UGT : llvm::CmpInst::ICMP_SGT;
+      break;
+    case Token::LTE:
+      pred = is_unsigned ? llvm::CmpInst::ICMP_ULE : llvm::CmpInst::ICMP_SLE;
+      break;
+    case Token::GTE:
+      pred = is_unsigned ? llvm::CmpInst::ICMP_UGE : llvm::CmpInst::ICMP_SGE;
+      break;
+    case Token::IN:
+    case Token::INSTANCEOF:
+    default:
+      UNREACHABLE();
+  }
+  return pred;
+}
+
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
 #ifdef DEBUG
   std::cerr << __FUNCTION__ << std::endl;
 #endif
   DCHECK(is_building());
-  CreateBasicBlock(block);
+  Use(block);
   llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
       block->llvm_basic_block());
   current_block_ = block;
@@ -269,7 +301,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 }
 
 void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
-  CreateBasicBlock(instr->block());
+  Use(instr->block());
   // TODO(llvm): LGap & parallel moves (OSR support)
   // return new(zone()) LLabel(instr->block());
 }
@@ -556,7 +588,28 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr) {
-  UNIMPLEMENTED();
+  Representation r = instr->representation();
+  HValue* left = instr->left();
+  HValue* right = instr->right();
+  DCHECK(left->representation().Equals(r));
+  DCHECK(right->representation().Equals(r));
+  bool is_unsigned = r.IsDouble()
+      || left->CheckFlag(HInstruction::kUint32)
+      || right->CheckFlag(HInstruction::kUint32);
+  llvm::CmpInst::Predicate pred = TokenToPredicate(instr->token(), is_unsigned);
+
+  if (r.IsSmi()) {
+    UNIMPLEMENTED();
+  } else if (r.IsInteger32()) {
+    llvm::Value* compare = llvm_ir_builder_->CreateICmp(pred, Use(left),
+                                                        Use(right));
+    llvm::Value* branch = llvm_ir_builder_->CreateCondBr(compare,
+        Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    instr->set_llvm_value(branch);
+  } else {
+    DCHECK(r.IsDouble());
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoCompareHoleAndBranch(HCompareHoleAndBranch* instr) {

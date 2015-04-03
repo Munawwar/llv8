@@ -129,13 +129,16 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
 
+  static llvm::CmpInst::Predicate TokenToPredicate(Token::Value op,
+                                                   bool is_unsigned);
+
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
+  // if the llvm counterpart of the block does not exist, create it
+  llvm::BasicBlock* Use(HBasicBlock* block);
   llvm::Value* Use(HValue* value);
   llvm::Value* SmiToInteger32(HValue* value);
   llvm::Value* Integer32ToSmi(HValue* value);
-  // if the llvm counterpart of the block does not exist, create it
-  void CreateBasicBlock(HBasicBlock* block);
 
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
