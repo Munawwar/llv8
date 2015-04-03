@@ -133,6 +133,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void VisitInstruction(HInstruction* current);
   llvm::Value* Use(HValue* value);
   llvm::Value* SmiToInteger32(HValue* value);
+  llvm::Value* Integer32ToSmi(HValue* value);
   // if the llvm counterpart of the block does not exist, create it
   void CreateBasicBlock(HBasicBlock* block);
 

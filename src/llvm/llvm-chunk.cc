@@ -175,6 +175,7 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
     HInstruction* instr = HInstruction::cast(value);
     VisitInstruction(instr);
   }
+  DCHECK(value->llvm_value());
   return value->llvm_value();
 }
 
@@ -188,6 +189,10 @@ llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
     // TODO(llvm): just implement sarl(dst, Immediate(kSmiShift));
   }
   return res;
+}
+
+llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
+  return llvm_ir_builder_->CreateShl(Use(value), kSmiShift);
 }
 
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
@@ -335,7 +340,9 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     llvm::Value* value = llvm_ir_builder_->getInt64(int32_value << (kSmiShift));
     instr->set_llvm_value(value);
   } else if (r.IsInteger32()) {
-    UNIMPLEMENTED();
+    int64_t int32_value = instr->Integer32Value();
+    llvm::Value* value = llvm_ir_builder_->getInt64(int32_value);
+    instr->set_llvm_value(value);
   } else if (r.IsDouble()) {
     UNIMPLEMENTED();
   } else if (r.IsExternal()) {
@@ -389,9 +396,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
-    CHECK(left->llvm_value());
-    CHECK(right->llvm_value());
-    llvm::Value* Add = llvm_ir_builder_->CreateAdd(left->llvm_value(), right->llvm_value(),"");
+    llvm::Value* Add = llvm_ir_builder_->CreateAdd(Use(left), Use(right),"");
     instr->set_llvm_value(Add);
     llvm::outs() << "Adding module " << *(module_.get());
   } 
@@ -503,10 +508,18 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
   } else if (from.IsDouble()) {
     UNIMPLEMENTED();
   } else if (from.IsInteger32()) {
-    UNIMPLEMENTED();
-  } else {
-    DCHECK(to.IsDouble());
-    UNIMPLEMENTED();
+    if (to.IsTagged()) {
+      if (!instr->CheckFlag(HValue::kCanOverflow)) {
+        instr->set_llvm_value(Integer32ToSmi(val));
+      } else {
+        UNIMPLEMENTED();
+      }
+    } else if (to.IsSmi()) {
+      UNIMPLEMENTED();
+    } else {
+      DCHECK(to.IsDouble());
+      UNIMPLEMENTED();
+    }
   }
 }
 
