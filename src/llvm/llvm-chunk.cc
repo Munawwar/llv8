@@ -52,11 +52,6 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   LLVMChunk* chunk = builder.Build();
   if (chunk == NULL) return NULL;
 
-//  if (!allocator.Allocate(chunk)) {
-//    info->AbortOptimization(kNotEnoughVirtualRegistersRegalloc);
-//    return NULL;
-//  }
-
 //  chunk->set_allocated_double_registers(
 //      allocator.assigned_double_registers());
 
@@ -108,11 +103,34 @@ LLVMChunk* LLVMChunkBuilder::Build() {
     DoBasicBlock(blocks->at(i), next);
     if (is_aborted()) return NULL;
   }
+
+  ResolvePhis();
+
   DCHECK(module_);
   chunk()->set_llvm_function_id(std::stoi(module_->getModuleIdentifier()));
   LLVMGranularity::getInstance().AddModule(std::move(module_));
   status_ = DONE;
   return chunk();
+}
+
+void LLVMChunkBuilder::ResolvePhis() {
+  // Process the blocks in reverse order.
+  const ZoneList<HBasicBlock*>* blocks = graph_->blocks();
+  for (int block_id = blocks->length() - 1; block_id >= 0; --block_id) {
+    HBasicBlock* block = blocks->at(block_id);
+    ResolvePhis(block);
+  }
+}
+
+void LLVMChunkBuilder::ResolvePhis(HBasicBlock* block) {
+  for (int i = 0; i < block->phis()->length(); ++i) {
+    HPhi* phi = block->phis()->at(i);
+    for (int j = 0; j < phi->OperandCount(); ++j) {
+      HValue* operand = phi->OperandAt(j);
+      auto llvm_phi = static_cast<llvm::PHINode*>(phi->llvm_value());
+      llvm_phi->addIncoming(Use(operand), operand->block()->llvm_basic_block());
+    }
+  }
 }
 
 void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
@@ -234,6 +252,8 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 #endif
   DCHECK(is_building());
   Use(block);
+  // TODO(llvm): it it OK to create a new builder each time?
+  // we could just set the insertion point for the irbuilder.
   llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
       block->llvm_basic_block());
   current_block_ = block;
@@ -267,6 +287,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
     HEnvironment* last_environment = pred->last_environment();
     for (int i = 0; i < block->phis()->length(); ++i) {
       HPhi* phi = block->phis()->at(i);
+      DoPhi(phi);
       if (phi->HasMergedIndex()) {
         last_environment->SetValueAt(phi->merged_index(), phi);
       }
@@ -298,6 +319,13 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   block->set_argument_count(argument_count_);
   next_block_ = NULL;
   current_block_ = NULL;
+}
+
+void LLVMChunkBuilder::DoPhi(HPhi* phi) {
+  llvm::PHINode* llvm_phi = llvm_ir_builder_->CreatePHI(
+      llvm::Type::getInt64Ty(LLVMGranularity::getInstance().context()),
+      phi->OperandCount());
+  phi->set_llvm_value(llvm_phi);
 }
 
 void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
