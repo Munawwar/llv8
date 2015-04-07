@@ -414,8 +414,26 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
       intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
       llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
       instr->set_llvm_value(value);
-    } else {
-      UNIMPLEMENTED();
+    } else { // Heap object
+      // MacroAssembler::MoveHeapObject
+      // TODO(llvm): is allowing all these things for a block here OK?
+      AllowDeferredHandleDereference using_raw_address;
+      AllowHeapAllocation allow_allocation;
+      AllowHandleAllocation allow_handles;
+      DCHECK(object->IsHeapObject());
+      if (isolate()->heap()->InNewSpace(*object)) {
+        Handle<Cell> cell = isolate()->factory()->NewCell(object);
+        // FIXME(llvm): reloc info
+        intptr_t intptr_value = reinterpret_cast<intptr_t>(*cell);
+        llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+        instr->set_llvm_value(value);
+      } else {
+        UNIMPLEMENTED(); // TODO(llvm): untested
+        // FIXME(llvm): reloc info
+        intptr_t intptr_value = reinterpret_cast<intptr_t>(object.location());
+        llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+        instr->set_llvm_value(value);
+      }
     }
   } else {
     UNREACHABLE();
@@ -559,9 +577,6 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   llvm::CallInst* call = llvm_ir_builder_->CreateCall(casted, argsRef);
   call->setCallingConv(llvm::CallingConv::X86_64_V8);
   instr->set_llvm_value(call);
-
-  llvm::outs() << "Adding module " << *(module_.get());
-  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
