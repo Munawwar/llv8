@@ -73,8 +73,8 @@ LLVMChunk* LLVMChunkBuilder::Build() {
 
   LLVMContext& context = LLVMGranularity::getInstance().context();
 
-  // First param is context (v8, js context) which goes to esi,
-  // second param is the callee's JSFunction object (edi),
+  // First param is context (v8, js context) which goes to rsi,
+  // second param is the callee's JSFunction object (rdi),
   // third param is Parameter 0 which is I am not sure what
   int num_parameters = info()->num_parameters() + 3;
 
@@ -84,8 +84,7 @@ LLVMChunk* LLVMChunkBuilder::Build() {
     // So in that case we are going to do come casts AFAIK
     params[i] = llvm::Type::getInt64Ty(context);
   }
-  llvm::ArrayRef<llvm::Type*> paramsRef(params);
-  llvm::FunctionType *function_type = llvm::FunctionType::get(
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
       llvm::Type::getInt64Ty(context), params, false);
 
   // TODO(llvm): return type for void JS functions?
@@ -353,8 +352,8 @@ void LLVMChunkBuilder::DoParameter(HParameter* instr) {
 
   int num_parameters = info()->num_parameters() + 3;
   llvm::Function::arg_iterator it = function_->arg_begin();
-  // First off, skip first 2 parameters: context (esi)
-  // and callee's JSFunction object (edi).
+  // First off, skip first 2 parameters: context (rsi)
+  // and callee's JSFunction object (rdi).
   // Now, I couldn't find a way to tweak the calling convention through LLVM
   // in a way that parameters are passed left-to-right on the stack.
   // So for now they are passed right-to-left, as in cdecl.
@@ -505,7 +504,63 @@ void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   UNIMPLEMENTED();
 }
 
+void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
+  // FIXME(llvm): must be more generic (any call)
+  // but calls other than CallJSFunction are not supported yet.
+  DCHECK(instr->next()->IsCallJSFunction());
+}
+
 void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
+  // Don't know what this is yet.
+  if (instr->pass_argument_count()) UNIMPLEMENTED();
+  // Code that follows relies on this assumption
+  if (!instr->function()->IsConstant()) UNIMPLEMENTED();
+
+  Handle<JSFunction> js_function = Handle<JSFunction>::null();
+  HConstant* fun_const = HConstant::cast(instr->function());
+  js_function = Handle<JSFunction>::cast(fun_const->handle(isolate()));
+
+  byte* target = js_function->code()->instruction_start();
+  Context* js_context = js_function->context(); // rsi
+  auto argument_count = instr->argument_count() + 2; // rsi, rdi
+
+  // Construct the function type (signature)
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  std::vector<llvm::Type*> params(argument_count, nullptr);
+  for (auto i = 0; i < argument_count; i++)
+    params[i] = llvm::Type::getInt64Ty(llvm_context);
+  llvm::ArrayRef<llvm::Type*> paramsRef(params);
+  bool is_var_arg = false;
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      llvm::Type::getInt64Ty(llvm_context), params, is_var_arg);
+
+  // Get the callee's address
+  // FIXME(llvm): it is a pointer, not an int64
+  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(target));
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
+                                                         ptr_to_function);
+
+  // Set up the actual arguments
+  std::vector<llvm::Value*> args(argument_count, nullptr);
+  // FIXME(llvm): pointers, not int64
+  args[0] = llvm_ir_builder_->getInt64(reinterpret_cast<uint64_t>(js_context));
+  args[1] = llvm_ir_builder_->getInt64(reinterpret_cast<uint64_t>(*js_function));
+  DCHECK(instr->previous()->IsPushArguments());
+  HPushArguments* prev = static_cast<HPushArguments*>(instr->previous());
+  DCHECK(prev->OperandCount() + 2 == argument_count);
+  // The order is reverse because X86_64_V8 is not implemented quite right.
+  for (int i = 0; i < prev->OperandCount(); ++i) {
+    args[argument_count - 1 - i] = Use(prev->argument(i));
+  }
+  llvm::ArrayRef<llvm::Value*> argsRef(args);
+
+  llvm::CallInst* call = llvm_ir_builder_->CreateCall(casted, argsRef);
+  call->setCallingConv(llvm::CallingConv::X86_64_V8);
+  instr->set_llvm_value(call);
+
+  llvm::outs() << "Adding module " << *(module_.get());
   UNIMPLEMENTED();
 }
 
@@ -846,10 +901,6 @@ void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
 }
 
 void LLVMChunkBuilder::DoPower(HPower* instr) {
-  UNIMPLEMENTED();
-}
-
-void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
   UNIMPLEMENTED();
 }
 
