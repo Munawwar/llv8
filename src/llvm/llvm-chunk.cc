@@ -940,7 +940,18 @@ void LLVMChunkBuilder::DoSeqStringSetChar(HSeqStringSetChar* instr) {
 }
 
 void LLVMChunkBuilder::DoShl(HShl* instr) {
-  UNIMPLEMENTED();
+  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+    DCHECK(instr->left()->representation().Equals(instr->representation()));
+    DCHECK(instr->right()->representation().Equals(instr->representation()));
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    llvm::Value* Shl = llvm_ir_builder_->CreateShl(Use(left), Use(right),"");
+    instr->set_llvm_value(Shl);
+    llvm::outs() << "Adding module " << *(module_.get());
+  }
+  else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoShr(HShr* instr) {
