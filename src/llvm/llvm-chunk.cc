@@ -503,7 +503,27 @@ void LLVMChunkBuilder::DoArgumentsLength(HArgumentsLength* instr) {
 }
 
 void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
-  UNIMPLEMENTED();
+  DCHECK(instr->left()->representation().Equals(instr->representation()));
+  DCHECK(instr->right()->representation().Equals(instr->representation()));
+  HValue* left = instr->left();
+  HValue* right = instr->right();
+  switch (instr->op()) {
+      case Token::BIT_AND: {
+        llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
+        instr->set_llvm_value(And);
+        llvm::outs() << "Adding module " << *(module_.get());
+        break;
+      }  
+      case Token::BIT_OR: {
+        llvm::Value* Or = llvm_ir_builder_->CreateOr(Use(left), Use(right),"");
+        instr->set_llvm_value(Or);
+        llvm::outs() << "Adding module " << *(module_.get());
+        break;
+      }
+      default:
+        UNREACHABLE();
+        break; 
+   } 
 }
 
 void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
@@ -928,7 +948,18 @@ void LLVMChunkBuilder::DoRor(HRor* instr) {
 }
 
 void LLVMChunkBuilder::DoSar(HSar* instr) {
-  UNIMPLEMENTED();
+  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+    DCHECK(instr->left()->representation().Equals(instr->representation()));
+    DCHECK(instr->right()->representation().Equals(instr->representation()));
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    llvm::Value* AShr = llvm_ir_builder_->CreateAShr(Use(left), Use(right),"");
+    instr->set_llvm_value(AShr);
+    llvm::outs() << "Adding module " << *(module_.get());
+  }
+  else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoSeqStringGetChar(HSeqStringGetChar* instr) {
@@ -955,7 +986,18 @@ void LLVMChunkBuilder::DoShl(HShl* instr) {
 }
 
 void LLVMChunkBuilder::DoShr(HShr* instr) {
-  UNIMPLEMENTED();
+  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+    DCHECK(instr->left()->representation().Equals(instr->representation()));
+    DCHECK(instr->right()->representation().Equals(instr->representation()));
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    llvm::Value* LShr = llvm_ir_builder_->CreateLShr(Use(left), Use(right),"");
+    instr->set_llvm_value(LShr);
+    llvm::outs() << "Adding module " << *(module_.get());
+  }
+  else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoStoreCodeEntry(HStoreCodeEntry* instr) {
