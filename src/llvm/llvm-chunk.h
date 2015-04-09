@@ -5,11 +5,12 @@
 #ifndef V8_LLVM_CHUNK_H_
 #define V8_LLVM_CHUNK_H_
 
+#include "llvm-headers.h"
+
 #include "../hydrogen.h"
 #include "../hydrogen-instructions.h"
 #include "../handles.h"
 #include "../lithium.h"
-#include "llvm-headers.h"
 #include "mcjit-memory-manager.h"
 
 #include <memory>

@@ -5,13 +5,16 @@
 #ifndef V8_HYDROGEN_H_
 #define V8_HYDROGEN_H_
 
+#include "src/llvm/llvm-headers.h"
+
+#include "src/v8.h"
+
 #include "src/accessors.h"
 #include "src/allocation.h"
 #include "src/ast.h"
 #include "src/bailout-reason.h"
 #include "src/compiler.h"
 #include "src/hydrogen-instructions.h"
-#include "src/llvm/llvm-headers.h"
 #include "src/scopes.h"
 #include "src/zone.h"
 

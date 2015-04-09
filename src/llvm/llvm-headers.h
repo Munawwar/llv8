@@ -5,6 +5,10 @@
 #ifndef V8_LLVM_HEADERS_H_
 #define V8_LLVM_HEADERS_H_
 
+#if DEBUG
+#define LLV8_HAD_DEBUG
+#endif
+
 // FIXME(llvm): remove unneeded headers
 // FIXME(llvm): sort headers (style)
 #include <iostream>
@@ -34,6 +38,12 @@
 #include "llvm/Transforms/Scalar.h"
 
 #include "llvm/IR/LegacyPassManager.h"
+
+#undef DEBUG // Undef the llvm DEBUG
+
+#ifdef LLV8_HAD_DEBUG
+#define DEBUG 1
+#endif
 
 namespace v8 {
 namespace internal {

@@ -5,6 +5,8 @@
 #ifndef V8_HYDROGEN_INSTRUCTIONS_H_
 #define V8_HYDROGEN_INSTRUCTIONS_H_
 
+#include "src/llvm/llvm-headers.h"
+
 #include <cstring>
 #include <iosfwd>
 
@@ -17,7 +19,6 @@
 #include "src/conversions.h"
 #include "src/deoptimizer.h"
 #include "src/hydrogen-types.h"
-#include "src/llvm/llvm-headers.h"
 #include "src/small-pointer-list.h"
 #include "src/unique.h"
 #include "src/utils.h"
