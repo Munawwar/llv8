@@ -37,6 +37,9 @@ class LowChunkBuilderBase BASE_EMBEDDED {
     virtual ~LowChunkBuilderBase() {} // FIXME(llvm): virtuality now seems redundant
     explicit LowChunkBuilderBase(CompilationInfo* info, HGraph* graph);
 
+    void Abort(BailoutReason reason);
+    void Retry(BailoutReason reason);
+
   protected:
     enum Status { UNUSED, BUILDING, DONE, ABORTED };
 
@@ -82,10 +85,12 @@ class LowCodeGenBase BASE_EMBEDDED {
     // Try to generate native code for the entire chunk, but it may fail if the
     // chunk contains constructs we cannot handle. Returns true if the
     // code generation attempt succeeded.
+    // FIXME(llvm): return this method to the child class (make non-virtual)
     virtual bool GenerateCode() = 0;
 
     // Finish the code by setting stack height, safepoint, and bailout
     // information on it.
+    // FIXME(llvm): return this method to the child class (make non-virtual)
     virtual void FinishCode(Handle<Code> code) = 0;
   protected:
     LowChunk* const chunk_;

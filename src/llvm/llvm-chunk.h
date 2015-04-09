@@ -152,6 +152,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   LLVMChunkBuilder& Optimize(); // invoke llvm transformation passes for the function
   LLVMChunk* Create();
 
+  void DeoptimizeIf();
+
   // Declare methods that deal with the individual node types.
 #define DECLARE_DO(type) void Do##type(H##type* node);
   HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)

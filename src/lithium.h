@@ -709,9 +709,6 @@ class LChunkBuilderBase : public LowChunkBuilderBase {
 
   ~LChunkBuilderBase() override {}
 
-  void Abort(BailoutReason reason);
-  void Retry(BailoutReason reason);
-
  protected:
   LPlatformChunk* chunk() const; // FIXME(llvm): shadows chunk() in LowChunk. Should probably be virtual
   // An input operand in register, stack slot or a constant operand.

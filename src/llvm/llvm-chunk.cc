@@ -478,15 +478,34 @@ void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
   UNIMPLEMENTED();
 }
 
+void LLVMChunkBuilder::DeoptimizeIf(Deoptimizer::BailoutType bailout_type) {
+  Address entry =
+      Deoptimizer::GetDeoptimizationEntry(isolate(), id, bailout_type);
+  if (entry == NULL) {
+    Abort(kBailoutWasNotPrepared);
+    return;
+  }
+
+  if (FLAG_deopt_every_n_times != 0 && !info()->IsStub()) UNIMPLEMENTED();
+  if (info()->ShouldTrapOnDeopt()) UNIMPLEMENTED();
+
+  // TODO(llvm) create Deoptimizer::DeoptInfo
+}
+
 void LLVMChunkBuilder::DoAdd(HAdd* instr) {
   if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
     DCHECK(instr->left()->representation().Equals(instr->representation()));
     DCHECK(instr->right()->representation().Equals(instr->representation()));
+    bool can_overflow = instr->CheckFlag(HValue::kCanOverflow);
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* Add = llvm_ir_builder_->CreateAdd(Use(left), Use(right),"");
-    instr->set_llvm_value(Add);
-    llvm::outs() << "Adding module " << *(module_.get());
+    if (!can_overflow) {
+      llvm::Value* add = llvm_ir_builder_->CreateAdd(Use(left), Use(right),"");
+      instr->set_llvm_value(add);
+    } else {
+//      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
+      UNIMPLEMENTED();
+    }
   } 
   else {    
     UNIMPLEMENTED();

@@ -555,18 +555,6 @@ LPlatformChunk* LChunkBuilderBase::chunk() const {
   return static_cast<LPlatformChunk*>(chunk_);
 }
 
-void LChunkBuilderBase::Abort(BailoutReason reason) {
-  info()->AbortOptimization(reason);
-  status_ = ABORTED;
-}
-
-
-void LChunkBuilderBase::Retry(BailoutReason reason) {
-  info()->RetryOptimization(reason);
-  status_ = ABORTED;
-}
-
-
 LEnvironment* LChunkBuilderBase::CreateEnvironment(
     HEnvironment* hydrogen_env, int* argument_index_accumulator,
     ZoneList<HValue*>* objects_to_materialize) {

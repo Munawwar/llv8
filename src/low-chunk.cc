@@ -29,4 +29,14 @@ Isolate* LowChunk::isolate() const {
   return graph_->isolate();
 }
 
+void LowChunkBuilderBase::Abort(BailoutReason reason) {
+  info()->AbortOptimization(reason);
+  status_ = ABORTED;
+}
+
+void LowChunkBuilderBase::Retry(BailoutReason reason) {
+  info()->RetryOptimization(reason);
+  status_ = ABORTED;
+}
+
 } }  // namespace v8::internal
