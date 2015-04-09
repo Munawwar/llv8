@@ -34,9 +34,8 @@ class LowChunk : public ZoneObject {
 
 class LowChunkBuilderBase BASE_EMBEDDED {
   public:
-    virtual ~LowChunkBuilderBase() {}
+    virtual ~LowChunkBuilderBase() {} // FIXME(llvm): virtuality now seems redundant
     explicit LowChunkBuilderBase(CompilationInfo* info, HGraph* graph);
-    virtual LowChunk* Build() = 0;
 
   protected:
     enum Status { UNUSED, BUILDING, DONE, ABORTED };

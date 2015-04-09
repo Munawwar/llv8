@@ -49,7 +49,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 //  }
 //  LAllocator allocator(values, graph);
   LLVMChunkBuilder builder(info, graph);
-  LLVMChunk* chunk = builder.Build();
+  LLVMChunk* chunk = builder.Build().Optimize().Create(); // TODO(llvm): naming
   if (chunk == NULL) return NULL;
 
 //  chunk->set_allocated_double_registers(
@@ -58,7 +58,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   return chunk;
 }
 
-LLVMChunk* LLVMChunkBuilder::Build() {
+LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
   module_ = LLVMGranularity::getInstance().CreateModule();
   status_ = BUILDING;
@@ -100,15 +100,19 @@ LLVMChunk* LLVMChunkBuilder::Build() {
     HBasicBlock* next = NULL;
     if (i < blocks->length() - 1) next = blocks->at(i + 1);
     DoBasicBlock(blocks->at(i), next);
-    if (is_aborted()) return NULL;
+    DCHECK(!is_aborted());
   }
 
   ResolvePhis();
 
   DCHECK(module_);
   chunk()->set_llvm_function_id(std::stoi(module_->getModuleIdentifier()));
-  LLVMGranularity::getInstance().AddModule(std::move(module_));
   status_ = DONE;
+  return *this;
+}
+
+LLVMChunk* LLVMChunkBuilder::Create() {
+  LLVMGranularity::getInstance().AddModule(std::move(module_));
   return chunk();
 }
 
@@ -242,6 +246,13 @@ llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
       UNREACHABLE();
   }
   return pred;
+}
+
+LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
+  DCHECK(module_);
+  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
+  LLVMGranularity::getInstance().OptimizeModule(module_.get());
+  return *this;
 }
 
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,

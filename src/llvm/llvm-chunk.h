@@ -17,6 +17,7 @@
 namespace v8 {
 namespace internal {
 
+// TODO(llvm): move this class to a separate file. Or, better, 2 files
 class LLVMGranularity FINAL {
  public:
   static LLVMGranularity& getInstance() {
@@ -43,8 +44,8 @@ class LLVMGranularity FINAL {
         .setMCJITMemoryManager(std::move(manager))
         .setErrorStr(&err_str_)
         .setEngineKind(llvm::EngineKind::JIT)
-        .setOptLevel(llvm::CodeGenOpt::Aggressive)
-        .create(); // TODO(llvm): add options
+        .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
+        .create();
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
       CHECK(engine_);
     } else {
@@ -53,6 +54,30 @@ class LLVMGranularity FINAL {
     // Finalize each time after adding a new module
     // (assuming the added module is constructed and won't change)
     engine_->finalizeObject();
+  }
+
+  void OptimizeFunciton(llvm::Module* module, llvm::Function* function) {
+    // TODO(llvm): 1). Instead of using -O3 optimizations, add the
+    // appropriate passes manually
+    // TODO(llvm): 2). I didn't manage to make use of new PassManagers.
+    // llvm::legacy:: things should probably be removed with time.
+    // But for now even the llvm optimizer (llvm/tools/opt/opt.cpp) uses them.
+    // TODO(llvm): 3). (Probably could be resolved easily when 2. is done)
+    // for now we set up the passes for each module (and each function).
+    // It would be much nicer if we could just set the passes once
+    // and then in OptimizeFunciton() and OptimizeModule() simply run them.
+    llvm::legacy::FunctionPassManager pass_manager(module);
+    pass_manager_builder_.populateFunctionPassManager(pass_manager);
+    pass_manager.doInitialization();
+    pass_manager.run(*function);
+    pass_manager.doFinalization();
+  }
+
+  void OptimizeModule(llvm::Module* module) {
+    // TODO(llvm): see OptimizeFunciton TODOs (ditto)
+    llvm::legacy::PassManager pass_manager;
+    pass_manager_builder_.populateModulePassManager(pass_manager);
+    pass_manager.run(*module);
   }
 
   uint64_t GetFunctionAddress(int id) {
@@ -65,13 +90,15 @@ class LLVMGranularity FINAL {
   }
  private:
   LLVMContext context_;
-  std::unique_ptr<llvm::ExecutionEngine> engine_; // FIXME(llvm): is it unique? //probably it is shared...
+  llvm::PassManagerBuilder pass_manager_builder_;
+  std::unique_ptr<llvm::ExecutionEngine> engine_;
   int count_;
   MCJITMemoryManager* memory_manager_ref_; // non-owning ptr
   std::string err_str_;
 
   LLVMGranularity()
       : context_(),
+        pass_manager_builder_(),
         engine_(nullptr),
         count_(0),
         memory_manager_ref_(nullptr),
@@ -79,6 +106,7 @@ class LLVMGranularity FINAL {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
+    pass_manager_builder_.OptLevel = 3; // -O3
   }
 
   std::string GenerateName() {
@@ -119,7 +147,9 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
-  LLVMChunk* Build() override;
+  LLVMChunkBuilder& Build();
+  LLVMChunkBuilder& Optimize(); // invoke llvm transformation passes for the function
+  LLVMChunk* Create();
 
   // Declare methods that deal with the individual node types.
 #define DECLARE_DO(type) void Do##type(H##type* node);

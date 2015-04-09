@@ -387,7 +387,7 @@
 #        "__STDC_CONSTANT_MACROS=1",
 #      ],
      "ldflags+": [
-        "<!@(<(llvm_config) --cxxflags --ldflags --libs core executionengine mcjit interpreter analysis native --system-libs)",
+        "<!@(<(llvm_config) --cxxflags --ldflags --libs core executionengine mcjit interpreter analysis ipo native --system-libs)",
       ],
 #     "libraries": [
 #       "<!@(<(llvm_config) --ldflags --system-libs)",
@@ -1545,7 +1545,7 @@
                   'libraries': [
                     '-ldl',
                     '-lrt'
-                    '<!@(<(llvm_config) --ldflags --libs core mcjit native --system-libs)', #TODO(llvm): remove redundant if any
+                    '<!@(<(llvm_config) --ldflags --libs core mcjit ipo native --system-libs)', #TODO(llvm): remove redundant if any
                   ],
                 },
               }, {

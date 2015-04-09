@@ -2735,7 +2735,7 @@ class LChunkBuilder final : public LChunkBuilderBase {
         allocator_(allocator) {}
   ~LChunkBuilder() override {}
   // Build the sequence for the graph.
-  LPlatformChunk* Build() override;
+  LPlatformChunk* Build();
 
   // Declare methods that deal with the individual node types.
 #define DECLARE_DO(type) LInstruction* Do##type(H##type* node);
