@@ -130,7 +130,8 @@ void LLVMChunkBuilder::ResolvePhis(HBasicBlock* block) {
     for (int j = 0; j < phi->OperandCount(); ++j) {
       HValue* operand = phi->OperandAt(j);
       auto llvm_phi = static_cast<llvm::PHINode*>(phi->llvm_value());
-      llvm_phi->addIncoming(Use(operand), operand->block()->llvm_basic_block());
+      llvm_phi->addIncoming(Use(operand),
+                            operand->block()->llvm_end_basic_block());
     }
   }
 }
@@ -181,13 +182,13 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
 }
 
 llvm::BasicBlock* LLVMChunkBuilder::Use(HBasicBlock* block) {
-  if (!block->llvm_basic_block()) {
-    llvm::BasicBlock *llvm_block = llvm::BasicBlock::Create(
+  if (!block->llvm_start_basic_block()) {
+    llvm::BasicBlock* llvm_block = llvm::BasicBlock::Create(
         LLVMGranularity::getInstance().context(),
         "BlockEntry", function_);
-    block->set_llvm_basic_block(llvm_block);
+    block->set_llvm_start_basic_block(llvm_block);
   }
-  return block->llvm_basic_block();
+  return block->llvm_start_basic_block();
 }
 
 llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
@@ -249,8 +250,18 @@ llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
 
 LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   DCHECK(module_);
+#ifdef DEBUG
+  std::cerr << "===========vvv Module BEFORE optimization vvv===========" << std::endl;
+  llvm::outs() << *(module_.get());
+  std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
+#endif
   LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
   LLVMGranularity::getInstance().OptimizeModule(module_.get());
+#ifdef DEBUG
+  std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
+  llvm::outs() << *(module_.get());
+  std::cerr << "===========^^^ Module AFTER optimization ^^^============" << std::endl;
+#endif
   return *this;
 }
 
@@ -261,10 +272,9 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 #endif
   DCHECK(is_building());
   Use(block);
-  // TODO(llvm): it it OK to create a new builder each time?
+  // TODO(llvm): is it OK to create a new builder each time?
   // we could just set the insertion point for the irbuilder.
-  llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
-      block->llvm_basic_block());
+  llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(Use(block));
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
@@ -476,16 +486,40 @@ void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DeoptimizeIf(Deoptimizer::BailoutType bailout_type) {
-  Address entry =
-      Deoptimizer::GetDeoptimizationEntry(isolate(), id, bailout_type);
-  if (entry == NULL) {
-    Abort(kBailoutWasNotPrepared);
-    return;
-  }
-
+llvm::BasicBlock* LLVMChunkBuilder::DeoptimizeIf(HInstruction* instr,
+                                    Deoptimizer::DeoptReason deopt_reason) {
   if (FLAG_deopt_every_n_times != 0 && !info()->IsStub()) UNIMPLEMENTED();
   if (info()->ShouldTrapOnDeopt()) UNIMPLEMENTED();
+
+  llvm::BasicBlock* block = llvm::BasicBlock::Create(
+      LLVMGranularity::getInstance().context(), "DeoptBlock");
+
+  //llvm::ArrayRef<llvm::Value*>();
+
+  //==========================Fake function=============================
+  // Construct the function type (signature)
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  llvm::ArrayRef<llvm::Type*> paramsRef;
+  bool is_var_arg = false;
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      llvm::Type::getVoidTy(llvm_context), paramsRef, is_var_arg);
+
+  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(0xbadbeef);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
+                                                         ptr_to_function);
+  //===================================================================
+  llvm_ir_builder_->SetInsertPoint(block);
+  llvm_ir_builder_->CreateCall(casted, llvm::ArrayRef<llvm::Value*>());
+  return block;
+//  int id = 0 ;
+//  Address entry =
+//      Deoptimizer::GetDeoptimizationEntry(isolate(), id, bailout_type);
+//  if (entry == NULL) {
+//    Abort(kBailoutWasNotPrepared);
+//    return;
+//  }
+
 
   // TODO(llvm) create Deoptimizer::DeoptInfo
 }
@@ -502,7 +536,33 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       instr->set_llvm_value(add);
     } else {
 //      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
-      UNIMPLEMENTED();
+      LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+      std::vector<llvm::Type*> types;
+      types.push_back(llvm::Type::getInt64Ty(llvm_context));
+      types.push_back(llvm::Type::getInt64Ty(llvm_context));
+
+      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::sadd_with_overflow, types);
+
+      llvm::Value* params[] = { Use(left), Use(right) };
+      llvm::Value* call = llvm_ir_builder_->CreateCall(intrinsic, params);
+
+      llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
+      llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
+      instr->set_llvm_value(sum);
+
+      llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
+          "BlockContinue", function_);
+      llvm::BasicBlock* deopt_block = DeoptimizeIf(instr,
+                                                   Deoptimizer::kOverflow);
+      llvm_ir_builder_->SetInsertPoint(instr->block()->llvm_end_basic_block());
+      llvm_ir_builder_->CreateCondBr(overflow, deopt_block, next_block);
+      instr->block()->set_llvm_end_basic_block(next_block);
+      llvm_ir_builder_->SetInsertPoint(next_block);
+//      %res = call {i32, i1} @llvm.sadd.with.overflow.i32(i32 %a, i32 %b)
+//      %sum = extractvalue {i32, i1} %res, 0
+//      %obit = extractvalue {i32, i1} %res, 1
+//      br i1 %obit, label %overflow, label %normal
     }
   } 
   else {    
@@ -599,7 +659,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   std::vector<llvm::Type*> params(argument_count, nullptr);
   for (auto i = 0; i < argument_count; i++)
     params[i] = llvm::Type::getInt64Ty(llvm_context);
-  llvm::ArrayRef<llvm::Type*> paramsRef(params);
+  llvm::ArrayRef<llvm::Type*> paramsRef(params); // FIXME(llvm): unused; rm
   bool is_var_arg = false;
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       llvm::Type::getInt64Ty(llvm_context), params, is_var_arg);
