@@ -11,10 +11,9 @@ namespace internal {
 LLVMChunk::~LLVMChunk() {}
 
 Handle<Code> LLVMChunk::Codegen() {
+#ifdef DEBUG
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
-
-#ifdef DEBUG
   std::cerr << "\taddress == " <<  address << std::endl;
   std::cerr << "\tlast code allocated == "
       << reinterpret_cast<uint64_t>(
@@ -351,7 +350,6 @@ void LLVMChunkBuilder::DoContext(HContext* instr) {
     UNIMPLEMENTED();
   }
 //  FIXME(llvm): we need it for bailouts and such
-//  UNIMPLEMENTED();
 //  return DefineAsRegister(new(zone()) LContext);
 }
 
@@ -541,13 +539,17 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
       case Token::BIT_AND: {
         llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
         instr->set_llvm_value(And);
+#ifdef DEBUG
         llvm::outs() << "Adding module " << *(module_.get());
+#endif
         break;
       }  
       case Token::BIT_OR: {
         llvm::Value* Or = llvm_ir_builder_->CreateOr(Use(left), Use(right),"");
         instr->set_llvm_value(Or);
+#ifdef DEBUG
         llvm::outs() << "Adding module " << *(module_.get());
+#endif
         break;
       }
       default:
@@ -954,7 +956,9 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     CHECK(right->llvm_value());
     llvm::Value* Mul = llvm_ir_builder_->CreateMul(left->llvm_value(), right->llvm_value(),"");
     instr->set_llvm_value(Mul);
-    llvm::outs() << "Adding module " << *(module_.get()); 
+#ifdef DEBUG
+    llvm::outs() << "Adding module " << *(module_.get());
+#endif
   }
   else {
     UNIMPLEMENTED();
@@ -985,7 +989,9 @@ void LLVMChunkBuilder::DoSar(HSar* instr) {
     HValue* right = instr->right();
     llvm::Value* AShr = llvm_ir_builder_->CreateAShr(Use(left), Use(right),"");
     instr->set_llvm_value(AShr);
+#ifdef DEBUG
     llvm::outs() << "Adding module " << *(module_.get());
+#endif
   }
   else {
     UNIMPLEMENTED();
@@ -1008,7 +1014,9 @@ void LLVMChunkBuilder::DoShl(HShl* instr) {
     HValue* right = instr->right();
     llvm::Value* Shl = llvm_ir_builder_->CreateShl(Use(left), Use(right),"");
     instr->set_llvm_value(Shl);
+#ifdef DEBUG
     llvm::outs() << "Adding module " << *(module_.get());
+#endif
   }
   else {
     UNIMPLEMENTED();
@@ -1023,7 +1031,9 @@ void LLVMChunkBuilder::DoShr(HShr* instr) {
     HValue* right = instr->right();
     llvm::Value* LShr = llvm_ir_builder_->CreateLShr(Use(left), Use(right),"");
     instr->set_llvm_value(LShr);
+#ifdef DEBUG
     llvm::outs() << "Adding module " << *(module_.get());
+#endif
   }
   else {
     UNIMPLEMENTED();
@@ -1088,7 +1098,9 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     CHECK(right->llvm_value());
     llvm::Value* Sub = llvm_ir_builder_->CreateSub(left->llvm_value(), right->llvm_value(),"");
     instr->set_llvm_value(Sub);
+#ifdef DEBUG
     llvm::outs() << "Adding module " << *(module_.get());
+#endif
   }
   else {
     UNIMPLEMENTED();
