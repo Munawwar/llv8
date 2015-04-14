@@ -405,6 +405,54 @@ void LLVMChunkBuilder::DoSimulate(HSimulate* instr) {
 }
 
 void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
+#ifdef DEBUG
+  std::cout << __FUNCTION__ << std::endl;
+#endif
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  std::vector<llvm::Type*> types(1, llvm_ir_builder_->getInt64Ty());
+
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+      llvm::Intrinsic::read_register, types);
+
+  auto metadata =
+    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
+  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
+      llvm_context, metadata);
+
+  llvm::Value* rsp_value = llvm_ir_builder_->CreateCall(intrinsic, val);
+
+  llvm::Value* rsp_ptr = llvm_ir_builder_->CreateIntToPtr(rsp_value,
+      llvm_ir_builder_->getInt64Ty()->getPointerTo());
+  llvm::Value* r13_value = llvm_ir_builder_->CreateLoad(rsp_ptr);
+
+  llvm::Value* compare = llvm_ir_builder_->CreateICmp(llvm::CmpInst::ICMP_ULT,
+                                                      rsp_value,
+                                                      r13_value);
+
+  llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
+      "BlockContinue", function_);
+
+  llvm::BasicBlock* deopt_block = llvm::BasicBlock::Create(
+      LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
+  llvm_ir_builder_->SetInsertPoint(deopt_block);
+  byte* target = isolate()->builtins()->StackCheck()->instruction_start();
+  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(target));
+  bool is_var_arg = false;
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      llvm::Type::getVoidTy(llvm_context), llvm::ArrayRef<llvm::Type*>(),
+      is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
+                                                         ptr_to_function);
+  llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
+
+
+  llvm_ir_builder_->SetInsertPoint(instr->block()->llvm_end_basic_block());
+  llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
+  instr->block()->set_llvm_end_basic_block(next_block);
+  llvm_ir_builder_->SetInsertPoint(next_block);
+//  instr->set_llvm_value(sum);
 //  UNIMPLEMENTED();
 }
 
@@ -492,25 +540,26 @@ llvm::BasicBlock* LLVMChunkBuilder::DeoptimizeIf(HInstruction* instr,
   if (info()->ShouldTrapOnDeopt()) UNIMPLEMENTED();
 
   llvm::BasicBlock* block = llvm::BasicBlock::Create(
-      LLVMGranularity::getInstance().context(), "DeoptBlock");
+      LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
 
   //llvm::ArrayRef<llvm::Value*>();
 
   //==========================Fake function=============================
-  // Construct the function type (signature)
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-  llvm::ArrayRef<llvm::Type*> paramsRef;
-  bool is_var_arg = false;
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      llvm::Type::getVoidTy(llvm_context), paramsRef, is_var_arg);
-
-  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(0xbadbeef);
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
-                                                         ptr_to_function);
+//  // Construct the function type (signature)
+//  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+//  llvm::ArrayRef<llvm::Type*> paramsRef;
+//  bool is_var_arg = false;
+//  llvm::FunctionType* function_type = llvm::FunctionType::get(
+//      llvm::Type::getVoidTy(llvm_context), paramsRef, is_var_arg);
+//
+//  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(0xbadbeef);
+//  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+//  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
+//                                                         ptr_to_function);
   //===================================================================
   llvm_ir_builder_->SetInsertPoint(block);
-  llvm_ir_builder_->CreateCall(casted, llvm::ArrayRef<llvm::Value*>());
+  llvm_ir_builder_->CreateRet(llvm_ir_builder_->getInt64(deopt_reason));
+//  llvm_ir_builder_->CreateCall(casted, llvm::ArrayRef<llvm::Value*>());
   return block;
 //  int id = 0 ;
 //  Address entry =
