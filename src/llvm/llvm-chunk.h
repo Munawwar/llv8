@@ -178,6 +178,10 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* Use(HValue* value);
   llvm::Value* SmiToInteger32(HValue* value);
   llvm::Value* Integer32ToSmi(HValue* value);
+  // Is the value (not) a smi?
+  llvm::Value* SmiCheck(HValue* value, bool negate = false);
+  llvm::Value* CallVoid(Address target);
+  llvm::BasicBlock* DoBadThing(llvm::Value* compare, Address target);
 
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;

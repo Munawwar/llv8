@@ -212,8 +212,49 @@ llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
   return res;
 }
 
+llvm::Value* LLVMChunkBuilder::SmiCheck(HValue* value, bool negate) {
+  llvm::Value* res = llvm_ir_builder_->CreateAnd(Use(value),
+                                                 llvm_ir_builder_->getInt64(1));
+  return llvm_ir_builder_->CreateICmp(
+      negate ? llvm::CmpInst::ICMP_NE : llvm::CmpInst::ICMP_EQ,
+      res, llvm_ir_builder_->getInt64(0));
+}
+
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
   return llvm_ir_builder_->CreateShl(Use(value), kSmiShift);
+}
+
+llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(target));
+  bool is_var_arg = false;
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      llvm::Type::getVoidTy(llvm_context), llvm::ArrayRef<llvm::Type*>(),
+      is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
+                                                         ptr_to_function);
+  return llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
+}
+
+llvm::BasicBlock* LLVMChunkBuilder::DoBadThing(llvm::Value* compare,
+                                               Address target) {
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  llvm::BasicBlock* saved_insert_point = llvm_ir_builder_->GetInsertBlock();
+  llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
+      "BlockContinue", function_);
+  llvm::BasicBlock* deopt_block = llvm::BasicBlock::Create(
+      LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
+  llvm_ir_builder_->SetInsertPoint(deopt_block);
+
+  CallVoid(target);
+  llvm_ir_builder_->CreateUnreachable();
+
+  llvm_ir_builder_->SetInsertPoint(saved_insert_point);
+  llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
+  llvm_ir_builder_->SetInsertPoint(next_block);
+  return next_block;
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
@@ -251,6 +292,8 @@ llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
 LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   DCHECK(module_);
 #ifdef DEBUG
+  llvm::verifyFunction(*function_, &llvm::errs());
+
   std::cerr << "===========vvv Module BEFORE optimization vvv===========" << std::endl;
   llvm::outs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
@@ -429,33 +472,8 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
                                                       rsp_value,
                                                       r13_value);
 
-  llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
-      "BlockContinue", function_);
-
-  llvm::BasicBlock* deopt_block = llvm::BasicBlock::Create(
-      LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
-  llvm_ir_builder_->SetInsertPoint(deopt_block);
   byte* target = isolate()->builtins()->StackCheck()->instruction_start();
-  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
-      reinterpret_cast<uint64_t>(target));
-  bool is_var_arg = false;
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      llvm::Type::getVoidTy(llvm_context), llvm::ArrayRef<llvm::Type*>(),
-      is_var_arg);
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
-                                                         ptr_to_function);
-  llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
-//  USE(casted);
-//  std::vector<llvm::Value*> par(info()->num_parameters() + 3, llvm_ir_builder_->getInt64(22));
-//  llvm::CallInst* call = llvm_ir_builder_->CreateCall(function_, par);
-//  call->setCallingConv(llvm::CallingConv::X86_64_V8);
-  llvm_ir_builder_->CreateUnreachable();
-
-  llvm_ir_builder_->SetInsertPoint(instr->block()->llvm_end_basic_block());
-  llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
-  instr->block()->set_llvm_end_basic_block(next_block);
-  llvm_ir_builder_->SetInsertPoint(next_block);
+  instr->block()->set_llvm_end_basic_block(DoBadThing(compare, target));
 //  instr->set_llvm_value(sum);
 //  UNIMPLEMENTED();
 }
@@ -792,9 +810,22 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         // lithium codegen does __ AssertSmi(input)
         instr->set_llvm_value(SmiToInteger32(val));
       } else {
+#ifdef DEBUG
+      std::cerr << "SECOND " << instr->from().IsSmi()
+          << " " << instr->from().IsTagged() << std::endl;
+#endif
+        bool truncating = instr->CanTruncateToInt32();
+        USE(truncating);
         // TODO(llvm): perform smi check, bailout if not a smi
         // see LCodeGen::DoTaggedToI
+        if (!val->representation().IsSmi()) {
+          bool not_smi = true;
+          llvm::Value* cond = SmiCheck(val, not_smi);
+          DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef));
+        }
         instr->set_llvm_value(SmiToInteger32(val));
+
+//        if (!val->representation().IsSmi()) result = AssignEnvironment(result);
       }
     }
   } else if (from.IsDouble()) {
