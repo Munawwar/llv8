@@ -406,7 +406,7 @@ void LLVMChunkBuilder::DoSimulate(HSimulate* instr) {
 
 void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 #ifdef DEBUG
-  std::cout << __FUNCTION__ << std::endl;
+  std::cerr << __FUNCTION__ << std::endl;
 #endif
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   std::vector<llvm::Type*> types(1, llvm_ir_builder_->getInt64Ty());
@@ -446,7 +446,11 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
   llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
                                                          ptr_to_function);
   llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
-
+//  USE(casted);
+//  std::vector<llvm::Value*> par(info()->num_parameters() + 3, llvm_ir_builder_->getInt64(22));
+//  llvm::CallInst* call = llvm_ir_builder_->CreateCall(function_, par);
+//  call->setCallingConv(llvm::CallingConv::X86_64_V8);
+  llvm_ir_builder_->CreateUnreachable();
 
   llvm_ir_builder_->SetInsertPoint(instr->block()->llvm_end_basic_block());
   llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
