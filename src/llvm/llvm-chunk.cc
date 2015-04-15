@@ -238,8 +238,9 @@ llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   return llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
 }
 
-llvm::BasicBlock* LLVMChunkBuilder::DoBadThing(llvm::Value* compare,
-                                               Address target) {
+void LLVMChunkBuilder::DoBadThing(llvm::Value* compare,
+                                               Address target,
+                                               HBasicBlock* block) {
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* saved_insert_point = llvm_ir_builder_->GetInsertBlock();
   llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
@@ -254,7 +255,7 @@ llvm::BasicBlock* LLVMChunkBuilder::DoBadThing(llvm::Value* compare,
   llvm_ir_builder_->SetInsertPoint(saved_insert_point);
   llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
   llvm_ir_builder_->SetInsertPoint(next_block);
-  return next_block;
+  block->set_llvm_end_basic_block(next_block);
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
@@ -451,29 +452,30 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 #ifdef DEBUG
   std::cerr << __FUNCTION__ << std::endl;
 #endif
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-  std::vector<llvm::Type*> types(1, llvm_ir_builder_->getInt64Ty());
-
-  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-      llvm::Intrinsic::read_register, types);
-
-  auto metadata =
-    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
-  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
-      llvm_context, metadata);
-
-  llvm::Value* rsp_value = llvm_ir_builder_->CreateCall(intrinsic, val);
-
-  llvm::Value* rsp_ptr = llvm_ir_builder_->CreateIntToPtr(rsp_value,
-      llvm_ir_builder_->getInt64Ty()->getPointerTo());
-  llvm::Value* r13_value = llvm_ir_builder_->CreateLoad(rsp_ptr);
-
-  llvm::Value* compare = llvm_ir_builder_->CreateICmp(llvm::CmpInst::ICMP_ULT,
-                                                      rsp_value,
-                                                      r13_value);
-
-  byte* target = isolate()->builtins()->StackCheck()->instruction_start();
-  instr->block()->set_llvm_end_basic_block(DoBadThing(compare, target));
+//  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+//  std::vector<llvm::Type*> types(1, llvm_ir_builder_->getInt64Ty());
+//
+//  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+//      llvm::Intrinsic::read_register, types);
+//
+//  auto metadata =
+//    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
+//  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
+//      llvm_context, metadata);
+//
+//  llvm::Value* rsp_value = llvm_ir_builder_->CreateCall(intrinsic, val);
+//
+//  llvm::Value* rsp_ptr = llvm_ir_builder_->CreateIntToPtr(rsp_value,
+//      llvm_ir_builder_->getInt64Ty()->getPointerTo());
+//  llvm::Value* r13_value = llvm_ir_builder_->CreateLoad(rsp_ptr);
+//
+//  llvm::Value* compare = llvm_ir_builder_->CreateICmp(llvm::CmpInst::ICMP_ULT,
+//                                                      rsp_value,
+//                                                      r13_value);
+//
+////  byte* target = isolate()->builtins()->StackCheck()->instruction_start();
+//  Address target = reinterpret_cast<Address>(0);
+//  instr->block()->set_llvm_end_basic_block(DoBadThing(compare, target));
 //  instr->set_llvm_value(sum);
 //  UNIMPLEMENTED();
 }
@@ -607,8 +609,6 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       instr->set_llvm_value(add);
     } else {
 //      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
-      LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-
       llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
           llvm::Intrinsic::sadd_with_overflow, llvm_ir_builder_->getInt64Ty());
 
@@ -618,19 +618,8 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
       llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
-
-      llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
-          "BlockContinue", function_);
-      llvm::BasicBlock* deopt_block = DeoptimizeIf(instr,
-                                                   Deoptimizer::kOverflow);
-      llvm_ir_builder_->SetInsertPoint(instr->block()->llvm_end_basic_block());
-      llvm_ir_builder_->CreateCondBr(overflow, deopt_block, next_block);
-      instr->block()->set_llvm_end_basic_block(next_block);
-      llvm_ir_builder_->SetInsertPoint(next_block);
-//      %res = call {i32, i1} @llvm.sadd.with.overflow.i32(i32 %a, i32 %b)
-//      %sum = extractvalue {i32, i1} %res, 0
-//      %obit = extractvalue {i32, i1} %res, 1
-//      br i1 %obit, label %overflow, label %normal
+      DoBadThing(overflow, reinterpret_cast<Address>(0xbadbeef1),
+                 instr->block());
     }
   } 
   else {    
@@ -821,7 +810,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         if (!val->representation().IsSmi()) {
           bool not_smi = true;
           llvm::Value* cond = SmiCheck(val, not_smi);
-          DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef));
+          DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef), instr->block());
         }
         instr->set_llvm_value(SmiToInteger32(val));
 
