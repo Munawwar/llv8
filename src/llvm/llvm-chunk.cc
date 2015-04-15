@@ -590,12 +590,9 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     } else {
 //      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
       LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-      std::vector<llvm::Type*> types;
-      types.push_back(llvm::Type::getInt64Ty(llvm_context));
-      types.push_back(llvm::Type::getInt64Ty(llvm_context));
 
       llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::sadd_with_overflow, types);
+          llvm::Intrinsic::sadd_with_overflow, llvm_ir_builder_->getInt64Ty());
 
       llvm::Value* params[] = { Use(left), Use(right) };
       llvm::Value* call = llvm_ir_builder_->CreateCall(intrinsic, params);
