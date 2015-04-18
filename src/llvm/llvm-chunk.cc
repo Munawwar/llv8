@@ -14,9 +14,9 @@ Handle<Code> LLVMChunk::Codegen() {
 #ifdef DEBUG
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
-  std::cerr << "\taddress == " <<  address << std::endl;
+  std::cerr << "\taddress == " <<  reinterpret_cast<void*>(address) << std::endl;
   std::cerr << "\tlast code allocated == "
-      << reinterpret_cast<uint64_t>(
+      << reinterpret_cast<void*>(
           LLVMGranularity::getInstance()
             .memory_manager_ref()
             ->LastAllocatedCode()
@@ -32,6 +32,10 @@ Handle<Code> LLVMChunk::Codegen() {
       info()->flags());
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
+#ifdef DEBUG
+  std::cerr << "Instruction start:"
+      << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
+#endif
   return code;
 }
 
@@ -60,6 +64,8 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
   module_ = LLVMGranularity::getInstance().CreateModule();
+  module_->setTargetTriple("x86_64-unknown-linux-gnu");
+  std::cerr << module_->getTargetTriple() << std::endl;
   status_ = BUILDING;
 
 //  // If compiling for OSR, reserve space for the unoptimized frame,
@@ -238,9 +244,8 @@ llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   return llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
 }
 
-void LLVMChunkBuilder::DoBadThing(llvm::Value* compare,
-                                               Address target,
-                                               HBasicBlock* block) {
+void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
+                                  HBasicBlock* block) {
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* saved_insert_point = llvm_ir_builder_->GetInsertBlock();
   llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
@@ -296,14 +301,14 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   llvm::verifyFunction(*function_, &llvm::errs());
 
   std::cerr << "===========vvv Module BEFORE optimization vvv===========" << std::endl;
-  llvm::outs() << *(module_.get());
+  llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
   LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
   LLVMGranularity::getInstance().OptimizeModule(module_.get());
 #ifdef DEBUG
   std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
-  llvm::outs() << *(module_.get());
+  llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module AFTER optimization ^^^============" << std::endl;
 #endif
   return *this;
@@ -519,7 +524,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
         llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
         instr->set_llvm_value(value);
       } else {
-        UNIMPLEMENTED(); // TODO(llvm): untested
+//        UNIMPLEMENTED(); // TODO(llvm): untested
         // FIXME(llvm): reloc info
         intptr_t intptr_value = reinterpret_cast<intptr_t>(object.location());
         llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
@@ -618,7 +623,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
       llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
-      DoBadThing(overflow, reinterpret_cast<Address>(0xbadbeef1),
+      DoBadThing(overflow, reinterpret_cast<Address>(0xbadbeef0),
                  instr->block());
     }
   } 
@@ -656,17 +661,11 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
       case Token::BIT_AND: {
         llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
         instr->set_llvm_value(And);
-#ifdef DEBUG
-        llvm::outs() << "Adding module " << *(module_.get());
-#endif
         break;
       }  
       case Token::BIT_OR: {
         llvm::Value* Or = llvm_ir_builder_->CreateOr(Use(left), Use(right),"");
         instr->set_llvm_value(Or);
-#ifdef DEBUG
-        llvm::outs() << "Adding module " << *(module_.get());
-#endif
         break;
       }
       default:
@@ -703,6 +702,8 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   // Code that follows relies on this assumption
   if (!instr->function()->IsConstant()) UNIMPLEMENTED();
 
+//  llvm::Value* fun = Use(instr->function()); // It's an int constant (a ptr)
+
   Handle<JSFunction> js_function = Handle<JSFunction>::null();
   HConstant* fun_const = HConstant::cast(instr->function());
   js_function = Handle<JSFunction>::cast(fun_const->handle(isolate()));
@@ -734,6 +735,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   // FIXME(llvm): pointers, not int64
   args[0] = llvm_ir_builder_->getInt64(reinterpret_cast<uint64_t>(js_context));
   args[1] = llvm_ir_builder_->getInt64(reinterpret_cast<uint64_t>(*js_function));
+//  args[1] = fun;
   DCHECK(instr->previous()->IsPushArguments());
   HPushArguments* prev = static_cast<HPushArguments*>(instr->previous());
   DCHECK(prev->OperandCount() + 2 == argument_count);
@@ -789,7 +791,9 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
         // TODO(llvm): environment
-        // TODO(llvm): checkSmi, bailout
+        bool not_smi = true;
+        llvm::Value* cond = SmiCheck(val, not_smi);
+        DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef1), instr->block());
       }
       instr->set_llvm_value(Use(val));
     } else {
@@ -810,7 +814,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         if (!val->representation().IsSmi()) {
           bool not_smi = true;
           llvm::Value* cond = SmiCheck(val, not_smi);
-          DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef), instr->block());
+          DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef1), instr->block());
         }
         instr->set_llvm_value(SmiToInteger32(val));
 
@@ -1086,9 +1090,6 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     CHECK(right->llvm_value());
     llvm::Value* Mul = llvm_ir_builder_->CreateMul(left->llvm_value(), right->llvm_value(),"");
     instr->set_llvm_value(Mul);
-#ifdef DEBUG
-    llvm::outs() << "Adding module " << *(module_.get());
-#endif
   }
   else {
     UNIMPLEMENTED();
@@ -1119,9 +1120,6 @@ void LLVMChunkBuilder::DoSar(HSar* instr) {
     HValue* right = instr->right();
     llvm::Value* AShr = llvm_ir_builder_->CreateAShr(Use(left), Use(right),"");
     instr->set_llvm_value(AShr);
-#ifdef DEBUG
-    llvm::outs() << "Adding module " << *(module_.get());
-#endif
   }
   else {
     UNIMPLEMENTED();
@@ -1144,9 +1142,6 @@ void LLVMChunkBuilder::DoShl(HShl* instr) {
     HValue* right = instr->right();
     llvm::Value* Shl = llvm_ir_builder_->CreateShl(Use(left), Use(right),"");
     instr->set_llvm_value(Shl);
-#ifdef DEBUG
-    llvm::outs() << "Adding module " << *(module_.get());
-#endif
   }
   else {
     UNIMPLEMENTED();
@@ -1161,9 +1156,6 @@ void LLVMChunkBuilder::DoShr(HShr* instr) {
     HValue* right = instr->right();
     llvm::Value* LShr = llvm_ir_builder_->CreateLShr(Use(left), Use(right),"");
     instr->set_llvm_value(LShr);
-#ifdef DEBUG
-    llvm::outs() << "Adding module " << *(module_.get());
-#endif
   }
   else {
     UNIMPLEMENTED();
@@ -1228,9 +1220,6 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     CHECK(right->llvm_value());
     llvm::Value* Sub = llvm_ir_builder_->CreateSub(left->llvm_value(), right->llvm_value(),"");
     instr->set_llvm_value(Sub);
-#ifdef DEBUG
-    llvm::outs() << "Adding module " << *(module_.get());
-#endif
   }
   else {
     UNIMPLEMENTED();

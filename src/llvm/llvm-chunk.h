@@ -26,6 +26,11 @@ class LLVMGranularity FINAL {
     return instance;
   }
 
+  // TODO(llvm):
+//  ~LLVMGranularity() {
+//    llvm::llvm_shutdown();
+//  }
+
   LLVMContext& context() { return context_; }
   MCJITMemoryManager* memory_manager_ref() { return memory_manager_ref_; }
 
@@ -37,9 +42,6 @@ class LLVMGranularity FINAL {
   }
 
   void AddModule(std::unique_ptr<llvm::Module> module) {
-#ifdef DEBUG
-    llvm::outs() << "Adding module " << *(module.get());
-#endif
     if (!engine_) {
       std::unique_ptr<MCJITMemoryManager>manager = MCJITMemoryManager::Create();
       memory_manager_ref_ = manager.get(); // non-owning!
