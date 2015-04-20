@@ -683,7 +683,17 @@ void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexIn
 }
 
 void LLVMChunkBuilder::DoBranch(HBranch* instr) {
-  UNIMPLEMENTED();
+  /*HValue* value  = instr->value();
+  Representation r  = value->representation();
+  if(r.IsInteger32()){
+    llvm::Value* zero = llvm_ir_builder_->getInt64(0);
+    llvm::Value* Compare = llvm_ir_builder_->CreateICmpEQ(Use(value), zero);
+    llvm::BranchInst* Branch = llvm_ir_builder_->CreateCondBr(Compare, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1))); 
+    instr->set_llvm_value(Branch);
+    llvm::outs() << "Adding module " << *(module_.get());
+  }*/
+  
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
