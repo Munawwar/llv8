@@ -153,10 +153,15 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
   LLVMChunkBuilder& Build();
+  // LLVM requires that each phi input's label be a basic block
+  // immediately preceding the given BB.
+  // Hydrogen does not impose such a constraint.
+  // For that reason our phis are not LLVM-compliant right after phi resolution.
+  LLVMChunkBuilder& NormalizePhis();
   LLVMChunkBuilder& Optimize(); // invoke llvm transformation passes for the function
   LLVMChunk* Create();
 
-  llvm::BasicBlock* DeoptimizeIf(HInstruction* instr,
+  llvm::BasicBlock* DeoptimizeIf(HInstruction* instr, // TODO (llvm): usage?
                     Deoptimizer::DeoptReason deopt_reason);
 
   // Declare methods that deal with the individual node types.

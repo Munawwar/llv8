@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include "llvm-chunk.h"
+#include "llvm-passes.h"
 
 namespace v8 {
 namespace internal {
@@ -52,7 +53,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 //  }
 //  LAllocator allocator(values, graph);
   LLVMChunkBuilder builder(info, graph);
-  LLVMChunk* chunk = builder.Build().Optimize().Create(); // TODO(llvm): naming
+  LLVMChunk* chunk = builder.Build().NormalizePhis().Optimize().Create(); // TODO(llvm): naming
   if (chunk == NULL) return NULL;
 
 //  chunk->set_allocated_double_registers(
@@ -194,6 +195,7 @@ llvm::BasicBlock* LLVMChunkBuilder::Use(HBasicBlock* block) {
         "BlockEntry", function_);
     block->set_llvm_start_basic_block(llvm_block);
   }
+  DCHECK(block->llvm_start_basic_block());
   return block->llvm_start_basic_block();
 }
 
@@ -261,6 +263,8 @@ void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
   llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
   llvm_ir_builder_->SetInsertPoint(next_block);
   block->set_llvm_end_basic_block(next_block);
+  std::cerr << "\t Setting llvm_end_BB for block id " << block->block_id()
+      << " to " << next_block->getName().str() << std::endl;
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
@@ -293,6 +297,15 @@ llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
       UNREACHABLE();
   }
   return pred;
+}
+
+LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
+  llvm::legacy::FunctionPassManager pass_manager(module_.get());
+  pass_manager.add(new NormalizePhisPass());
+  pass_manager.doInitialization();
+  pass_manager.run(*function_);
+  pass_manager.doFinalization();
+  return *this;
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
@@ -683,17 +696,18 @@ void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexIn
 }
 
 void LLVMChunkBuilder::DoBranch(HBranch* instr) {
-  /*HValue* value  = instr->value();
+  HValue* value  = instr->value();
   Representation r  = value->representation();
   if(r.IsInteger32()){
     llvm::Value* zero = llvm_ir_builder_->getInt64(0);
     llvm::Value* Compare = llvm_ir_builder_->CreateICmpEQ(Use(value), zero);
-    llvm::BranchInst* Branch = llvm_ir_builder_->CreateCondBr(Compare, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1))); 
+    llvm::BranchInst* Branch = llvm_ir_builder_->CreateCondBr(Compare,
+        Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
     instr->set_llvm_value(Branch);
-    llvm::outs() << "Adding module " << *(module_.get());
-  }*/
-  
-  //UNIMPLEMENTED();
+//    llvm::outs() << "Adding module " << *(module_.get());
+  } else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
