@@ -33,7 +33,7 @@ Handle<Code> LLVMChunk::Codegen() {
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 #ifdef DEBUG
-  std::cerr << "Instruction start:"
+  std::cerr << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
 #endif
   return code;
@@ -707,23 +707,34 @@ void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
 }
 
 void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   // Don't know what this is yet.
   if (instr->pass_argument_count()) UNIMPLEMENTED();
   // Code that follows relies on this assumption
   if (!instr->function()->IsConstant()) UNIMPLEMENTED();
 
-//  llvm::Value* fun = Use(instr->function()); // It's an int constant (a ptr)
+  Use(instr->function()); // It's an int constant (a ptr)
 
   Handle<JSFunction> js_function = Handle<JSFunction>::null();
   HConstant* fun_const = HConstant::cast(instr->function());
   js_function = Handle<JSFunction>::cast(fun_const->handle(isolate()));
+  Address js_function_addr = reinterpret_cast<Address>(*js_function);
+  Address js_context_ptr =
+      js_function_addr + JSFunction::kContextOffset - kHeapObjectTag;
+  Address target_entry_ptr =
+      js_function_addr + JSFunction::kCodeEntryOffset - kHeapObjectTag;
 
-  byte* target = js_function->code()->instruction_start();
-  Context* js_context = js_function->context(); // rsi
+  llvm::Value* js_function_val = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(js_function_addr));
+  llvm::Value* js_context_ptr_val = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(js_context_ptr));
+  js_context_ptr_val = llvm_ir_builder_->CreateIntToPtr(
+      js_context_ptr_val,
+      llvm::Type::getInt64PtrTy(llvm_context));
+
   auto argument_count = instr->argument_count() + 2; // rsi, rdi
 
   // Construct the function type (signature)
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   std::vector<llvm::Type*> params(argument_count, nullptr);
   for (auto i = 0; i < argument_count; i++)
     params[i] = llvm::Type::getInt64Ty(llvm_context);
@@ -733,19 +744,22 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
       llvm::Type::getInt64Ty(llvm_context), params, is_var_arg);
 
   // Get the callee's address
-  // FIXME(llvm): it is a pointer, not an int64
-  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
-      reinterpret_cast<uint64_t>(target));
+  // TODO(llvm): it is a pointer, not an int64
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
-                                                         ptr_to_function);
+  llvm::PointerType* ptr_to_ptr_to_function = ptr_to_function->getPointerTo();
+
+  llvm::Value* target_entry_ptr_val = llvm_ir_builder_->CreateIntToPtr(
+     llvm_ir_builder_->getInt64(reinterpret_cast<int64_t>(target_entry_ptr)),
+     ptr_to_ptr_to_function);
+  llvm::Value* target_entry_val =  llvm_ir_builder_->CreateAlignedLoad(
+      target_entry_ptr_val, 1);
 
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   // FIXME(llvm): pointers, not int64
-  args[0] = llvm_ir_builder_->getInt64(reinterpret_cast<uint64_t>(js_context));
-  args[1] = llvm_ir_builder_->getInt64(reinterpret_cast<uint64_t>(*js_function));
-//  args[1] = fun;
+  args[0] = llvm_ir_builder_->CreateAlignedLoad(js_context_ptr_val, 1);
+  args[1] = js_function_val;
+
   DCHECK(instr->previous()->IsPushArguments());
   HPushArguments* prev = static_cast<HPushArguments*>(instr->previous());
   DCHECK(prev->OperandCount() + 2 == argument_count);
@@ -753,9 +767,8 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   for (int i = 0; i < prev->OperandCount(); ++i) {
     args[argument_count - 1 - i] = Use(prev->argument(i));
   }
-  llvm::ArrayRef<llvm::Value*> argsRef(args);
 
-  llvm::CallInst* call = llvm_ir_builder_->CreateCall(casted, argsRef);
+  llvm::CallInst* call = llvm_ir_builder_->CreateCall(target_entry_val, args);
   call->setCallingConv(llvm::CallingConv::X86_64_V8);
   instr->set_llvm_value(call);
 }
