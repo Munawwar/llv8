@@ -43,6 +43,7 @@
 #include "llvm/IR/Function.h"
 
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/PassSupport.h"
 
 #undef DEBUG // Undef the llvm DEBUG
 
