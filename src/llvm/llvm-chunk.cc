@@ -301,9 +301,13 @@ llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
 
 LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
+  llvm::outs() << "====Gonna add phi normalization pass====\n";
   pass_manager.add(new NormalizePhisPass());
+  llvm::outs() << "====Gonna call doInitialization( )====\n";
   pass_manager.doInitialization();
+  llvm::outs() << "====Gonna run phi normalization pass====\n";
   pass_manager.run(*function_);
+  llvm::outs() << "====Have run phi normalization pass====\n";
   pass_manager.doFinalization();
   return *this;
 }

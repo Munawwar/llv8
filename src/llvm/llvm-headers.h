@@ -20,6 +20,7 @@
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
@@ -38,6 +39,8 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Scalar.h"
+
+#include "llvm/IR/Function.h"
 
 #include "llvm/IR/LegacyPassManager.h"
 

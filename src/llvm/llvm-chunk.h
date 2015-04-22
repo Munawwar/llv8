@@ -7,6 +7,7 @@
 
 #include "llvm-headers.h"
 
+// TODO(llvm): get rid of the ugly ".."
 #include "../hydrogen.h"
 #include "../hydrogen-instructions.h"
 #include "../handles.h"

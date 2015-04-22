@@ -7,12 +7,6 @@
 
 #include "llvm-headers.h"
 
-//#include "src/globals.h"
-//#include "src/list-inl.h"
-
-#include "llvm/Pass.h"
-#include "llvm/IR/Function.h"
-#include "llvm/Support/raw_ostream.h"
 
 namespace v8 {
 namespace internal {
@@ -29,13 +23,10 @@ class NormalizePhisPass : public llvm::FunctionPass {
   bool runOnFunction(llvm::Function &F) override;
   void getAnalysisUsage(llvm::AnalysisUsage& info) const override;
 
+  bool doInitialization(llvm::Module &M) override { return false; };
   static char ID;
 };
 //}
-
-char NormalizePhisPass::ID = 0;
-//static llvm::RegisterPass<NormalizePhisPass> X(
-//    "NormalizePhis", "Normalize phis", true, true);
 //llvm::FunctionPass* llvm::createNormalizePhis() { return new Norm(); }
 
 } }  // namespace v8::internal
