@@ -263,8 +263,10 @@ void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
   llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
   llvm_ir_builder_->SetInsertPoint(next_block);
   block->set_llvm_end_basic_block(next_block);
+#ifdef DEBUG
   std::cerr << "\t Setting llvm_end_BB for block id " << block->block_id()
       << " to " << next_block->getName().str() << std::endl;
+#endif
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
