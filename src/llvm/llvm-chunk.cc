@@ -705,7 +705,7 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   Representation r  = value->representation();
   if(r.IsInteger32()){
     llvm::Value* zero = llvm_ir_builder_->getInt64(0);
-    llvm::Value* Compare = llvm_ir_builder_->CreateICmpEQ(Use(value), zero);
+    llvm::Value* Compare = llvm_ir_builder_->CreateICmpNE(Use(value), zero);
     llvm::BranchInst* Branch = llvm_ir_builder_->CreateCondBr(Compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
     instr->set_llvm_value(Branch);
