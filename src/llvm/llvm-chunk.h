@@ -46,10 +46,14 @@ class LLVMGranularity FINAL {
     if (!engine_) {
       std::unique_ptr<MCJITMemoryManager>manager = MCJITMemoryManager::Create();
       memory_manager_ref_ = manager.get(); // non-owning!
+      llvm::TargetOptions options;
+      // rbp based frame so the runtime can walk the stack as before
+      options.NoFramePointerElim = true;
       llvm::ExecutionEngine* raw = llvm::EngineBuilder(std::move(module))
         .setMCJITMemoryManager(std::move(manager))
         .setErrorStr(&err_str_)
         .setEngineKind(llvm::EngineKind::JIT)
+        .setTargetOptions(options)
         .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
         .create();
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
