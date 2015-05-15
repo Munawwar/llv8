@@ -308,10 +308,10 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  pass_manager.add(new NormalizePhisPass());
-  pass_manager.doInitialization();
-  pass_manager.run(*function_);
-  pass_manager.doFinalization();
+  //pass_manager.add(new NormalizePhisPass());
+  //pass_manager.doInitialization();
+  //pass_manager.run(*function_);
+  //pass_manager.doFinalization();
   return *this;
 }
 
@@ -981,7 +981,16 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
 }
 
 void LLVMChunkBuilder::DoDiv(HDiv* instr) {
-  UNIMPLEMENTED();
+  DCHECK(instr->representation().IsSmi() || instr->representation().IsInteger32());
+  DCHECK(instr->left()->representation().Equals(instr->representation()));
+  DCHECK(instr->right()->representation().Equals(instr->representation()));
+  HValue* dividend = instr->left();
+  HValue* divisor = instr->right();
+  CHECK(dividend->llvm_value());
+  CHECK(divisor->llvm_value());
+ 
+  llvm::Value* Div = llvm_ir_builder_->CreateUDiv(Use(dividend), Use(divisor),"");
+  instr->set_llvm_value(Div);
 }
 
 void LLVMChunkBuilder::DoDoubleBits(HDoubleBits* instr) {
