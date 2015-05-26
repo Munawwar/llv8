@@ -677,7 +677,9 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
   DCHECK(instr->right()->representation().Equals(instr->representation()));
   HValue* left = instr->left();
   HValue* right = instr->right();
-  switch (instr->op()) {
+  if (right->IsConstant()) {
+    int32_t right_operand = right->GetInteger32Constant();
+    switch (instr->op()) {
       case Token::BIT_AND: {
         llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
         instr->set_llvm_value(And);
@@ -688,10 +690,23 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
         instr->set_llvm_value(Or);
         break;
       }
+      case Token::BIT_XOR: {
+        if(right_operand == int32_t(~0)) {
+          llvm::Value* Not = llvm_ir_builder_->CreateNot(Use(left), "");
+          instr->set_llvm_value(Not);
+        }
+        else
+        {
+          llvm::Value* Xor = llvm_ir_builder_->CreateXor(Use(left), Use(right), "");
+	  instr->set_llvm_value(Xor);
+        }
+        break;
+      }
       default:
         UNREACHABLE();
         break; 
-   } 
+    }
+  }
 }
 
 void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
@@ -1141,7 +1156,8 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     HValue* right = instr->right();
     CHECK(left->llvm_value());
     CHECK(right->llvm_value());
-    llvm::Value* Mul = llvm_ir_builder_->CreateMul(left->llvm_value(), right->llvm_value(),"");
+    // llvm::Value* Mul = llvm_ir_builder_->CreateMul(left->llvm_value(), right->llvm_value(),"");
+    llvm::Value* Mul = llvm_ir_builder_->CreateMul(Use(left),Use(right),"");
     instr->set_llvm_value(Mul);
   }
   else {
