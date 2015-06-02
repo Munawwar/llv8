@@ -15,6 +15,8 @@ LowChunkBuilderBase::LowChunkBuilderBase(CompilationInfo* info, HGraph* graph)
       graph_(graph),
       status_(UNUSED),
       argument_count_(0),
+      current_block_(nullptr),
+      next_block_(nullptr),
       zone_(graph->zone()) {}
 
 Isolate* LowChunkBuilderBase::isolate() const {

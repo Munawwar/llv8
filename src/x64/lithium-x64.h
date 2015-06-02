@@ -2730,8 +2730,6 @@ class LChunkBuilder final : public LChunkBuilderBase {
   LChunkBuilder(CompilationInfo* info, HGraph* graph, LAllocator* allocator)
       : LChunkBuilderBase(info, graph),
         current_instruction_(NULL),
-        current_block_(NULL),
-        next_block_(NULL),
         allocator_(allocator) {}
   ~LChunkBuilder() override {}
   // Build the sequence for the graph.
@@ -2854,8 +2852,6 @@ class LChunkBuilder final : public LChunkBuilderBase {
   void FindDehoistedKeyDefinitions(HValue* candidate);
 
   HInstruction* current_instruction_;
-  HBasicBlock* current_block_;
-  HBasicBlock* next_block_;
   LAllocator* allocator_;
 
   DISALLOW_COPY_AND_ASSIGN(LChunkBuilder);

@@ -308,10 +308,10 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  //pass_manager.add(new NormalizePhisPass());
-  //pass_manager.doInitialization();
-  //pass_manager.run(*function_);
-  //pass_manager.doFinalization();
+  pass_manager.add(new NormalizePhisPass());
+  pass_manager.doInitialization();
+  pass_manager.run(*function_);
+  pass_manager.doFinalization();
   return *this;
 }
 
@@ -407,6 +407,75 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   block->set_argument_count(argument_count_);
   next_block_ = NULL;
   current_block_ = NULL;
+}
+
+LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
+    HEnvironment* hydrogen_env, int* argument_index_accumulator,
+    ZoneList<HValue*>* objects_to_materialize) {
+  if (hydrogen_env == NULL) return NULL;
+
+  LLVMEnvironment* outer =
+      CreateEnvironment(hydrogen_env->outer(), argument_index_accumulator,
+                        objects_to_materialize);
+  BailoutId ast_id = hydrogen_env->ast_id();
+  DCHECK(!ast_id.IsNone() ||
+         hydrogen_env->frame_type() != JS_FUNCTION);
+
+  int omitted_count = (hydrogen_env->frame_type() == JS_FUNCTION)
+                          ? 0
+                          : hydrogen_env->specials_count();
+
+  int value_count = hydrogen_env->length() - omitted_count;
+  LLVMEnvironment* result =
+      new(zone()) LLVMEnvironment(hydrogen_env->closure(),
+                               hydrogen_env->frame_type(),
+                               ast_id,
+                               hydrogen_env->parameter_count(),
+                               argument_count_,
+                               value_count,
+                               outer,
+                               hydrogen_env->entry(),
+                               zone());
+  int argument_index = *argument_index_accumulator;
+
+  // Store the environment description into the environment
+  // (with holes for nested objects)
+  for (int i = 0; i < hydrogen_env->length(); ++i) {
+    if (hydrogen_env->is_special_index(i) &&
+        hydrogen_env->frame_type() != JS_FUNCTION) {
+      continue;
+    }
+    llvm::Value* op;
+    HValue* value = hydrogen_env->values()->at(i);
+    CHECK(!value->IsPushArguments());  // Do not deopt outgoing arguments
+    if (value->IsArgumentsObject() || value->IsCapturedObject()) {
+      op = LLVMEnvironment::materialization_marker();
+    } else {
+      op = Use(value);
+    }
+    // Well, we can add a corresponding llvm value here.
+    // Though it seems redundant...
+    result->AddValue(op,
+                     value->representation(),
+                     value->CheckFlag(HInstruction::kUint32));
+  }
+
+  // Recursively store the nested objects into the environment
+  for (int i = 0; i < hydrogen_env->length(); ++i) {
+    if (hydrogen_env->is_special_index(i)) continue;
+
+    HValue* value = hydrogen_env->values()->at(i);
+    if (value->IsArgumentsObject() || value->IsCapturedObject()) {
+//      AddObjectToMaterialize(value, objects_to_materialize, result);
+      UNIMPLEMENTED();
+    }
+  }
+
+  if (hydrogen_env->frame_type() == JS_FUNCTION) {
+    *argument_index_accumulator = argument_index;
+  }
+
+  return result;
 }
 
 void LLVMChunkBuilder::DoPhi(HPhi* phi) {
@@ -643,6 +712,10 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
       llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
+      // This will be the environment (Lithium creates LEnvironment from it).
+      HEnvironment* hydrogen_env = current_block_->last_environment();
+      USE(hydrogen_env);
+//      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
       DoBadThing(overflow, reinterpret_cast<Address>(0xbadbeef0),
                  instr->block());
     }
@@ -852,6 +925,8 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         // TODO(llvm): environment
         bool not_smi = true;
         llvm::Value* cond = SmiCheck(val, not_smi);
+//        AssignEnvironment(); // just take block_->last_environment()
+//        return AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
         DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef1), instr->block());
       }
       instr->set_llvm_value(Use(val));
@@ -1001,9 +1076,7 @@ void LLVMChunkBuilder::DoDiv(HDiv* instr) {
   DCHECK(instr->right()->representation().Equals(instr->representation()));
   HValue* dividend = instr->left();
   HValue* divisor = instr->right();
-  CHECK(dividend->llvm_value());
-  CHECK(divisor->llvm_value());
- 
+
   llvm::Value* Div = llvm_ir_builder_->CreateUDiv(Use(dividend), Use(divisor),"");
   instr->set_llvm_value(Div);
 }

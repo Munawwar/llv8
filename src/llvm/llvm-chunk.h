@@ -166,6 +166,10 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   LLVMChunkBuilder& Optimize(); // invoke llvm transformation passes for the function
   LLVMChunk* Create();
 
+  LLVMEnvironment* CreateEnvironment(
+      HEnvironment* hydrogen_env, int* argument_index_accumulator,
+      ZoneList<HValue*>* objects_to_materialize);
+
   llvm::BasicBlock* DeoptimizeIf(HInstruction* instr, // TODO (llvm): usage?
                     Deoptimizer::DeoptReason deopt_reason);
 
@@ -208,6 +212,69 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   std::unique_ptr<llvm::IRBuilder<>> llvm_ir_builder_;
 };
 
+class LLVMEnvironment {
+ public:
+  LLVMEnvironment(Handle<JSFunction> closure,
+               FrameType frame_type,
+               BailoutId ast_id,
+               int parameter_count,
+               int argument_count,
+               int value_count,
+               LLVMEnvironment* outer,
+               HEnterInlined* entry,
+               Zone* zone)
+      : closure_(closure),
+        frame_type_(frame_type),
+        arguments_stack_height_(argument_count),
+        deoptimization_index_(Safepoint::kNoDeoptimizationIndex),
+        translation_index_(-1),
+        ast_id_(ast_id),
+        translation_size_(value_count),
+        parameter_count_(parameter_count),
+        pc_offset_(-1),
+        values_(value_count, zone),
+        is_tagged_(value_count, zone),
+        is_uint32_(value_count, zone),
+        object_mapping_(0, zone),
+        outer_(outer),
+        entry_(entry),
+        zone_(zone),
+        has_been_used_(false) { }
+  // Marker value indicating a de-materialized object.
+  static llvm::Value* materialization_marker() { return nullptr; }
+
+ private:
+  Handle<JSFunction> closure_;
+  FrameType frame_type_;
+  int arguments_stack_height_;
+  int deoptimization_index_;
+  int translation_index_;
+  BailoutId ast_id_;
+  int translation_size_;
+  int parameter_count_;
+  int pc_offset_;
+
+  // Value array: [parameters] [locals] [expression stack] [de-materialized].
+  //              |>--------- translation_size ---------<|
+  ZoneList<llvm::Value*> values_;
+  GrowableBitVector is_tagged_;
+  GrowableBitVector is_uint32_;
+
+  // Map with encoded information about materialization_marker operands.
+  ZoneList<uint32_t> object_mapping_;
+
+  LEnvironment* outer_;
+  HEnterInlined* entry_;
+  Zone* zone_;
+  bool has_been_used_;
+};
+
+class LLVMDeoptArtifacts {
+ public:
+ private:
+  ZoneList<LLVMEnvironment*> deoptimizations_;
+  TranslationBuffer translations_;
+};
 
 }  // namespace internal
 }  // namespace v8

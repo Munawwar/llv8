@@ -61,6 +61,8 @@ class LowChunkBuilderBase BASE_EMBEDDED {
     HGraph* const graph_;
     Status status_;
     int argument_count_;
+    HBasicBlock* current_block_;
+    HBasicBlock* next_block_;
 
   private:
    Zone* zone_;
