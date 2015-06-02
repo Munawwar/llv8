@@ -677,35 +677,35 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
   DCHECK(instr->right()->representation().Equals(instr->representation()));
   HValue* left = instr->left();
   HValue* right = instr->right();
-  if (right->IsConstant()) {
-    int32_t right_operand = right->GetInteger32Constant();
-    switch (instr->op()) {
-      case Token::BIT_AND: {
-        llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
-        instr->set_llvm_value(And);
-        break;
-      }  
-      case Token::BIT_OR: {
-        llvm::Value* Or = llvm_ir_builder_->CreateOr(Use(left), Use(right),"");
-        instr->set_llvm_value(Or);
-        break;
-      }
-      case Token::BIT_XOR: {
-        if(right_operand == int32_t(~0)) {
-          llvm::Value* Not = llvm_ir_builder_->CreateNot(Use(left), "");
-          instr->set_llvm_value(Not);
-        }
-        else
-        {
-          llvm::Value* Xor = llvm_ir_builder_->CreateXor(Use(left), Use(right), "");
-	  instr->set_llvm_value(Xor);
-        }
-        break;
-      }
-      default:
-        UNREACHABLE();
-        break; 
+  int32_t right_operand;
+  if (right->IsConstant()) 
+    right_operand = right->GetInteger32Constant();
+  switch (instr->op()) {
+    case Token::BIT_AND: {
+      llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
+      instr->set_llvm_value(And);
+      break;
+    }  
+    case Token::BIT_OR: {
+      llvm::Value* Or = llvm_ir_builder_->CreateOr(Use(left), Use(right),"");
+      instr->set_llvm_value(Or);
+      break;
     }
+    case Token::BIT_XOR: {
+      if(right->IsConstant() && right_operand == int32_t(~0)) {
+        llvm::Value* Not = llvm_ir_builder_->CreateNot(Use(left), "");
+        instr->set_llvm_value(Not);
+      }
+      else
+      {
+        llvm::Value* Xor = llvm_ir_builder_->CreateXor(Use(left), Use(right), "");
+         instr->set_llvm_value(Xor);
+      }
+      break;
+    }
+    default:
+      UNREACHABLE();
+      break; 
   }
 }
 
