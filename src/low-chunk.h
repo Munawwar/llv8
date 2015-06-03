@@ -93,6 +93,7 @@ class LowCodeGenBase BASE_EMBEDDED {
     // Finish the code by setting stack height, safepoint, and bailout
     // information on it.
     // FIXME(llvm): return this method to the child class (make non-virtual)
+    // Or use it...
     virtual void FinishCode(Handle<Code> code) = 0;
   protected:
     LowChunk* const chunk_;

@@ -144,6 +144,110 @@ class LLVMChunk FINAL : public LowChunk {
   int llvm_function_id_;
 };
 
+class LLVMEnvironment FINAL:  public ZoneObject {
+ public:
+  LLVMEnvironment(Handle<JSFunction> closure,
+               FrameType frame_type,
+               BailoutId ast_id,
+               int parameter_count,
+               int argument_count,
+               int value_count,
+               LLVMEnvironment* outer,
+               HEnterInlined* entry,
+               Zone* zone)
+      : closure_(closure),
+        frame_type_(frame_type),
+        arguments_stack_height_(argument_count),
+        deoptimization_index_(Safepoint::kNoDeoptimizationIndex),
+        translation_index_(-1),
+        ast_id_(ast_id),
+        translation_size_(value_count),
+        parameter_count_(parameter_count),
+        pc_offset_(-1),
+        values_(value_count, zone),
+        is_tagged_(value_count, zone),
+        is_uint32_(value_count, zone),
+        object_mapping_(0, zone),
+        outer_(outer),
+        entry_(entry),
+        zone_(zone),
+        has_been_used_(false) { }
+
+  Zone* zone() const { return zone_; }
+
+  // Marker value indicating a de-materialized object.
+  static llvm::Value* materialization_marker() { return nullptr; }
+
+  void AddValue(llvm::Value* value,
+                Representation representation,
+                bool is_uint32) {
+    values_.Add(value, zone());
+    if (representation.IsSmiOrTagged()) {
+      DCHECK(!is_uint32);
+      is_tagged_.Add(values_.length() - 1, zone());
+    }
+
+    if (is_uint32) {
+      is_uint32_.Add(values_.length() - 1, zone());
+    }
+  }
+
+  ~LLVMEnvironment() { // FIXME(llvm): remove unused fields.
+    USE(closure_);
+    USE(frame_type_);
+    USE(arguments_stack_height_);
+    USE(deoptimization_index_);
+    USE(translation_index_);
+    USE(ast_id_);
+    USE(translation_size_);
+    USE(parameter_count_);
+    USE(pc_offset_);
+    //USE(object_mapping_);
+    USE(outer_);
+    USE(entry_);
+    USE(has_been_used_);
+  }
+
+ private:
+  Handle<JSFunction> closure_;
+  FrameType frame_type_;
+  int arguments_stack_height_;
+  int deoptimization_index_;
+  int translation_index_;
+  BailoutId ast_id_;
+  int translation_size_;
+  int parameter_count_;
+  int pc_offset_;
+
+  // Value array: [parameters] [locals] [expression stack] [de-materialized].
+  //              |>--------- translation_size ---------<|
+  ZoneList<llvm::Value*> values_;
+  GrowableBitVector is_tagged_;
+  GrowableBitVector is_uint32_;
+
+  // Map with encoded information about materialization_marker operands.
+  ZoneList<uint32_t> object_mapping_;
+
+  LLVMEnvironment* outer_;
+  HEnterInlined* entry_;
+  Zone* zone_;
+  bool has_been_used_;
+};
+
+class LLVMDeoptData {
+ public:
+  LLVMDeoptData(Zone* zone)
+     : deoptimizations_(4, zone),
+       translations_(zone) {}
+
+  void Add(LLVMEnvironment* environment) {
+    deoptimizations_.Add(environment, environment->zone());
+  }
+ private:
+  ZoneList<LLVMEnvironment*> deoptimizations_;
+  TranslationBuffer translations_;
+};
+
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
  public:
   LLVMChunkBuilder(CompilationInfo* info, HGraph* graph)
@@ -153,7 +257,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         next_block_(nullptr),
         module_(nullptr),
         function_(nullptr),
-        llvm_ir_builder_(nullptr) {}
+        llvm_ir_builder_(nullptr),
+        deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())) {}
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
@@ -166,6 +271,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   LLVMChunkBuilder& Optimize(); // invoke llvm transformation passes for the function
   LLVMChunk* Create();
 
+  LLVMEnvironment* AssignEnvironment();
   LLVMEnvironment* CreateEnvironment(
       HEnvironment* hydrogen_env, int* argument_index_accumulator,
       ZoneList<HValue*>* objects_to_materialize);
@@ -210,70 +316,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // since the corresponding methods are deprecated.
   llvm::Function* function_;
   std::unique_ptr<llvm::IRBuilder<>> llvm_ir_builder_;
-};
-
-class LLVMEnvironment {
- public:
-  LLVMEnvironment(Handle<JSFunction> closure,
-               FrameType frame_type,
-               BailoutId ast_id,
-               int parameter_count,
-               int argument_count,
-               int value_count,
-               LLVMEnvironment* outer,
-               HEnterInlined* entry,
-               Zone* zone)
-      : closure_(closure),
-        frame_type_(frame_type),
-        arguments_stack_height_(argument_count),
-        deoptimization_index_(Safepoint::kNoDeoptimizationIndex),
-        translation_index_(-1),
-        ast_id_(ast_id),
-        translation_size_(value_count),
-        parameter_count_(parameter_count),
-        pc_offset_(-1),
-        values_(value_count, zone),
-        is_tagged_(value_count, zone),
-        is_uint32_(value_count, zone),
-        object_mapping_(0, zone),
-        outer_(outer),
-        entry_(entry),
-        zone_(zone),
-        has_been_used_(false) { }
-  // Marker value indicating a de-materialized object.
-  static llvm::Value* materialization_marker() { return nullptr; }
-
- private:
-  Handle<JSFunction> closure_;
-  FrameType frame_type_;
-  int arguments_stack_height_;
-  int deoptimization_index_;
-  int translation_index_;
-  BailoutId ast_id_;
-  int translation_size_;
-  int parameter_count_;
-  int pc_offset_;
-
-  // Value array: [parameters] [locals] [expression stack] [de-materialized].
-  //              |>--------- translation_size ---------<|
-  ZoneList<llvm::Value*> values_;
-  GrowableBitVector is_tagged_;
-  GrowableBitVector is_uint32_;
-
-  // Map with encoded information about materialization_marker operands.
-  ZoneList<uint32_t> object_mapping_;
-
-  LEnvironment* outer_;
-  HEnterInlined* entry_;
-  Zone* zone_;
-  bool has_been_used_;
-};
-
-class LLVMDeoptArtifacts {
- public:
- private:
-  ZoneList<LLVMEnvironment*> deoptimizations_;
-  TranslationBuffer translations_;
+  std::unique_ptr<LLVMDeoptData> deopt_data_;
 };
 
 }  // namespace internal

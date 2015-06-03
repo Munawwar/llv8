@@ -246,8 +246,18 @@ llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   return llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
 }
 
+LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
+  HEnvironment* hydrogen_env = current_block_->last_environment();
+  int argument_index_accumulator = 0;
+  ZoneList<HValue*> objects_to_materialize(0, zone());
+  return CreateEnvironment(
+      hydrogen_env, &argument_index_accumulator, &objects_to_materialize);
+}
+
 void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
                                   HBasicBlock* block) {
+  deopt_data_->Add(AssignEnvironment());
+
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* saved_insert_point = llvm_ir_builder_->GetInsertBlock();
   llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
@@ -263,10 +273,6 @@ void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
   llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
   llvm_ir_builder_->SetInsertPoint(next_block);
   block->set_llvm_end_basic_block(next_block);
-#ifdef DEBUG
-  std::cerr << "\t Setting llvm_end_BB for block id " << block->block_id()
-      << " to " << next_block->getName().str() << std::endl;
-#endif
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
@@ -428,14 +434,14 @@ LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
   int value_count = hydrogen_env->length() - omitted_count;
   LLVMEnvironment* result =
       new(zone()) LLVMEnvironment(hydrogen_env->closure(),
-                               hydrogen_env->frame_type(),
-                               ast_id,
-                               hydrogen_env->parameter_count(),
-                               argument_count_,
-                               value_count,
-                               outer,
-                               hydrogen_env->entry(),
-                               zone());
+                                  hydrogen_env->frame_type(),
+                                  ast_id,
+                                  hydrogen_env->parameter_count(),
+                                  argument_count_,
+                                  value_count,
+                                  outer,
+                                  hydrogen_env->entry(),
+                                  zone());
   int argument_index = *argument_index_accumulator;
 
   // Store the environment description into the environment
@@ -493,12 +499,12 @@ void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
 
 void LLVMChunkBuilder::DoContext(HContext* instr) {
   if (instr->HasNoUses()) return;
-//  std::cerr << "#Uses == " << instr->UseCount() << std::endl;
+  // std::cerr << "#Uses == " << instr->UseCount() << std::endl;
   if (info()->IsStub()) {
     UNIMPLEMENTED();
   }
-//  FIXME(llvm): we need it for bailouts and such
-//  return DefineAsRegister(new(zone()) LContext);
+  // First parameter is our context (rsi).
+  instr->set_llvm_value(function_->arg_begin());
 }
 
 void LLVMChunkBuilder::DoParameter(HParameter* instr) {
@@ -712,9 +718,6 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
       llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
-      // This will be the environment (Lithium creates LEnvironment from it).
-      HEnvironment* hydrogen_env = current_block_->last_environment();
-      USE(hydrogen_env);
 //      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
       DoBadThing(overflow, reinterpret_cast<Address>(0xbadbeef0),
                  instr->block());
