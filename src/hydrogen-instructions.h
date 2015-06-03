@@ -872,6 +872,7 @@ class HValue : public ZoneObject {
   int flags_;
   GVNFlagSet changes_flags_;
   GVNFlagSet depends_on_flags_;
+  // FIXME(llvm): not sure who takes care of deallocation.
   llvm::Value* llvm_value_;
 
  private:

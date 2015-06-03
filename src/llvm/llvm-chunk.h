@@ -173,6 +173,7 @@ class LLVMEnvironment FINAL:  public ZoneObject {
         zone_(zone),
         has_been_used_(false) { }
 
+  const ZoneList<llvm::Value*>* values() const { return &values_; }
   Zone* zone() const { return zone_; }
 
   // Marker value indicating a de-materialized object.
@@ -243,6 +244,8 @@ class LLVMDeoptData {
   void Add(LLVMEnvironment* environment) {
     deoptimizations_.Add(environment, environment->zone());
   }
+
+  int DeoptCount() { return deoptimizations_.length(); }
  private:
   ZoneList<LLVMEnvironment*> deoptimizations_;
   TranslationBuffer translations_;

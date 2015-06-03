@@ -256,7 +256,8 @@ LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
 
 void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
                                   HBasicBlock* block) {
-  deopt_data_->Add(AssignEnvironment());
+  LLVMEnvironment* environment = AssignEnvironment();
+  deopt_data_->Add(environment);
 
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* saved_insert_point = llvm_ir_builder_->GetInsertBlock();
@@ -266,6 +267,18 @@ void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
       LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
   llvm_ir_builder_->SetInsertPoint(deopt_block);
 
+  // StackMap (id = #deopts, shadow_bytes=0, ...)
+  llvm::Function* stackmap = llvm::Intrinsic::getDeclaration(module_.get(),
+      llvm::Intrinsic::experimental_stackmap);
+  std::vector<llvm::Value*> mapped_values;
+  int stackmap_id = deopt_data_->DeoptCount() - 1;
+  mapped_values.push_back(llvm_ir_builder_->getInt64(stackmap_id));
+  int shadow_bytes = 0;
+  mapped_values.push_back(llvm_ir_builder_->getInt32(shadow_bytes));
+  for (auto val : *environment->values()) {
+    mapped_values.push_back(val);
+  }
+  llvm_ir_builder_->CreateCall(stackmap, mapped_values);
   CallVoid(target);
   llvm_ir_builder_->CreateUnreachable();
 
