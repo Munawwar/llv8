@@ -867,6 +867,8 @@
         '../../src/llvm/llvm-headers.h',
         '../../src/llvm/llvm-passes.cc',
         '../../src/llvm/llvm-passes.h',
+        '../../src/llvm/llvm-stackmaps.cc',
+        '../../src/llvm/llvm-stackmaps.h',
         '../../src/llvm/mcjit-memory-manager.cc',
         '../../src/llvm/mcjit-memory-manager.h',
         '../../src/log-inl.h',

@@ -44,7 +44,8 @@ class LLVMGranularity FINAL {
 
   void AddModule(std::unique_ptr<llvm::Module> module) {
     if (!engine_) {
-      std::unique_ptr<MCJITMemoryManager>manager = MCJITMemoryManager::Create();
+      std::unique_ptr<MCJITMemoryManager> manager =
+          MCJITMemoryManager::Create();
       memory_manager_ref_ = manager.get(); // non-owning!
       llvm::TargetOptions options;
       // rbp based frame so the runtime can walk the stack as before

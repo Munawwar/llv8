@@ -20,7 +20,8 @@ std::unique_ptr<MCJITMemoryManager> MCJITMemoryManager::Create() {
 
 MCJITMemoryManager::MCJITMemoryManager()
   : allocated_code_(1),
-    allocated_data_(1) {}
+    allocated_data_(1),
+    stackmaps_(1) {}
 
 MCJITMemoryManager::~MCJITMemoryManager() {
   for (auto it = allocated_code_.begin(); it != allocated_code_.end(); ++it) {
@@ -68,7 +69,8 @@ byte* MCJITMemoryManager::allocateDataSection(uintptr_t size,
 #ifdef DEBUG
   std::cerr << __FUNCTION__ << " section_name == "
       << section_name.str() << " section id == "
-      << section_id << std::endl;
+      << section_id << " size == "
+      << size << std::endl;
 #endif
   CHECK(alignment <= base::OS::AllocateAlignment());
   // TODO(llvm): handle is_readonly
@@ -76,10 +78,12 @@ byte* MCJITMemoryManager::allocateDataSection(uintptr_t size,
       UNIMPLEMENTED(); // TODO(llvm): call allocateCodeSection
                        // as far as you understand what's happening
   }
-//  size_t actual_size;
-//  uint8_t* buffer =
-//      static_cast<uint8_t*>(base::OS::Allocate(size, &actual_size, false));
+  // FIXME(llvm): who frees that memory?
+  // The destructor here does. Not sure if it is supposed to.
   byte* buffer = NewArray<byte>(RoundUp(size, alignment));
+  allocated_data_.Add(buffer);
+  if (section_name.equals(".llvm_stackmaps"))
+    stackmaps_.Add(buffer);
   return buffer;
 }
 

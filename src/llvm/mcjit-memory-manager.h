@@ -65,6 +65,7 @@ class MCJITMemoryManager : public llvm::RTDyldMemoryManager {
   // TODO(llvm): is it OK to allocate those in the zone?
   List<CodeDesc> allocated_code_;
   List<byte*> allocated_data_;
+  List<byte*> stackmaps_;
 //  Zone* zone_;
 };
 
