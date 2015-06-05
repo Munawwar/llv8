@@ -35,11 +35,7 @@
 #include <vector>
 
 #define OVERLOAD_STREAM_INSERTION(type) \
-  friend std::ostream& operator<<(std::ostream& os, type* rhs) { \
-    rhs->dump(os); \
-    return os; \
-  } \
-  friend std::ostream& operator<<(std::ostream& os, type& rhs) { \
+  friend std::ostream& operator<<(std::ostream& os, const type& rhs) { \
     rhs.dump(os); \
     return os; \
   }
@@ -100,7 +96,7 @@ struct StackMaps {
     int64_t integer;
 
     void parse(ParseContext&);
-    void dump(std::ostream&);
+    void dump(std::ostream&) const;
 
     OVERLOAD_STREAM_INSERTION(Constant)
   };
@@ -110,7 +106,7 @@ struct StackMaps {
     uint64_t size;
 
     void parse(ParseContext&);
-    void dump(std::ostream&);
+    void dump(std::ostream&) const;
 
     OVERLOAD_STREAM_INSERTION(StackSize)
   };
@@ -131,7 +127,7 @@ struct StackMaps {
     int32_t offset;
 
     void parse(ParseContext&);
-    void dump(std::ostream&);
+    void dump(std::ostream&) const;
 
     OVERLOAD_STREAM_INSERTION(Location)
 //    GPRReg directGPR() const;
@@ -144,7 +140,7 @@ struct StackMaps {
     uint8_t size;
 
     void parse(ParseContext&);
-    void dump(std::ostream&);
+    void dump(std::ostream&) const;
 
     OVERLOAD_STREAM_INSERTION(LiveOut)
   };
@@ -158,7 +154,7 @@ struct StackMaps {
     std::vector<LiveOut> live_outs;
 
     bool parse(ParseContext&);
-    void dump(std::ostream&);
+    void dump(std::ostream&) const;
 
     OVERLOAD_STREAM_INSERTION(Record)
 //
@@ -175,8 +171,8 @@ struct StackMaps {
   // Returns true on parse success, false on failure.
   // Failure means that LLVM is signaling compile failure to us.
   bool parse(DataView*);
-  void dump(std::ostream&);
-  void dumpMultiline(std::ostream&, const char* prefix);
+  void dump(std::ostream&) const;
+  void dumpMultiline(std::ostream&, const char* prefix) const;
 
   using RecordMap = std::map<uint32_t, Record>; // PatchPoint ID -> Record
 

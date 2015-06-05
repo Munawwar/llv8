@@ -56,7 +56,7 @@ void StackMaps::Constant::parse(StackMaps::ParseContext& context) {
   integer = context.view->read<int64_t>(true);
 }
 
-void StackMaps::Constant::dump(std::ostream& os) {
+void StackMaps::Constant::dump(std::ostream& os) const {
   os << static_cast<unsigned long long>(integer);
 }
 
@@ -74,7 +74,7 @@ void StackMaps::StackSize::parse(StackMaps::ParseContext& context) {
   }
 }
 
-void StackMaps::StackSize::dump(std::ostream& os) {
+void StackMaps::StackSize::dump(std::ostream& os) const {
   os << "(off:" << functionOffset << ", size:" << size << ")";
 }
 
@@ -85,7 +85,7 @@ void StackMaps::Location::parse(StackMaps::ParseContext& context) {
   this->offset = context.view->read<int32_t>(true);
 }
 
-void StackMaps::Location::dump(std::ostream& os) {
+void StackMaps::Location::dump(std::ostream& os) const {
   os << "(" << kind << ", "
       << dwarf_reg << ", off:"
       << offset << ", size:"
@@ -107,7 +107,7 @@ void StackMaps::LiveOut::parse(StackMaps::ParseContext& context) {
   size = context.view->read<uint8_t>(true); // size in bytes
 }
 
-void StackMaps::LiveOut::dump(std::ostream& os) {
+void StackMaps::LiveOut::dump(std::ostream& os) const {
   os << "(" << dwarfReg << ", " << size << ")";
 }
 
@@ -142,16 +142,16 @@ bool StackMaps::Record::parse(StackMaps::ParseContext& context) {
   return true;
 }
 
-void StackMaps::Record::dump(std::ostream& os) {
+void StackMaps::Record::dump(std::ostream& os) const {
   os << "(#" << patchpointID << ", offset = "
       << instructionOffset << ", flags = "
       << flags << ", locations = "
       << "[" ;
   std::for_each(locations.begin(), locations.end(),
-                [&os](Location &n){ os << n << ", "; });
+                [&os](const Location &n){ os << n << ", "; });
   os << "] live_outs = [";
   std::for_each(live_outs.begin(), live_outs.end(),
-                [&os](LiveOut &n){ os << n << ", "; });
+                [&os](const LiveOut &n){ os << n << ", "; });
   os << "])";
 }
 //
@@ -227,20 +227,20 @@ bool StackMaps::parse(DataView* view) {
   return true;
 }
 
-void StackMaps::dump(std::ostream& os) {
+void StackMaps::dump(std::ostream& os) const {
   os << "Version:" << version << ", StackSizes[";
   std::for_each(stack_sizes.begin(), stack_sizes.end(),
-                [&os](StackSize &n){ os << n << ", "; });
+                [&os](const StackSize &n){ os << n << ", "; });
   os << "], Constants:[";
   std::for_each(constants.begin(), constants.end(),
-                [&os](Constant &n){ os << n << ", "; });
+                [&os](const Constant &n){ os << n << ", "; });
   os << "], Records:[";
   std::for_each(records.begin(), records.end(),
-                [&os](Record &n){ os << n << ", "; });
+                [&os](const Record &n){ os << n << ", "; });
   os << "]";
 }
 
-void StackMaps::dumpMultiline(std::ostream& os, const char* prefix) {
+void StackMaps::dumpMultiline(std::ostream& os, const char* prefix) const {
   os << prefix << "Version: " << version << "\n";
   os << prefix << "StackSizes:\n";
   for (unsigned i = 0; i < stack_sizes.size(); ++i)
