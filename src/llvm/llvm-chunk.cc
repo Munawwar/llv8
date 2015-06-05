@@ -5,6 +5,7 @@
 #include <cstdio>
 #include "llvm-chunk.h"
 #include "llvm-passes.h"
+#include "llvm-stackmaps.h"
 
 namespace v8 {
 namespace internal {
@@ -33,6 +34,16 @@ Handle<Code> LLVMChunk::Codegen() {
       info()->flags());
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
+
+  List<byte*>& stackmap_list =
+      LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
+
+  for (int i = 0; i < stackmap_list.length(); i++) {
+    StackMaps stackmaps;
+    DataView view(stackmap_list[i]);
+    stackmaps.parse(&view);
+    stackmaps.dumpMultiline(std::cerr, "  ");
+  }
 #ifdef DEBUG
   std::cerr << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;

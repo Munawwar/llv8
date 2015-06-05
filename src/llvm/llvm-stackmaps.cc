@@ -26,6 +26,8 @@
 
 #include "llvm-stackmaps.h"
 
+#include <algorithm>
+
 namespace v8 {
 namespace internal {
 
@@ -45,11 +47,16 @@ Register DWARFRegister::reg() const {
   return Register::from_code(map[dwarf_reg_num_]);
 }
 
+void DWARFRegister::dump(std::ostream& os) const {
+    Register reg = this->reg();
+    os << Register::AllocationIndexToString(reg.code());
+}
+
 void StackMaps::Constant::parse(StackMaps::ParseContext& context) {
   integer = context.view->read<int64_t>(true);
 }
 
-void StackMaps::Constant::dump(std::ostream& os) const {
+void StackMaps::Constant::dump(std::ostream& os) {
   os << static_cast<unsigned long long>(integer);
 }
 
@@ -67,20 +74,20 @@ void StackMaps::StackSize::parse(StackMaps::ParseContext& context) {
   }
 }
 
-void StackMaps::StackSize::dump(std::ostream& os) const {
+void StackMaps::StackSize::dump(std::ostream& os) {
   os << "(off:" << functionOffset << ", size:" << size << ")";
 }
 
 void StackMaps::Location::parse(StackMaps::ParseContext& context) {
   kind = static_cast<Kind>(context.view->read<uint8_t>(true));
   size = context.view->read<uint8_t>(true);
-  dwarfReg = DWARFRegister(context.view->read<uint16_t>(true));
+  dwarf_reg = DWARFRegister(context.view->read<uint16_t>(true));
   this->offset = context.view->read<int32_t>(true);
 }
 
-void StackMaps::Location::dump(std::ostream& os) const {
+void StackMaps::Location::dump(std::ostream& os) {
   os << "(" << kind << ", "
-      << dwarfReg << ", off:"
+      << dwarf_reg << ", off:"
       << offset << ", size:"
       << size << ")";
 }
@@ -100,7 +107,7 @@ void StackMaps::LiveOut::parse(StackMaps::ParseContext& context) {
   size = context.view->read<uint8_t>(true); // size in bytes
 }
 
-void StackMaps::LiveOut::dump(std::ostream& os) const {
+void StackMaps::LiveOut::dump(std::ostream& os) {
   os << "(" << dwarfReg << ", " << size << ")";
 }
 
@@ -116,14 +123,14 @@ bool StackMaps::Record::parse(StackMaps::ParseContext& context) {
 
   unsigned length = context.view->read<uint16_t>(true);
   while (length--)
-    locations.Add(readObject<Location>(context));
+    locations.push_back(std::move(readObject<Location>(context)));
 
   if (context.version >= 1)
     context.view->read<uint16_t>(true); // padding
 
   unsigned numLiveOuts = context.view->read<uint16_t>(true);
   while (numLiveOuts--)
-    liveOuts.Add(readObject<LiveOut>(context));
+    live_outs.push_back(readObject<LiveOut>(context));
 
   if (context.version >= 1) {
     if (context.view->offset() & 0x111) {
@@ -135,15 +142,16 @@ bool StackMaps::Record::parse(StackMaps::ParseContext& context) {
   return true;
 }
 
-void StackMaps::Record::dump(std::ostream& os) const {
-  DumpListVisitor dumper(os);
+void StackMaps::Record::dump(std::ostream& os) {
   os << "(#" << patchpointID << ", offset = "
       << instructionOffset << ", flags = "
       << flags << ", locations = "
       << "[" ;
-  locations.Iterate(&dumper);
-  os << "] liveOuts = [";
-  liveOuts.Iterate(&dumper);
+  std::for_each(locations.begin(), locations.end(),
+                [&os](Location &n){ os << n << ", "; });
+  os << "] live_outs = [";
+  std::for_each(live_outs.begin(), live_outs.end(),
+                [&os](LiveOut &n){ os << n << ", "; });
   os << "])";
 }
 //
@@ -159,8 +167,8 @@ void StackMaps::Record::dump(std::ostream& os) const {
 //
 //RegisterSet StackMaps::Record::liveOutsSet() const {
 //  RegisterSet result;
-//  for (unsigned i = liveOuts.size(); i--;) {
-//    LiveOut liveOut = liveOuts[i];
+//  for (unsigned i = live_outs.size(); i--;) {
+//    LiveOut liveOut = live_outs[i];
 //    Reg reg = liveOut.dwarfReg.reg();
 //    // FIXME: Either assert that size is not greater than sizeof(pointer), or actually
 //    // save the high bits of registers.
@@ -200,12 +208,12 @@ bool StackMaps::parse(DataView* view) {
     numRecords = context.view->read<uint32_t>(true);
   }
   while (numFunctions--)
-    stackSizes.Add(readObject<StackSize>(context));
+    stack_sizes.push_back(readObject<StackSize>(context));
 
   if (!context.version)
     numConstants = context.view->read<uint32_t>(true);
   while (numConstants--)
-    constants.Add(readObject<Constant>(context));
+    constants.push_back(readObject<Constant>(context));
 
   if (!context.version)
     numRecords = context.view->read<uint32_t>(true);
@@ -213,47 +221,49 @@ bool StackMaps::parse(DataView* view) {
     Record record;
     if (!record.parse(context))
       return false;
-    records.Add(record);
+    records.push_back(record);
   }
 
   return true;
 }
 
-void StackMaps::dump(std::ostream& os) const {
-  DumpListVisitor dumper(os);
+void StackMaps::dump(std::ostream& os) {
   os << "Version:" << version << ", StackSizes[";
-  stackSizes.Iterate(&dumper);
+  std::for_each(stack_sizes.begin(), stack_sizes.end(),
+                [&os](StackSize &n){ os << n << ", "; });
   os << "], Constants:[";
-  constants.Iterate(&dumper);
+  std::for_each(constants.begin(), constants.end(),
+                [&os](Constant &n){ os << n << ", "; });
   os << "], Records:[";
-  records.Iterate(&dumper);
+  std::for_each(records.begin(), records.end(),
+                [&os](Record &n){ os << n << ", "; });
   os << "]";
 }
 
-void StackMaps::dumpMultiline(std::ostream& os, const char* prefix) const {
+void StackMaps::dumpMultiline(std::ostream& os, const char* prefix) {
   os << prefix << "Version: " << version << "\n";
   os << prefix << "StackSizes:\n";
-  for (unsigned i = 0; i < stackSizes.length(); ++i)
-    os << prefix << "    " << stackSizes[i] << "\n";
+  for (unsigned i = 0; i < stack_sizes.size(); ++i)
+    os << prefix << "    " << stack_sizes[i] << "\n";
   os << prefix << "Constants:\n";
-  for (unsigned i = 0; i < constants.length(); ++i)
+  for (unsigned i = 0; i < constants.size(); ++i)
     os << prefix << "    " << constants[i] << "\n";
   os << prefix << "Records:\n";
-  for (unsigned i = 0; i < records.length(); ++i)
+  for (unsigned i = 0; i < records.size(); ++i)
     os << prefix << "    " << records[i] << "\n";
 }
 
 StackMaps::RecordMap StackMaps::computeRecordMap() const {
   RecordMap result;
-  for (unsigned i = records.length(); i--;)
-    result[records[i].patchpointID] = records[i];
+  for (unsigned i = records.size(); i--;)
+    result[records[i].patchpointID] = records[i]; // Careful (life-time)!
   return result;
 }
 
 unsigned StackMaps::stackSize() const {
-  CHECK(stackSizes.length() == 1);
+  CHECK(stack_sizes.size() == 1);
 
-  return stackSizes[0].size;
+  return stack_sizes[0].size;
 }
 
 } } // namespace v8::internal

@@ -27,10 +27,23 @@
 #ifndef V8_LLVM_STACKMAPS_H_
 #define V8_LLVM_STACKMAPS_H_
 
-#include "src/list-inl.h"
-#include "src/x64/assembler-x64.h" // For now
+#include "llvm-headers.h"
+//#include "src/list-inl.h"
+#include "src/x64/assembler-x64-inl.h" // For now
 
 #include <map>
+#include <vector>
+
+#define OVERLOAD_STREAM_INSERTION(type) \
+  friend std::ostream& operator<<(std::ostream& os, type* rhs) { \
+    rhs->dump(os); \
+    return os; \
+  } \
+  friend std::ostream& operator<<(std::ostream& os, type& rhs) { \
+    rhs.dump(os); \
+    return os; \
+  }
+
 
 namespace v8 {
 namespace internal {
@@ -56,19 +69,6 @@ class DataView {
   int offset_;
 };
 
-class DumpListVisitor {
- public:
-  DumpListVisitor(std::ostream& os)
-     : os_(os) {}
-
-  template <typename T>
-  void Apply(T* element) {
-    os_ << *element << ", ";
-  }
- private:
-  std::ostream& os_;
-};
-
 class DWARFRegister {
  public:
   DWARFRegister()
@@ -81,7 +81,10 @@ class DWARFRegister {
 
   Register reg() const;
 
+  // TODO(llvm): method names should start with a capital (style)
   void dump(std::ostream&) const;
+
+  OVERLOAD_STREAM_INSERTION(DWARFRegister)
 
  private:
   int16_t dwarf_reg_num_;
@@ -97,7 +100,9 @@ struct StackMaps {
     int64_t integer;
 
     void parse(ParseContext&);
-    void dump(std::ostream&) const;
+    void dump(std::ostream&);
+
+    OVERLOAD_STREAM_INSERTION(Constant)
   };
 
   struct StackSize {
@@ -105,7 +110,9 @@ struct StackMaps {
     uint64_t size;
 
     void parse(ParseContext&);
-    void dump(std::ostream&) const;
+    void dump(std::ostream&);
+
+    OVERLOAD_STREAM_INSERTION(StackSize)
   };
 
   struct Location {
@@ -118,14 +125,15 @@ struct StackMaps {
       kConstantIndex
     };
 
-    DWARFRegister dwarfReg;
+    DWARFRegister dwarf_reg;
     uint8_t size;
     Kind kind;
     int32_t offset;
 
     void parse(ParseContext&);
-    void dump(std::ostream&) const;
+    void dump(std::ostream&);
 
+    OVERLOAD_STREAM_INSERTION(Location)
 //    GPRReg directGPR() const;
 //    void restoreInto(MacroAssembler&, StackMaps&, char* savedRegisters, GPRReg result) const;
   };
@@ -136,7 +144,9 @@ struct StackMaps {
     uint8_t size;
 
     void parse(ParseContext&);
-    void dump(std::ostream&) const;
+    void dump(std::ostream&);
+
+    OVERLOAD_STREAM_INSERTION(LiveOut)
   };
 
   struct Record {
@@ -144,11 +154,13 @@ struct StackMaps {
     uint32_t instructionOffset;
     uint16_t flags;
 
-    List<Location> locations;
-    List<LiveOut> liveOuts;
+    std::vector<Location> locations;
+    std::vector<LiveOut> live_outs;
 
     bool parse(ParseContext&);
-    void dump(std::ostream&) const;
+    void dump(std::ostream&);
+
+    OVERLOAD_STREAM_INSERTION(Record)
 //
 //    RegisterSet liveOutsSet() const;
 //    RegisterSet locationSet() const;
@@ -156,17 +168,16 @@ struct StackMaps {
   };
 
   unsigned version;
-  List<StackSize> stackSizes;
-  List<Constant> constants;
-  List<Record> records;
+  std::vector<StackSize> stack_sizes;
+  std::vector<Constant> constants;
+  std::vector<Record> records;
 
   // Returns true on parse success, false on failure.
   // Failure means that LLVM is signaling compile failure to us.
   bool parse(DataView*);
-  void dump(std::ostream&) const;
-  void dumpMultiline(std::ostream&, const char* prefix) const;
+  void dump(std::ostream&);
+  void dumpMultiline(std::ostream&, const char* prefix);
 
-//  typedef HashMap<uint32_t, Vector<Record>, WTF::IntHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>
   using RecordMap = std::map<uint32_t, Record>; // PatchPoint ID -> Record
 
   RecordMap computeRecordMap() const;
@@ -177,4 +188,4 @@ struct StackMaps {
 
 } } // namespace v8::internal
 
-#endif V8_LLVM_STACKMAPS_H_
+#endif // V8_LLVM_STACKMAPS_H_
