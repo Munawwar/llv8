@@ -49,7 +49,7 @@ Register DWARFRegister::reg() const {
 
 void DWARFRegister::dump(std::ostream& os) const {
     Register reg = this->reg();
-    os << Register::AllocationIndexToString(reg.code());
+    os << Register::AllocationIndexToString(Register::ToAllocationIndex(reg));
 }
 
 void StackMaps::Constant::parse(StackMaps::ParseContext& context) {
@@ -133,8 +133,8 @@ bool StackMaps::Record::parse(StackMaps::ParseContext& context) {
     live_outs.push_back(readObject<LiveOut>(context));
 
   if (context.version >= 1) {
-    if (context.view->offset() & 0x111) {
-      DCHECK(!(context.view->offset() & 0x11));
+    if (context.view->offset() & 7) {
+      DCHECK(!(context.view->offset() & 3));
       context.view->read<uint32_t>(true); // padding
     }
   }
