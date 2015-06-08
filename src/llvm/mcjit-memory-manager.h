@@ -62,6 +62,8 @@ class MCJITMemoryManager : public llvm::RTDyldMemoryManager {
   CodeDesc LastAllocatedCode() { return allocated_code_.last(); }
 
   List<byte*>& stackmaps() { return stackmaps_; }
+
+  void DropStackmaps() { stackmaps_.Free(); }
  private:
   // TODO(llvm): is it OK to allocate those in the zone?
   List<CodeDesc> allocated_code_;

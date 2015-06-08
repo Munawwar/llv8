@@ -35,20 +35,179 @@ Handle<Code> LLVMChunk::Codegen() {
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
-  List<byte*>& stackmap_list =
-      LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
-
-  for (int i = 0; i < stackmap_list.length(); i++) {
-    StackMaps stackmaps;
-    DataView view(stackmap_list[i]);
-    stackmaps.parse(&view);
-    stackmaps.dumpMultiline(std::cerr, "  ");
-  }
+  SetUpDeoptimizationData(code);
 #ifdef DEBUG
   std::cerr << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
 #endif
   return code;
+}
+
+void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
+                                 StackMaps::Record& stackmap,
+                                 Translation* translation) {
+  if (environment == nullptr) return;
+
+  // The translation includes one command per value in the environment.
+  int translation_size = environment->translation_size();
+  // The output frame height does not include the parameters.
+  int height = translation_size - environment->parameter_count();
+
+  WriteTranslation(environment->outer(), stackmap, translation);
+  bool has_closure_id = !info()->closure().is_null() &&
+      !info()->closure().is_identical_to(environment->closure());
+
+  int closure_id;
+  if (has_closure_id)
+    UNIMPLEMENTED();
+  else
+    closure_id = Translation::kSelfLiteralId;
+
+//  int closure_id = has_closure_id
+//      ? DefineDeoptimizationLiteral(environment->closure())
+//      : Translation::kSelfLiteralId;
+
+  switch (environment->frame_type()) {
+    case JS_FUNCTION:
+      translation->BeginJSFrame(environment->ast_id(), closure_id, height);
+      break;
+    case JS_CONSTRUCT:
+      translation->BeginConstructStubFrame(closure_id, translation_size);
+      break;
+    case JS_GETTER:
+      DCHECK(translation_size == 1);
+      DCHECK(height == 0);
+      translation->BeginGetterStubFrame(closure_id);
+      break;
+    case JS_SETTER:
+      DCHECK(translation_size == 2);
+      DCHECK(height == 0);
+      translation->BeginSetterStubFrame(closure_id);
+      break;
+    case ARGUMENTS_ADAPTOR:
+      translation->BeginArgumentsAdaptorFrame(closure_id, translation_size);
+      break;
+    case STUB:
+      translation->BeginCompiledStubFrame();
+      break;
+  }
+
+  int object_index = 0;
+  int dematerialized_index = 0;
+
+  if (translation_size != stackmap.locations.size()) {
+    // To support inlining (environment -> outer != NULL)
+    // we probably should introduce some mapping between llvm::Value* and
+    // Location number in a StackMap.
+    UNIMPLEMENTED();
+  }
+  for (int i = 0; i < translation_size; ++i) {
+    llvm::Value* value = environment->values()->at(i);
+    StackMaps::Location location = stackmap.locations[i];
+    AddToTranslation(environment,
+                     translation,
+                     value,
+                     location,
+                     environment->HasTaggedValueAt(i),
+                     environment->HasUint32ValueAt(i),
+                     &object_index,
+                     &dematerialized_index);
+  }
+}
+
+
+void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
+                                 Translation* translation,
+                                 llvm::Value* op,
+                                 StackMaps::Location& location,
+                                 bool is_tagged,
+                                 bool is_uint32,
+                                 int* object_index_pointer,
+                                 int* dematerialized_index_pointer) {
+  if (op == LLVMEnvironment::materialization_marker()) {
+    UNIMPLEMENTED();
+  }
+
+  if (location.kind == StackMaps::Location::kDirect) { // op->IsStackSlot()
+    if (is_tagged) {
+      UNIMPLEMENTED();
+//      translation->StoreStackSlot(op->index());
+    } else if (is_uint32) {
+      UNIMPLEMENTED();
+//      translation->StoreUint32StackSlot(op->index());
+    } else {
+      UNIMPLEMENTED();
+//      translation->StoreInt32StackSlot(op->index());
+    }
+  } else if (location.kind == StackMaps::Location::kIndirect) { // FIXME(llvm): it's wrong
+    UNIMPLEMENTED();
+//    translation->StoreDoubleStackSlot(op->index());
+  } else if (location.kind == StackMaps::Location::kRegister) {
+    Register reg = location.dwarf_reg.reg();
+    if (is_tagged) {
+      translation->StoreRegister(reg);
+    } else if (is_uint32) {
+      translation->StoreUint32Register(reg);
+    } else {
+      translation->StoreInt32Register(reg);
+    }
+  } else if (location.kind == StackMaps::Location::kConstantIndex) { // FIXME(llvm): it's wrong
+    UNIMPLEMENTED();
+//    XMMRegister reg = ToDoubleRegister(op);
+//    translation->StoreDoubleRegister(reg);
+  } else if (location.kind == StackMaps::Location::kConstant) {
+    UNIMPLEMENTED();
+//    HConstant* constant = chunk()->LookupConstant(LConstantOperand::cast(op));
+//    int src_index = DefineDeoptimizationLiteral(constant->handle(isolate()));
+//    translation->StoreLiteral(src_index);
+  } else {
+    UNREACHABLE();
+  }
+}
+
+void LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
+                                    StackMaps::Record& stackmap) {
+  int frame_count = 0;
+  int jsframe_count = 0;
+  for (LLVMEnvironment* e = env; e != NULL; e = e->outer()) {
+    ++frame_count;
+    if (e->frame_type() == JS_FUNCTION) {
+      ++jsframe_count;
+    }
+  }
+  Translation translation(&deopt_data_->translations(), frame_count,
+                          jsframe_count, zone());
+  WriteTranslation(env, stackmap, &translation);
+}
+
+void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
+  List<byte*>& stackmap_list =
+      LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
+  if (stackmap_list.length() == 0) return;
+  DCHECK(stackmap_list.length() == 1);
+
+  StackMaps stackmaps;
+  DataView view(stackmap_list[0]);
+  stackmaps.parse(&view);
+  stackmaps.dumpMultiline(std::cerr, "  ");
+  auto length = deopt_data_->DeoptCount();
+
+  Handle<DeoptimizationInputData> data =
+      DeoptimizationInputData::New(isolate(), length, TENURED);
+
+  USE(data);
+
+  DCHECK(length == stackmaps.records.size());
+  for (auto id = 0; id < length; id++) {
+    StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
+    // Time to make a Translation from Stackmaps and Environments.
+    LLVMEnvironment* env = deopt_data_->deoptimizations()[id];
+    WriteTranslationFor(env, stackmap_record);
+  }
+  // TODO(llvm): it is not thread-safe. It's not anything-safe.
+  // We assume a new function gets attention after the previous one
+  // has been fully processed by llv8.
+  LLVMGranularity::getInstance().memory_manager_ref()->DropStackmaps();
 }
 
 LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
@@ -58,17 +217,9 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 //  int values = graph->GetMaximumValueID();
   CompilationInfo* info = graph->info();
 
-//  if (values > LUnallocated::kMaxVirtualRegisters) {
-//    info->AbortOptimization(kNotEnoughVirtualRegistersForValues);
-//    return NULL;
-//  }
-//  LAllocator allocator(values, graph);
   LLVMChunkBuilder builder(info, graph);
-  LLVMChunk* chunk = builder.Build().NormalizePhis().Optimize().Create(); // TODO(llvm): naming
+  LLVMChunk* chunk = builder.Build().NormalizePhis().Optimize().Create();
   if (chunk == NULL) return NULL;
-
-//  chunk->set_allocated_double_registers(
-//      allocator.assigned_double_registers());
 
   return chunk;
 }
@@ -124,6 +275,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
 
   DCHECK(module_);
   chunk()->set_llvm_function_id(std::stoi(module_->getModuleIdentifier()));
+  chunk()->set_deopt_data(std::move(deopt_data_));
   status_ = DONE;
   return *this;
 }

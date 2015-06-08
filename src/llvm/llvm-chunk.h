@@ -12,6 +12,7 @@
 #include "../hydrogen-instructions.h"
 #include "../handles.h"
 #include "../lithium.h"
+#include "llvm-stackmaps.h"
 #include "mcjit-memory-manager.h"
 
 #include <memory>
@@ -127,24 +128,6 @@ class LLVMGranularity FINAL {
   DISALLOW_COPY_AND_ASSIGN(LLVMGranularity);
 };
 
-class LLVMChunk FINAL : public LowChunk {
- public:
-  virtual ~LLVMChunk();
-  LLVMChunk(CompilationInfo* info, HGraph* graph)
-    : LowChunk(info, graph),
-      llvm_function_id_(-1) {}
-
-  static LLVMChunk* NewChunk(HGraph *graph);
-
-  Handle<Code> Codegen() override;
-
-  void set_llvm_function_id(int id) { llvm_function_id_ = id; }
-  int llvm_function_id() { return llvm_function_id_; }
-
- private:
-  int llvm_function_id_;
-};
-
 class LLVMEnvironment FINAL:  public ZoneObject {
  public:
   LLVMEnvironment(Handle<JSFunction> closure,
@@ -174,7 +157,13 @@ class LLVMEnvironment FINAL:  public ZoneObject {
         zone_(zone),
         has_been_used_(false) { }
 
+  Handle<JSFunction> closure() const { return closure_; }
+  FrameType frame_type() const { return frame_type_; }
+  LLVMEnvironment* outer() const { return outer_; }
   const ZoneList<llvm::Value*>* values() const { return &values_; }
+  BailoutId ast_id() const { return ast_id_; }
+  int translation_size() const { return translation_size_; }
+  int parameter_count() const { return parameter_count_; }
   Zone* zone() const { return zone_; }
 
   // Marker value indicating a de-materialized object.
@@ -194,18 +183,26 @@ class LLVMEnvironment FINAL:  public ZoneObject {
     }
   }
 
+  bool HasTaggedValueAt(int index) const {
+    return is_tagged_.Contains(index);
+  }
+
+  bool HasUint32ValueAt(int index) const {
+    return is_uint32_.Contains(index);
+  }
+
   ~LLVMEnvironment() { // FIXME(llvm): remove unused fields.
-    USE(closure_);
-    USE(frame_type_);
+//    USE(closure_);
+//    USE(frame_type_);
     USE(arguments_stack_height_);
     USE(deoptimization_index_);
     USE(translation_index_);
-    USE(ast_id_);
-    USE(translation_size_);
-    USE(parameter_count_);
+//    USE(ast_id_);
+//    USE(translation_size_);
+//    USE(parameter_count_);
     USE(pc_offset_);
     //USE(object_mapping_);
-    USE(outer_);
+//    USE(outer_);
     USE(entry_);
     USE(has_been_used_);
   }
@@ -247,9 +244,50 @@ class LLVMDeoptData {
   }
 
   int DeoptCount() { return deoptimizations_.length(); }
+
+  ZoneList<LLVMEnvironment*>& deoptimizations() { return deoptimizations_; }
+  TranslationBuffer& translations() { return translations_; }
  private:
   ZoneList<LLVMEnvironment*> deoptimizations_;
   TranslationBuffer translations_;
+};
+
+class LLVMChunk FINAL : public LowChunk {
+ public:
+  virtual ~LLVMChunk();
+  LLVMChunk(CompilationInfo* info, HGraph* graph)
+    : LowChunk(info, graph),
+      llvm_function_id_(-1),
+      deopt_data_(nullptr) {}
+
+  static LLVMChunk* NewChunk(HGraph *graph);
+
+  Handle<Code> Codegen() override;
+
+  void set_llvm_function_id(int id) { llvm_function_id_ = id; }
+  int llvm_function_id() { return llvm_function_id_; }
+
+  void set_deopt_data(std::unique_ptr<LLVMDeoptData> deopt_data) {
+    deopt_data_ = std::move(deopt_data);
+  }
+ private:
+  void SetUpDeoptimizationData(Handle<Code> code);
+  void WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);
+  void WriteTranslation(LLVMEnvironment* environment,
+                        StackMaps::Record& stackmap,
+                        Translation* translation);
+  void AddToTranslation(LLVMEnvironment* environment,
+                        Translation* translation,
+                        llvm::Value* op, //change
+                        StackMaps::Location& location,
+                        bool is_tagged,
+                        bool is_uint32,
+                        int* object_index_pointer,
+                        int* dematerialized_index_pointer);
+
+  int llvm_function_id_;
+  // Ownership gets transfered from LLVMChunkBuilder
+  std::unique_ptr<LLVMDeoptData> deopt_data_;
 };
 
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
