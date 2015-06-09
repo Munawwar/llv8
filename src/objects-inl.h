@@ -5067,6 +5067,16 @@ inline void Code::set_is_turbofanned(bool value) {
   WRITE_UINT32_FIELD(this, kKindSpecificFlags1Offset, updated);
 }
 
+inline bool Code::is_llvmed() {
+  return IsLLVMedField::decode(
+      READ_UINT32_FIELD(this, kKindSpecificFlags1Offset));
+}
+
+inline void Code::set_is_llvmed(bool value) {
+  int previous = READ_UINT32_FIELD(this, kKindSpecificFlags1Offset);
+  int updated = IsLLVMedField::update(previous, value);
+  WRITE_UINT32_FIELD(this, kKindSpecificFlags1Offset, updated);
+}
 
 inline bool Code::can_have_weak_objects() {
   DCHECK(kind() == OPTIMIZED_FUNCTION);

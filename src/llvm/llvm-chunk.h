@@ -317,8 +317,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
       HEnvironment* hydrogen_env, int* argument_index_accumulator,
       ZoneList<HValue*>* objects_to_materialize);
 
-  llvm::BasicBlock* DeoptimizeIf(HInstruction* instr, // TODO (llvm): usage?
-                    Deoptimizer::DeoptReason deopt_reason);
+  void DeoptimizeIf(llvm::Value* compare, HBasicBlock* block);
 
   // Declare methods that deal with the individual node types.
 #define DECLARE_DO(type) void Do##type(H##type* node);
@@ -344,7 +343,6 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // Is the value (not) a smi?
   llvm::Value* SmiCheck(HValue* value, bool negate = false);
   llvm::Value* CallVoid(Address target);
-  void DoBadThing(llvm::Value* compare, Address target, HBasicBlock* block);
 
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;

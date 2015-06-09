@@ -448,10 +448,29 @@ LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
       hydrogen_env, &argument_index_accumulator, &objects_to_materialize);
 }
 
-void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
-                                  HBasicBlock* block) {
+void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block) {
   LLVMEnvironment* environment = AssignEnvironment();
   deopt_data_->Add(environment);
+
+  if (FLAG_deopt_every_n_times != 0 && !info()->IsStub()) UNIMPLEMENTED();
+  if (info()->ShouldTrapOnDeopt()) UNIMPLEMENTED();
+
+  Deoptimizer::BailoutType bailout_type = info()->IsStub()
+      ? Deoptimizer::LAZY
+      : Deoptimizer::EAGER;
+
+  Address entry;
+  {
+    AllowHandleAllocation allow;
+    entry = Deoptimizer::GetDeoptimizationEntry(isolate(),
+        deopt_data_->DeoptCount() - 1, bailout_type);
+  }
+  if (entry == NULL) {
+    Abort(kBailoutWasNotPrepared);
+    return;
+  }
+
+  // TODO(llvm): create Deoptimizer::DeoptInfo & Deoptimizer::JumpTableEntry (?)
 
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* saved_insert_point = llvm_ir_builder_->GetInsertBlock();
@@ -473,7 +492,7 @@ void LLVMChunkBuilder::DoBadThing(llvm::Value* compare, Address target,
     mapped_values.push_back(val);
   }
   llvm_ir_builder_->CreateCall(stackmap, mapped_values);
-  CallVoid(target);
+  CallVoid(entry);
   llvm_ir_builder_->CreateUnreachable();
 
   llvm_ir_builder_->SetInsertPoint(saved_insert_point);
@@ -865,45 +884,6 @@ void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
   UNIMPLEMENTED();
 }
 
-llvm::BasicBlock* LLVMChunkBuilder::DeoptimizeIf(HInstruction* instr,
-                                    Deoptimizer::DeoptReason deopt_reason) {
-  if (FLAG_deopt_every_n_times != 0 && !info()->IsStub()) UNIMPLEMENTED();
-  if (info()->ShouldTrapOnDeopt()) UNIMPLEMENTED();
-
-  llvm::BasicBlock* block = llvm::BasicBlock::Create(
-      LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
-
-  //llvm::ArrayRef<llvm::Value*>();
-
-  //==========================Fake function=============================
-//  // Construct the function type (signature)
-//  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-//  llvm::ArrayRef<llvm::Type*> paramsRef;
-//  bool is_var_arg = false;
-//  llvm::FunctionType* function_type = llvm::FunctionType::get(
-//      llvm::Type::getVoidTy(llvm_context), paramsRef, is_var_arg);
-//
-//  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(0xbadbeef);
-//  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-//  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
-//                                                         ptr_to_function);
-  //===================================================================
-  llvm_ir_builder_->SetInsertPoint(block);
-  llvm_ir_builder_->CreateRet(llvm_ir_builder_->getInt64(deopt_reason));
-//  llvm_ir_builder_->CreateCall(casted, llvm::ArrayRef<llvm::Value*>());
-  return block;
-//  int id = 0 ;
-//  Address entry =
-//      Deoptimizer::GetDeoptimizationEntry(isolate(), id, bailout_type);
-//  if (entry == NULL) {
-//    Abort(kBailoutWasNotPrepared);
-//    return;
-//  }
-
-
-  // TODO(llvm) create Deoptimizer::DeoptInfo
-}
-
 void LLVMChunkBuilder::DoAdd(HAdd* instr) {
   if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
     DCHECK(instr->left()->representation().Equals(instr->representation()));
@@ -926,8 +906,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
 //      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
-      DoBadThing(overflow, reinterpret_cast<Address>(0xbadbeef0),
-                 instr->block());
+      DeoptimizeIf(overflow, instr->block());
     }
   } 
   else {    
@@ -1137,7 +1116,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         llvm::Value* cond = SmiCheck(val, not_smi);
 //        AssignEnvironment(); // just take block_->last_environment()
 //        return AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
-        DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef1), instr->block());
+        DeoptimizeIf(cond, instr->block());
       }
       instr->set_llvm_value(Use(val));
     } else {
@@ -1158,7 +1137,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         if (!val->representation().IsSmi()) {
           bool not_smi = true;
           llvm::Value* cond = SmiCheck(val, not_smi);
-          DoBadThing(cond, reinterpret_cast<Address>(0xbadbeef1), instr->block());
+          DeoptimizeIf(cond, instr->block());
         }
         instr->set_llvm_value(SmiToInteger32(val));
 

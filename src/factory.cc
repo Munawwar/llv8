@@ -1408,7 +1408,7 @@ Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
   code->set_raw_kind_specific_flags1(0);
   code->set_raw_kind_specific_flags2(0);
   code->set_is_crankshafted(false);
-//  code->set_is_llvmed(true);
+  code->set_is_llvmed(true);
   code->set_deoptimization_data(*empty_fixed_array(), SKIP_WRITE_BARRIER);
   code->set_raw_type_feedback_info(Smi::FromInt(0));
   code->set_next_code_link(*undefined_value());

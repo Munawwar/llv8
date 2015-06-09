@@ -5206,7 +5206,8 @@ class Code: public HeapObject {
       kStackSlotsFirstBit + kStackSlotsBitCount;
   static const int kMarkedForDeoptimizationBit = kHasFunctionCacheBit + 1;
   static const int kIsTurbofannedBit = kMarkedForDeoptimizationBit + 1;
-  static const int kCanHaveWeakObjects = kIsTurbofannedBit + 1;
+  static const int kIsLLVMedBit = kIsTurbofannedBit + 1;
+  static const int kCanHaveWeakObjects = kIsLLVMedBit + 1;
 
   STATIC_ASSERT(kStackSlotsFirstBit + kStackSlotsBitCount <= 32);
   STATIC_ASSERT(kCanHaveWeakObjects + 1 <= 32);
@@ -5218,6 +5219,8 @@ class Code: public HeapObject {
   class MarkedForDeoptimizationField
       : public BitField<bool, kMarkedForDeoptimizationBit, 1> {};   // NOLINT
   class IsTurbofannedField : public BitField<bool, kIsTurbofannedBit, 1> {
+  };  // NOLINT
+  class IsLLVMedField : public BitField<bool, kIsLLVMedBit, 1> {
   };  // NOLINT
   class CanHaveWeakObjectsField
       : public BitField<bool, kCanHaveWeakObjects, 1> {};  // NOLINT
