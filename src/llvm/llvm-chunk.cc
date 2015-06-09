@@ -165,7 +165,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
   }
 }
 
-void LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
+int LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
                                     StackMaps::Record& stackmap) {
   int frame_count = 0;
   int jsframe_count = 0;
@@ -178,6 +178,7 @@ void LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
   Translation translation(&deopt_data_->translations(), frame_count,
                           jsframe_count, zone());
   WriteTranslation(env, stackmap, &translation);
+  return translation.index();
 }
 
 void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
@@ -195,15 +196,45 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   Handle<DeoptimizationInputData> data =
       DeoptimizationInputData::New(isolate(), length, TENURED);
 
-  USE(data);
-
   DCHECK(length == stackmaps.records.size());
   for (auto id = 0; id < length; id++) {
     StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
     // Time to make a Translation from Stackmaps and Environments.
     LLVMEnvironment* env = deopt_data_->deoptimizations()[id];
-    WriteTranslationFor(env, stackmap_record);
+
+    int translation_index = WriteTranslationFor(env, stackmap_record);
+
+    data->SetAstId(id, env->ast_id());
+    data->SetTranslationIndex(id, Smi::FromInt(translation_index));
+    data->SetArgumentsStackHeight(id,
+                                  Smi::FromInt(env->arguments_stack_height()));
+    // pc offset can be obtained from the stackmap TODO(llvm):
+    // but we do not support lazy deopt yet (and for eager it should be -1)
+    data->SetPc(id, Smi::FromInt(-1));
   }
+
+  Handle<ByteArray> translations =
+      deopt_data_->translations().CreateByteArray(isolate()->factory());
+  data->SetTranslationByteArray(*translations);
+  // FIXME(llvm):  inlined function count
+  data->SetInlinedFunctionCount(Smi::FromInt(0));
+  data->SetOptimizationId(Smi::FromInt(info()->optimization_id()));
+  if (info()->IsOptimizing()) {
+    // Reference to shared function info does not change between phases.
+    AllowDeferredHandleDereference allow_handle_dereference;
+    data->SetSharedFunctionInfo(*info()->shared_info());
+  } else {
+    data->SetSharedFunctionInfo(Smi::FromInt(0));
+  }
+  data->SetWeakCellCache(Smi::FromInt(0)); // I don't know what this is.
+
+  data->SetOsrAstId(Smi::FromInt(info()->osr_ast_id().ToInt()));
+  // TODO(llvm): OSR entry point
+  data->SetOsrPcOffset(Smi::FromInt(-1));
+
+  // TODO(llvm): deoptimization literals
+
+  code->set_deoptimization_data(*data);
   // TODO(llvm): it is not thread-safe. It's not anything-safe.
   // We assume a new function gets attention after the previous one
   // has been fully processed by llv8.

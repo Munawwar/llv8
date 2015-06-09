@@ -143,7 +143,6 @@ class LLVMEnvironment FINAL:  public ZoneObject {
         frame_type_(frame_type),
         arguments_stack_height_(argument_count),
         deoptimization_index_(Safepoint::kNoDeoptimizationIndex),
-        translation_index_(-1),
         ast_id_(ast_id),
         translation_size_(value_count),
         parameter_count_(parameter_count),
@@ -159,6 +158,7 @@ class LLVMEnvironment FINAL:  public ZoneObject {
 
   Handle<JSFunction> closure() const { return closure_; }
   FrameType frame_type() const { return frame_type_; }
+  int arguments_stack_height() const { return arguments_stack_height_; }
   LLVMEnvironment* outer() const { return outer_; }
   const ZoneList<llvm::Value*>* values() const { return &values_; }
   BailoutId ast_id() const { return ast_id_; }
@@ -194,9 +194,8 @@ class LLVMEnvironment FINAL:  public ZoneObject {
   ~LLVMEnvironment() { // FIXME(llvm): remove unused fields.
 //    USE(closure_);
 //    USE(frame_type_);
-    USE(arguments_stack_height_);
+//    USE(arguments_stack_height_);
     USE(deoptimization_index_);
-    USE(translation_index_);
 //    USE(ast_id_);
 //    USE(translation_size_);
 //    USE(parameter_count_);
@@ -212,7 +211,6 @@ class LLVMEnvironment FINAL:  public ZoneObject {
   FrameType frame_type_;
   int arguments_stack_height_;
   int deoptimization_index_;
-  int translation_index_;
   BailoutId ast_id_;
   int translation_size_;
   int parameter_count_;
@@ -272,7 +270,8 @@ class LLVMChunk FINAL : public LowChunk {
   }
  private:
   void SetUpDeoptimizationData(Handle<Code> code);
-  void WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);
+  // Returns translation index of the newly generated translation
+  int WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);
   void WriteTranslation(LLVMEnvironment* environment,
                         StackMaps::Record& stackmap,
                         Translation* translation);
