@@ -269,6 +269,9 @@ class LLVMChunk FINAL : public LowChunk {
     deopt_data_ = std::move(deopt_data);
   }
  private:
+  static const int kStackSlotSize = kPointerSize;
+  static const int kPhonySpillCount = 3; // rbp, rsi, rdi
+
   void SetUpDeoptimizationData(Handle<Code> code);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);

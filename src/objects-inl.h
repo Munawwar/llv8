@@ -5181,7 +5181,7 @@ void Code::set_builtin_index(int index) {
 
 
 unsigned Code::stack_slots() {
-  DCHECK(is_crankshafted());
+  DCHECK(is_crankshafted() || is_llvmed());
   return StackSlotsField::decode(
       READ_UINT32_FIELD(this, kKindSpecificFlags1Offset));
 }
@@ -5189,7 +5189,7 @@ unsigned Code::stack_slots() {
 
 void Code::set_stack_slots(unsigned slots) {
   CHECK(slots <= (1 << kStackSlotsBitCount));
-  DCHECK(is_crankshafted());
+  DCHECK(is_crankshafted() || is_llvmed());
   int previous = READ_UINT32_FIELD(this, kKindSpecificFlags1Offset);
   int updated = StackSlotsField::update(previous, slots);
   WRITE_UINT32_FIELD(this, kKindSpecificFlags1Offset, updated);

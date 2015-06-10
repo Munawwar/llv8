@@ -13,9 +13,9 @@ namespace internal {
 LLVMChunk::~LLVMChunk() {}
 
 Handle<Code> LLVMChunk::Codegen() {
-#ifdef DEBUG
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
+#ifdef DEBUG
   std::cerr << "\taddress == " <<  reinterpret_cast<void*>(address) << std::endl;
   std::cerr << "\tlast code allocated == "
       << reinterpret_cast<void*>(
@@ -25,6 +25,8 @@ Handle<Code> LLVMChunk::Codegen() {
             .buffer)
       << std::endl;
   LLVMGranularity::getInstance().Err();
+#else
+  USE(address);
 #endif
 
   Isolate* isolate = info()->isolate();
@@ -192,6 +194,17 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   stackmaps.parse(&view);
   stackmaps.dumpMultiline(std::cerr, "  ");
   auto length = deopt_data_->DeoptCount();
+
+  uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
+      llvm_function_id_);
+  auto it = std::find_if(std::begin(stackmaps.stack_sizes),
+                         std::end(stackmaps.stack_sizes),
+                         [address](const StackMaps::StackSize& s) {
+                           return s.functionOffset ==  address;
+                         });
+  DCHECK(it != std::end(stackmaps.stack_sizes));
+  DCHECK(it->size / kStackSlotSize - kPhonySpillCount >= 0);
+  code->set_stack_slots(it->size / kStackSlotSize - kPhonySpillCount);
 
   Handle<DeoptimizationInputData> data =
       DeoptimizationInputData::New(isolate(), length, TENURED);
