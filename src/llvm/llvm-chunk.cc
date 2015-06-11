@@ -125,18 +125,6 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   }
 }
 
-// FIXME(llvm): this O(n) can easily be replaced with O(1)
-HConstant* LLVMChunk::LookupConstant(llvm::Value* val) {
-  for (auto i = 0; i < graph()->GetMaximumValueID(); i++) {
-    if (graph()->LookupValue(i)->llvm_value() == val) {
-      DCHECK(graph()->LookupValue(i)->IsConstant());
-      return HConstant::cast(graph()->LookupValue(i));
-    }
-  }
-  UNREACHABLE();
-  return nullptr;
-}
-
 void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
                                  Translation* translation,
                                  llvm::Value* op,
@@ -177,9 +165,8 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
 //    XMMRegister reg = ToDoubleRegister(op);
 //    translation->StoreDoubleRegister(reg);
   } else if (location.kind == StackMaps::Location::kConstant) {
-    HConstant* constant = LookupConstant(op);
     int src_index = deopt_data_->DefineDeoptimizationLiteral(
-        constant->handle(isolate()));
+        isolate()->factory()->NewNumberFromInt(location.offset, TENURED));
     translation->StoreLiteral(src_index);
   } else {
     UNREACHABLE();

@@ -284,7 +284,6 @@ class LLVMChunk FINAL : public LowChunk {
   static const int kStackSlotSize = kPointerSize;
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi
 
-  HConstant* LookupConstant(llvm::Value*);
   void SetUpDeoptimizationData(Handle<Code> code);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);
