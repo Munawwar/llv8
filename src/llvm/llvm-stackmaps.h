@@ -129,6 +129,8 @@ struct StackMaps {
     void parse(ParseContext&);
     void dump(std::ostream&) const;
 
+    static const char* ToString(Kind kind);
+
     OVERLOAD_STREAM_INSERTION(Location)
 //    GPRReg directGPR() const;
 //    void restoreInto(MacroAssembler&, StackMaps&, char* savedRegisters, GPRReg result) const;

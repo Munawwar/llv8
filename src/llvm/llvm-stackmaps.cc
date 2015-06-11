@@ -84,11 +84,35 @@ void StackMaps::Location::parse(StackMaps::ParseContext& context) {
   this->offset = context.view->read<int32_t>(true);
 }
 
+const char* StackMaps::Location::ToString(
+    StackMaps::Location::Kind kind) {
+  switch (kind) {
+    case StackMaps::Location::kRegister:
+      return "Register";
+      break;
+    case StackMaps::Location::kDirect:
+      return "Direct";
+      break;
+    case StackMaps::Location::kIndirect:
+      return "Indirect";
+      break;
+    case StackMaps::Location::kConstant:
+      return "Constant";
+      break;
+    case StackMaps::Location::kConstantIndex:
+      return "ConstantIndex";
+      break;
+    default:
+      UNREACHABLE();
+      return nullptr;
+  }
+}
+
 void StackMaps::Location::dump(std::ostream& os) const {
-  os << "(" << kind << ", "
+  os << "(" << ToString(kind) << ", "
       << dwarf_reg << ", off:"
       << offset << ", size:"
-      << size << ")";
+      << static_cast<unsigned int>(size) << ")";
 }
 
 //GPRReg StackMaps::Location::directGPR() const {

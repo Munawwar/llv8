@@ -107,6 +107,11 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
     // FIXME(llvm): (probably when adding inlining support)
     // Here we assume the i-th stackmap's Location corresponds
     // to the i-th llvm::Value which is not a very safe assumption in general.
+
+    // Also, it seems we cannot really use llvm::Value* here, because
+    // since we generated them optimization has happened
+    // (therefore those values are now invalid).
+
     llvm::Value* value = environment->values()->at(i);
     StackMaps::Location location = stackmap.locations[i];
     AddToTranslation(environment,
