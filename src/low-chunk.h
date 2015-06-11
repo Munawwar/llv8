@@ -68,6 +68,8 @@ class LowChunkBuilderBase BASE_EMBEDDED {
    Zone* zone_;
 };
 
+// FIXME(llvm): it seems we don't use this class at all
+// (it has only 1 subclass).
 class LowCodeGenBase BASE_EMBEDDED {
   public:
     LowCodeGenBase(LowChunk* chunk, CompilationInfo* info)

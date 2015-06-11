@@ -235,19 +235,30 @@ class LLVMDeoptData {
  public:
   LLVMDeoptData(Zone* zone)
      : deoptimizations_(4, zone),
-       translations_(zone) {}
+       translations_(zone),
+       deoptimization_literals_(8, zone),
+       zone_(zone) {}
 
   void Add(LLVMEnvironment* environment) {
     deoptimizations_.Add(environment, environment->zone());
   }
 
-  int DeoptCount() { return deoptimizations_.length(); }
-
   ZoneList<LLVMEnvironment*>& deoptimizations() { return deoptimizations_; }
   TranslationBuffer& translations() { return translations_; }
+  ZoneList<Handle<Object> >& deoptimization_literals() {
+    return deoptimization_literals_;
+  }
+
+  int DeoptCount() { return deoptimizations_.length(); }
+
+  int DefineDeoptimizationLiteral(Handle<Object> literal);
+
  private:
   ZoneList<LLVMEnvironment*> deoptimizations_;
   TranslationBuffer translations_;
+  ZoneList<Handle<Object> > deoptimization_literals_;
+
+  Zone* zone_;
 };
 
 class LLVMChunk FINAL : public LowChunk {
@@ -259,6 +270,7 @@ class LLVMChunk FINAL : public LowChunk {
       deopt_data_(nullptr) {}
 
   static LLVMChunk* NewChunk(HGraph *graph);
+
 
   Handle<Code> Codegen() override;
 
@@ -272,6 +284,7 @@ class LLVMChunk FINAL : public LowChunk {
   static const int kStackSlotSize = kPointerSize;
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi
 
+  HConstant* LookupConstant(llvm::Value*);
   void SetUpDeoptimizationData(Handle<Code> code);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);

@@ -104,6 +104,9 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
     UNIMPLEMENTED();
   }
   for (int i = 0; i < translation_size; ++i) {
+    // FIXME(llvm): (probably when adding inlining support)
+    // Here we assume the i-th stackmap's Location corresponds
+    // to the i-th llvm::Value which is not a very safe assumption in general.
     llvm::Value* value = environment->values()->at(i);
     StackMaps::Location location = stackmap.locations[i];
     AddToTranslation(environment,
@@ -117,6 +120,17 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   }
 }
 
+// FIXME(llvm): this O(n) can easily be replaced with O(1)
+HConstant* LLVMChunk::LookupConstant(llvm::Value* val) {
+  for (auto i = 0; i < graph()->GetMaximumValueID(); i++) {
+    if (graph()->LookupValue(i)->llvm_value() == val) {
+      DCHECK(graph()->LookupValue(i)->IsConstant());
+      return HConstant::cast(graph()->LookupValue(i));
+    }
+  }
+  UNREACHABLE();
+  return nullptr;
+}
 
 void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
                                  Translation* translation,
@@ -158,10 +172,10 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
 //    XMMRegister reg = ToDoubleRegister(op);
 //    translation->StoreDoubleRegister(reg);
   } else if (location.kind == StackMaps::Location::kConstant) {
-    UNIMPLEMENTED();
-//    HConstant* constant = chunk()->LookupConstant(LConstantOperand::cast(op));
-//    int src_index = DefineDeoptimizationLiteral(constant->handle(isolate()));
-//    translation->StoreLiteral(src_index);
+    HConstant* constant = LookupConstant(op);
+    int src_index = deopt_data_->DefineDeoptimizationLiteral(
+        constant->handle(isolate()));
+    translation->StoreLiteral(src_index);
   } else {
     UNREACHABLE();
   }
@@ -181,6 +195,15 @@ int LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
                           jsframe_count, zone());
   WriteTranslation(env, stackmap, &translation);
   return translation.index();
+}
+
+int LLVMDeoptData::DefineDeoptimizationLiteral(Handle<Object> literal) {
+  int result = deoptimization_literals_.length();
+  for (int i = 0; i < deoptimization_literals_.length(); ++i) {
+    if (deoptimization_literals_[i].is_identical_to(literal)) return i;
+  }
+  deoptimization_literals_.Add(literal, zone_);
+  return result;
 }
 
 void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
@@ -226,6 +249,17 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
     data->SetPc(id, Smi::FromInt(-1));
   }
 
+  auto literals_len = deopt_data_->deoptimization_literals().length();
+  Handle<FixedArray> literals = isolate()->factory()->NewFixedArray(
+      literals_len, TENURED);
+  {
+    AllowDeferredHandleDereference copy_handles;
+    for (int i = 0; i < literals_len; i++) {
+      literals->set(i, *(deopt_data_->deoptimization_literals()[i]));
+    }
+    data->SetLiteralArray(*literals);
+  }
+
   Handle<ByteArray> translations =
       deopt_data_->translations().CreateByteArray(isolate()->factory());
   data->SetTranslationByteArray(*translations);
@@ -244,8 +278,6 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   data->SetOsrAstId(Smi::FromInt(info()->osr_ast_id().ToInt()));
   // TODO(llvm): OSR entry point
   data->SetOsrPcOffset(Smi::FromInt(-1));
-
-  // TODO(llvm): deoptimization literals
 
   code->set_deoptimization_data(*data);
   // TODO(llvm): it is not thread-safe. It's not anything-safe.
@@ -1124,11 +1156,8 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       UNIMPLEMENTED();
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
-        // TODO(llvm): environment
         bool not_smi = true;
         llvm::Value* cond = SmiCheck(val, not_smi);
-//        AssignEnvironment(); // just take block_->last_environment()
-//        return AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
         DeoptimizeIf(cond, instr->block());
       }
       instr->set_llvm_value(Use(val));
