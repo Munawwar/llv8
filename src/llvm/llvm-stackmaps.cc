@@ -48,8 +48,7 @@ Register DWARFRegister::reg() const {
 }
 
 void DWARFRegister::dump(std::ostream& os) const {
-    Register reg = this->reg();
-    os << Register::AllocationIndexToString(Register::ToAllocationIndex(reg));
+    os << this->reg().ToString();
 }
 
 void StackMaps::Constant::parse(StackMaps::ParseContext& context) {

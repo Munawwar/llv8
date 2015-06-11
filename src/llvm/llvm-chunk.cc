@@ -451,6 +451,7 @@ llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
   llvm::Value* res = nullptr;
   if (SmiValuesAre32Bits()) {
     res = llvm_ir_builder_->CreateLShr(Use(value), kSmiShift);
+    res = llvm_ir_builder_->CreateTrunc(res, llvm_ir_builder_->getInt32Ty());
   } else {
     DCHECK(SmiValuesAre31Bits());
     UNIMPLEMENTED();
@@ -468,7 +469,10 @@ llvm::Value* LLVMChunkBuilder::SmiCheck(HValue* value, bool negate) {
 }
 
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
-  return llvm_ir_builder_->CreateShl(Use(value), kSmiShift);
+  llvm::Value* int32_val = Use(value);
+  llvm::Value* extended_width_val = llvm_ir_builder_->CreateZExt(
+      int32_val, llvm_ir_builder_->getInt64Ty());
+  return llvm_ir_builder_->CreateShl(extended_width_val, kSmiShift);
 }
 
 llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
@@ -756,9 +760,23 @@ LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
 }
 
 void LLVMChunkBuilder::DoPhi(HPhi* phi) {
-  llvm::PHINode* llvm_phi = llvm_ir_builder_->CreatePHI(
-      llvm::Type::getInt64Ty(LLVMGranularity::getInstance().context()),
-      phi->OperandCount());
+  Representation r = phi->RepresentationFromInputs();
+  llvm::Type* phi_type;
+  switch (r.kind()) {
+    case Representation::Kind::kInteger32:
+      phi_type = llvm_ir_builder_->getInt32Ty();
+      break;
+    case Representation::Kind::kTagged:
+    case Representation::Kind::kSmi:
+      phi_type = llvm_ir_builder_->getInt64Ty();
+      break;
+    default:
+      UNIMPLEMENTED();
+      phi_type = nullptr;
+  }
+
+  llvm::PHINode* llvm_phi = llvm_ir_builder_->CreatePHI(phi_type,
+                                                        phi->OperandCount());
   phi->set_llvm_value(llvm_phi);
 }
 
@@ -862,7 +880,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     instr->set_llvm_value(value);
   } else if (r.IsInteger32()) {
     int64_t int32_value = instr->Integer32Value();
-    llvm::Value* value = llvm_ir_builder_->getInt64(int32_value);
+    llvm::Value* value = llvm_ir_builder_->getInt32(int32_value);
     instr->set_llvm_value(value);
   } else if (r.IsDouble()) {
     UNIMPLEMENTED();
@@ -940,9 +958,8 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* add = llvm_ir_builder_->CreateAdd(Use(left), Use(right),"");
       instr->set_llvm_value(add);
     } else {
-//      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
       llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::sadd_with_overflow, llvm_ir_builder_->getInt64Ty());
+          llvm::Intrinsic::sadd_with_overflow, llvm_ir_builder_->getInt32Ty());
 
       llvm::Value* params[] = { Use(left), Use(right) };
       llvm::Value* call = llvm_ir_builder_->CreateCall(intrinsic, params);
@@ -950,10 +967,9 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
       llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
-//      DeoptimizeIf(overflow, instr, Deoptimizer::kOverflow);
       DeoptimizeIf(overflow, instr->block());
     }
-  } 
+  }
   else {    
     UNIMPLEMENTED();
   }
@@ -1025,10 +1041,10 @@ void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexIn
 }
 
 void LLVMChunkBuilder::DoBranch(HBranch* instr) {
-  HValue* value  = instr->value();
-  Representation r  = value->representation();
-  if(r.IsInteger32()){
-    llvm::Value* zero = llvm_ir_builder_->getInt64(0);
+  HValue* value = instr->value();
+  Representation r = value->representation();
+  if(r.IsInteger32()) {
+    llvm::Value* zero = llvm_ir_builder_->getInt32(0);
     llvm::Value* Compare = llvm_ir_builder_->CreateICmpNE(Use(value), zero);
     llvm::BranchInst* Branch = llvm_ir_builder_->CreateCondBr(Compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));

@@ -110,6 +110,28 @@ struct Register {
   };
 
   static const int kNumRegisters = Code::kAfterLast;
+  const char* ToString() {
+    DCHECK(is_valid());
+    const char* const names[] = {
+      "rax",
+      "rcx",
+      "rdx",
+      "rbx",
+      "rsp",
+      "rbp",
+      "rsi",
+      "rdi",
+      "r8",
+      "r9",
+      "r10",
+      "r11",
+      "r12",
+      "r13"
+      "r14",
+      "r15"
+    };
+    return names[code_];
+  }
 
   static Register from_code(int code) {
     DCHECK(code >= 0);
