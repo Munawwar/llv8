@@ -875,7 +875,9 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     llvm::Value* value = llvm_ir_builder_->getInt32(int32_value);
     instr->set_llvm_value(value);
   } else if (r.IsDouble()) {
-    UNIMPLEMENTED();
+    double dValue = instr->DoubleValue();
+    llvm::Value* value = llvm::ConstantFP::get(llvm_ir_builder_->getDoubleTy(), dValue);
+    instr->set_llvm_value(value);
   } else if (r.IsExternal()) {
     UNIMPLEMENTED();
   } else if (r.IsTagged()) {
@@ -961,9 +963,13 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       instr->set_llvm_value(sum);
       DeoptimizeIf(overflow, instr->block());
     }
-  }
-  else {    
-    UNIMPLEMENTED();
+  } else if (instr->representation().IsDouble()) {
+    DCHECK(instr->left()->representation().IsDouble());
+    DCHECK(instr->right()->representation().IsDouble());
+    HValue* left = instr->BetterLeftOperand();
+    HValue* right = instr->BetterRightOperand();
+    llvm::Value* fadd = llvm_ir_builder_->CreateFAdd(Use(left), Use(right));
+    instr->set_llvm_value(fadd);
   }
 }
 
@@ -1152,6 +1158,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
   Representation from = instr->from();
   Representation to = instr->to();
   HValue* val = instr->value();
+  LLVMContext& context = LLVMGranularity::getInstance().context();
   if (from.IsSmi()) {
     if (to.IsTagged()) {
       instr->set_llvm_value(Use(val));
@@ -1161,7 +1168,24 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
   }
   if (from.IsTagged()) {
     if (to.IsDouble()) {
-      UNIMPLEMENTED();
+      NumberUntagDMode mode = val->representation().IsSmi()
+      ? NUMBER_CANDIDATE_IS_SMI : NUMBER_CANDIDATE_IS_ANY_TAGGED;
+      if (mode == NUMBER_CANDIDATE_IS_ANY_TAGGED) {
+        llvm::PointerType* PointerTy = llvm::PointerType::get(llvm::Type::getDoubleTy(context), 0);
+        llvm::ConstantInt* const_int32 = llvm::ConstantInt::get(context, llvm::APInt(64, llvm::StringRef("7"), 10));
+        llvm::ArrayRef<llvm::Value*> paramsRef(const_int32);
+        llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(val), llvm::Type::getInt8PtrTy(context));
+        llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, paramsRef);
+        llvm::Value* bitCast = llvm_ir_builder_->CreateBitCast(gep, PointerTy);
+        llvm::LoadInst* loadD = llvm_ir_builder_->CreateLoad(bitCast);
+        instr->set_llvm_value(loadD);
+      } else if(mode == NUMBER_CANDIDATE_IS_SMI) {
+        llvm::PointerType* PointerTy_2 = llvm::PointerType::get(llvm::Type::getDoubleTy(context), 0);
+        llvm::Value* sToI = SmiToInteger32(val);
+        llvm::Value* bitCast = llvm_ir_builder_->CreateSIToFP(sToI, PointerTy_2);
+        instr->set_llvm_value(bitCast); 
+      }
+      //UNIMPLEMENTED();
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
@@ -1195,7 +1219,15 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       }
     }
   } else if (from.IsDouble()) {
-    UNIMPLEMENTED();
+      if (to.IsInteger32()) {
+        LLVMContext& context = LLVMGranularity::getInstance().context();
+        llvm::Type* type = llvm::Type::getInt64Ty(context);
+        llvm::Value* dToi =  llvm_ir_builder_->CreateFPToSI(Use(val), type);
+        instr->set_llvm_value(dToi);
+      } else {
+        UNIMPLEMENTED();
+      } 
+    //UNIMPLEMENTED();
   } else if (from.IsInteger32()) {
     if (to.IsTagged()) {
       if (!instr->CheckFlag(HValue::kCanOverflow)) {
@@ -1576,6 +1608,13 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
+//  llvm::Value* context = llvm_ir_builder_->CreateLoad(instr->context()->llvm_value(), "RSI"); 
+  StringAddStub stub(isolate(),
+                     instr->flags(),
+                     instr->pretenure_flag());
+  
+  //llvm::Function* callStrAdd = llvm::Function::Create(&LCodeGen::CallCode, llvm::Function::ExternalLinkage );
+  //LCodeGen(NULL, NULL, NULL).CallCode(stub.GetCode(), RelocInfo::CODE_TARGET, NULL);
   UNIMPLEMENTED();
 }
 

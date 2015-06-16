@@ -11,6 +11,7 @@
 #include "../hydrogen.h"
 #include "../hydrogen-instructions.h"
 #include "../handles.h"
+#include "../x64/lithium-codegen-x64.h"
 #include "../lithium.h"
 #include "llvm-stackmaps.h"
 #include "mcjit-memory-manager.h"

@@ -4914,7 +4914,10 @@ void LCodeGen::EmitNumberUntagD(LNumberUntagD* instr, Register input_reg,
 
     // On x64 it is safe to load at heap number offset before evaluating the map
     // check, since all heap objects are at least two words long.
+     //__ int3();
     __ movsd(result_reg, FieldOperand(input_reg, HeapNumber::kValueOffset));
+    // if (instr->hydrogen_value()->id() == 24)
+    //__ int3();
 
     if (can_convert_undefined_to_nan) {
       __ j(not_equal, &convert, Label::kNear);

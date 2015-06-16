@@ -155,11 +155,9 @@ class LCodeGen: public LCodeGenBase {
                        SafepointMode safepoint_mode,
                        int argc);
 
-
   void CallCode(Handle<Code> code,
                 RelocInfo::Mode mode,
                 LInstruction* instr);
-
   void CallRuntime(const Runtime::Function* function,
                    int num_arguments,
                    LInstruction* instr,

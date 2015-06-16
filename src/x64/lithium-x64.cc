@@ -1891,6 +1891,7 @@ LInstruction* LChunkBuilder::DoChange(HChange* instr) {
     if (to.IsDouble()) {
       LOperand* value = UseRegister(val);
       LInstruction* result = DefineAsRegister(new(zone()) LNumberUntagD(value));
+      //__ stop("pending ");
       if (!val->representation().IsSmi()) result = AssignEnvironment(result);
       return result;
     } else if (to.IsSmi()) {
