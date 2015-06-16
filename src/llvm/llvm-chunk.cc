@@ -1024,7 +1024,7 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
       else
       {
         llvm::Value* Xor = llvm_ir_builder_->CreateXor(Use(left), Use(right), "");
-         instr->set_llvm_value(Xor);
+        instr->set_llvm_value(Xor);
       }
       break;
     }
@@ -1181,16 +1181,16 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(val), llvm::Type::getInt8PtrTy(context));
         llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, paramsRef);
         llvm::Value* bitCast = llvm_ir_builder_->CreateBitCast(gep, PointerTy);
-        llvm::LoadInst* loadD = llvm_ir_builder_->CreateLoad(bitCast);
-        instr->set_llvm_value(loadD);
+        llvm::LoadInst* load_d = llvm_ir_builder_->CreateLoad(bitCast);
+        instr->set_llvm_value(load_d);
+        // TODO(llvm): deopt
+        // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
       } else if(mode == NUMBER_CANDIDATE_IS_SMI) {
         llvm::PointerType* PointerTy_2 = llvm::PointerType::get(llvm::Type::getDoubleTy(context), 0);
-        llvm::Value* sToI = SmiToInteger32(val);
-        llvm::Value* bitCast = llvm_ir_builder_->CreateSIToFP(sToI, PointerTy_2);
-        instr->set_llvm_value(bitCast); 
+        llvm::Value* s_to_i = SmiToInteger32(val);
+        llvm::Value* bitCast = llvm_ir_builder_->CreateSIToFP(s_to_i, PointerTy_2);
+        instr->set_llvm_value(bitCast);
       }
-      // TODO(llvm): deopt
-      // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
@@ -1225,7 +1225,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
   } else if (from.IsDouble()) {
       if (to.IsInteger32()) {
         LLVMContext& context = LLVMGranularity::getInstance().context();
-        llvm::Type* type = llvm::Type::getInt64Ty(context);
+        llvm::Type* type = llvm::Type::getInt32Ty(context);
         llvm::Value* dToi =  llvm_ir_builder_->CreateFPToSI(Use(val), type);
         instr->set_llvm_value(dToi);
       } else if (to.IsTagged()) {
