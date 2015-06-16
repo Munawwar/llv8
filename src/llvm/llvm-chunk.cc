@@ -942,7 +942,7 @@ void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
 }
 
 void LLVMChunkBuilder::DoAdd(HAdd* instr) {
-  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+  if(instr->representation().IsSmiOrInteger32()) {
     DCHECK(instr->left()->representation().Equals(instr->representation()));
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     bool can_overflow = instr->CheckFlag(HValue::kCanOverflow);
@@ -952,8 +952,10 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* add = llvm_ir_builder_->CreateAdd(Use(left), Use(right),"");
       instr->set_llvm_value(add);
     } else {
+      auto type = instr->representation().IsSmi()
+          ? llvm_ir_builder_->getInt64Ty() : llvm_ir_builder_->getInt32Ty();
       llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::sadd_with_overflow, llvm_ir_builder_->getInt32Ty());
+          llvm::Intrinsic::sadd_with_overflow, type);
 
       llvm::Value* params[] = { Use(left), Use(right) };
       llvm::Value* call = llvm_ir_builder_->CreateCall(intrinsic, params);
@@ -970,6 +972,8 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     HValue* right = instr->BetterRightOperand();
     llvm::Value* fadd = llvm_ir_builder_->CreateFAdd(Use(left), Use(right));
     instr->set_llvm_value(fadd);
+  } else {
+    UNIMPLEMENTED();
   }
 }
 
@@ -1185,7 +1189,8 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         llvm::Value* bitCast = llvm_ir_builder_->CreateSIToFP(sToI, PointerTy_2);
         instr->set_llvm_value(bitCast); 
       }
-      //UNIMPLEMENTED();
+      // TODO(llvm): deopt
+      // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
@@ -1214,7 +1219,6 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
           DeoptimizeIf(cond, instr->block());
         }
         instr->set_llvm_value(SmiToInteger32(val));
-
 //        if (!val->representation().IsSmi()) result = AssignEnvironment(result);
       }
     }
@@ -1224,10 +1228,11 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         llvm::Type* type = llvm::Type::getInt64Ty(context);
         llvm::Value* dToi =  llvm_ir_builder_->CreateFPToSI(Use(val), type);
         instr->set_llvm_value(dToi);
+      } else if (to.IsTagged()) {
+        UNIMPLEMENTED();
       } else {
         UNIMPLEMENTED();
-      } 
-    //UNIMPLEMENTED();
+      }
   } else if (from.IsInteger32()) {
     if (to.IsTagged()) {
       if (!instr->CheckFlag(HValue::kCanOverflow)) {
