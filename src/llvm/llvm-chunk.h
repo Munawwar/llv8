@@ -359,6 +359,15 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // Is the value (not) a smi?
   llvm::Value* SmiCheck(HValue* value, bool negate = false);
   llvm::Value* CallVoid(Address target);
+  llvm::Value* CallForResult(Address target);
+  // Allocate a heap number in new space with undefined value. Returns
+  // tagged pointer in result register, or jumps to gc_required if new
+  // space is full. // FIXME(llvm): the comment
+  llvm::Value* AllocateHeapNumber();
+  llvm::Value* CallRuntime(Runtime::FunctionId id);
+  llvm::Value* GetContext();
+  void ChangeTaggedToDouble(HValue* val, HChange* instr);
+  void ChangeDoubleToTagged(HValue* val, HChange* instr);
 
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;

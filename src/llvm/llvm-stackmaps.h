@@ -159,7 +159,7 @@ struct StackMaps {
     void dump(std::ostream&) const;
 
     OVERLOAD_STREAM_INSERTION(Record)
-//
+//  TODO(llvm): use RegList.
 //    RegisterSet liveOutsSet() const;
 //    RegisterSet locationSet() const;
 //    RegisterSet usedRegisterSet() const;

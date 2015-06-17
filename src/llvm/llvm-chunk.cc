@@ -468,17 +468,70 @@ llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
 }
 
 llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(target));
   bool is_var_arg = false;
   llvm::FunctionType* function_type = llvm::FunctionType::get(
-      llvm::Type::getVoidTy(llvm_context), llvm::ArrayRef<llvm::Type*>(),
-      is_var_arg);
+      llvm_ir_builder_->getVoidTy(), is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
                                                          ptr_to_function);
   return llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
+}
+
+// TODO(llvm): Refactor. Most of the code is shared with CallVoid.
+// TODO(llvm): For now we only support functions with on arguments.
+llvm::Value* LLVMChunkBuilder::CallForResult(Address target) {
+  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(target));
+  bool is_var_arg = false;
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      llvm_ir_builder_->getInt8PtrTy(), is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
+                                                         ptr_to_function);
+
+  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall(casted);
+  // FIXME(llvm): this is not the right CC.
+  // We need a CC where everything is caller-saved.
+  call_inst->setCallingConv(llvm::CallingConv::PreserveAll);
+  // return value has type i8*
+  return call_inst;
+}
+
+llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
+  // FIXME(llvm): if FLAG_inline_new is set (which is the default)
+  // fast inline allocation should be used
+  // (otherwise runtime stub call should be performed).
+
+  // return an i8*
+  llvm::Value* allocated = CallRuntime(Runtime::kAllocateHeapNumber);
+  // RecordSafepointWithRegisters...
+  return allocated;
+}
+
+llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
+  const Runtime::Function* function = Runtime::FunctionForId(id);
+  auto arg_count = function->nargs;
+  if (arg_count != 0) UNIMPLEMENTED();
+
+  // TODO(llvm): we shouldn't always save FP regs
+  // moreover, we should find a way to offload such decisions to LLVM
+  CEntryStub ces(isolate(), function->result_size, kSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    code = ces.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+
+  // return an i8*
+  return CallForResult(code->instruction_start());
+}
+
+llvm::Value* LLVMChunkBuilder::GetContext() {
+  // First parameter is our context (rsi).
+  return function_->arg_begin();
 }
 
 LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
@@ -784,8 +837,7 @@ void LLVMChunkBuilder::DoContext(HContext* instr) {
   if (info()->IsStub()) {
     UNIMPLEMENTED();
   }
-  // First parameter is our context (rsi).
-  instr->set_llvm_value(function_->arg_begin());
+  instr->set_llvm_value(GetContext());
 }
 
 void LLVMChunkBuilder::DoParameter(HParameter* instr) {
@@ -1156,11 +1208,85 @@ void LLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
   UNIMPLEMENTED();
 }
 
+void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
+  // TODO(llvm): this case in Crankshaft utilizes deferred calling.
+
+  DCHECK(Use(val)->getType()->isDoubleTy());
+  if (!FLAG_inline_new) UNIMPLEMENTED();
+
+  // TODO(llvm): tagged value will be i8* in the future
+  llvm::PointerType* ptr_to_tagged = llvm::PointerType::get(
+      llvm_ir_builder_->getInt64Ty(), 0);
+
+  llvm::Value* new_heap_number = AllocateHeapNumber(); // i8*
+
+  auto offset = HeapNumber::kValueOffset - kHeapObjectTag;
+  auto llvm_offset = llvm_ir_builder_->getInt64(offset);
+  llvm::Value* store_address = llvm_ir_builder_->CreateGEP(new_heap_number,
+                                                           llvm_offset);
+  llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
+                                                                ptr_to_tagged);
+  llvm::Value* casted_val = llvm_ir_builder_->CreateBitCast(
+      Use(val), llvm_ir_builder_->getInt64Ty());
+  // [(i8*)new_heap_number + offset] = val;
+  llvm::Value* store = llvm_ir_builder_->CreateStore(casted_val,
+                                                     casted_adderss);
+  USE(store);
+  // Actually it's store, but store's type is void.
+  instr->set_llvm_value(casted_adderss);
+
+  llvm::outs() << "Adding module " << *(module_.get());
+  //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
+}
+
+void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
+  LLVMContext& context = LLVMGranularity::getInstance().context();
+  llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(context,
+                                                         "Cond True Block",
+                                                         function_);
+  llvm::BasicBlock* cond_false = llvm::BasicBlock::Create(context,
+                                                          "Cond False Block",
+                                                          function_);
+  llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(context,
+                                                              "Continue Block",
+                                                              function_);
+  llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
+  llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
+
+  llvm::LoadInst* load_d = nullptr;
+  bool not_smi = false;
+  llvm::Value* cond = SmiCheck(val, not_smi);
+  if (!val->representation().IsSmi()) {
+    llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
+    llvm_ir_builder_->SetInsertPoint(cond_false);
+    auto offset = llvm_ir_builder_->getInt64(
+        HeapNumber::kValueOffset - kHeapObjectTag);
+    llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
+        Use(val), llvm_ir_builder_->getInt8PtrTy());
+    llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
+    llvm::Value* bitcast = llvm_ir_builder_->CreateBitCast(gep, ptr_to_double);
+    load_d = llvm_ir_builder_->CreateLoad(bitcast);
+    llvm_ir_builder_->CreateBr(continue_block);
+    // TODO(llvm): deopt
+    // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
+  }
+
+  llvm_ir_builder_->SetInsertPoint(cond_true);
+  llvm::Value* int32_val = SmiToInteger32(val);
+  llvm::Value* double_val = llvm_ir_builder_->CreateSIToFP(int32_val,
+                                                           double_type);
+  llvm_ir_builder_->CreateBr(continue_block);
+  llvm_ir_builder_->SetInsertPoint(continue_block);
+  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(double_type, 2);
+  phi->addIncoming(load_d, cond_false);
+  phi->addIncoming(double_val, cond_true);
+  instr->set_llvm_value(phi);
+}
+
 void LLVMChunkBuilder::DoChange(HChange* instr) {
   Representation from = instr->from();
   Representation to = instr->to();
   HValue* val = instr->value();
-  LLVMContext& context = LLVMGranularity::getInstance().context();
   if (from.IsSmi()) {
     if (to.IsTagged()) {
       instr->set_llvm_value(Use(val));
@@ -1170,41 +1296,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
   }
   if (from.IsTagged()) {
     if (to.IsDouble()) {
-      NumberUntagDMode mode = val->representation().IsSmi()
-      ? NUMBER_CANDIDATE_IS_SMI : NUMBER_CANDIDATE_IS_ANY_TAGGED;
-      llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(context, "Cond True Block", function_);
-      llvm::BasicBlock* cond_false = llvm::BasicBlock::Create(context, "Cond False Block", function_);
-      llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(context, "Continue Block", function_);
-      llvm::LoadInst* load_d = nullptr;
-      bool not_smi = false;
-      llvm::Value* cond = SmiCheck(val, not_smi);
-
-      if (mode == NUMBER_CANDIDATE_IS_ANY_TAGGED) {
-        llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
-        llvm_ir_builder_->SetInsertPoint(cond_false);
-        llvm::PointerType* PointerTy = llvm::PointerType::get(llvm::Type::getDoubleTy(context), 0);
-        llvm::ConstantInt* const_int32 = llvm::ConstantInt::get(context, llvm::APInt(64, llvm::StringRef("7"), 10));
-        llvm::ArrayRef<llvm::Value*> paramsRef(const_int32);
-        llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(val), llvm::Type::getInt8PtrTy(context));
-        llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, paramsRef);
-        llvm::Value* bitCast = llvm_ir_builder_->CreateBitCast(gep, PointerTy);
-        load_d = llvm_ir_builder_->CreateLoad(bitCast);
-        llvm_ir_builder_->CreateBr(continue_block);
-        // TODO(llvm): deopt
-        // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
-      } else if(mode == NUMBER_CANDIDATE_IS_SMI) {
-        DCHECK(mode == NUMBER_CANDIDATE_IS_SMI);
-      }
-      llvm_ir_builder_->SetInsertPoint(cond_true);
-      llvm::Value* s_to_i = SmiToInteger32(val);
-      llvm::Value* bit_cast = llvm_ir_builder_->CreateSIToFP(s_to_i, llvm::Type::getDoubleTy(context));
-      llvm_ir_builder_->CreateBr(continue_block);
-      
-      llvm_ir_builder_->SetInsertPoint(continue_block);
-      llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(llvm::Type::getDoubleTy(context), 2);
-      phi->addIncoming(load_d, cond_false);
-      phi->addIncoming(bit_cast, cond_true);
-      instr->set_llvm_value(phi);
+      ChangeTaggedToDouble(val, instr);
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
@@ -1238,12 +1330,12 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     }
   } else if (from.IsDouble()) {
       if (to.IsInteger32()) {
-        LLVMContext& context = LLVMGranularity::getInstance().context();
-        llvm::Type* type = llvm::Type::getInt32Ty(context);
-        llvm::Value* dToi =  llvm_ir_builder_->CreateFPToSI(Use(val), type);
-        instr->set_llvm_value(dToi);
+        llvm::Type* type = llvm_ir_builder_->getInt32Ty();
+        llvm::Value* casted_int =  llvm_ir_builder_->CreateFPToSI(Use(val),
+                                                                  type);
+        instr->set_llvm_value(casted_int);
       } else if (to.IsTagged()) {
-        UNIMPLEMENTED();
+        ChangeDoubleToTagged(val, instr);
       } else {
         UNIMPLEMENTED();
       }
@@ -1642,6 +1734,7 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
 
 void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
 //  llvm::Value* context = llvm_ir_builder_->CreateLoad(instr->context()->llvm_value(), "RSI");
+  // see GetContext()!
   StringAddStub stub(isolate(),
                      instr->flags(),
                      instr->pretenure_flag());
