@@ -1003,14 +1003,14 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
   HValue* left = instr->left();
   HValue* right = instr->right();
   int32_t right_operand;
-  if (right->IsConstant()) 
+  if (right->IsConstant())
     right_operand = right->GetInteger32Constant();
   switch (instr->op()) {
     case Token::BIT_AND: {
       llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
       instr->set_llvm_value(And);
       break;
-    }  
+    }
     case Token::BIT_OR: {
       llvm::Value* Or = llvm_ir_builder_->CreateOr(Use(left), Use(right),"");
       instr->set_llvm_value(Or);
@@ -1020,9 +1020,7 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
       if(right->IsConstant() && right_operand == int32_t(~0)) {
         llvm::Value* Not = llvm_ir_builder_->CreateNot(Use(left), "");
         instr->set_llvm_value(Not);
-      }
-      else
-      {
+      } else {
         llvm::Value* Xor = llvm_ir_builder_->CreateXor(Use(left), Use(right), "");
         instr->set_llvm_value(Xor);
       }
@@ -1030,7 +1028,7 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
     }
     default:
       UNREACHABLE();
-      break; 
+      break;
   }
 }
 
@@ -1613,11 +1611,11 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
-//  llvm::Value* context = llvm_ir_builder_->CreateLoad(instr->context()->llvm_value(), "RSI"); 
+//  llvm::Value* context = llvm_ir_builder_->CreateLoad(instr->context()->llvm_value(), "RSI");
   StringAddStub stub(isolate(),
                      instr->flags(),
                      instr->pretenure_flag());
-  
+
   //llvm::Function* callStrAdd = llvm::Function::Create(&LCodeGen::CallCode, llvm::Function::ExternalLinkage );
   //LCodeGen(NULL, NULL, NULL).CallCode(stub.GetCode(), RelocInfo::CODE_TARGET, NULL);
   UNIMPLEMENTED();
