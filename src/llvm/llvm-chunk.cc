@@ -1646,7 +1646,15 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     CHECK(right->llvm_value());
     llvm::Value* Sub = llvm_ir_builder_->CreateSub(left->llvm_value(), right->llvm_value(),"");
     instr->set_llvm_value(Sub);
-  }
+  } else if (instr->representation().IsDouble()) {
+    DCHECK(instr->representation().IsDouble());
+    DCHECK(instr->left()->representation().IsDouble());
+    DCHECK(instr->right()->representation().IsDouble());
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    llvm::Value* fSub =  llvm_ir_builder_->CreateFSub(Use(left), Use(right), "");
+    instr->set_llvm_value(fSub);  
+   }
   else {
     UNIMPLEMENTED();
   }
