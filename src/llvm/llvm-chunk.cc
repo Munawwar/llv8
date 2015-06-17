@@ -1502,8 +1502,8 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     HValue* left = instr->left();
     HValue* right = instr->right();
     if (instr->representation().IsSmi()) {
-      llvm::Value* bitCast = llvm_ir_builder_->CreateAShr(Use(left), 32);
-      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(bitCast, Use(right), "");
+      llvm::Value* shift = llvm_ir_builder_->CreateAShr(Use(left), 32);
+      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(shift, Use(right), "");
       instr->set_llvm_value(Mul);
     } else {
       llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(Use(left), Use(right), "");
