@@ -1345,14 +1345,25 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
 }
 
 void LLVMChunkBuilder::DoDiv(HDiv* instr) {
-  DCHECK(instr->representation().IsSmi() || instr->representation().IsInteger32());
-  DCHECK(instr->left()->representation().Equals(instr->representation()));
-  DCHECK(instr->right()->representation().Equals(instr->representation()));
-  HValue* dividend = instr->left();
-  HValue* divisor = instr->right();
-
-  llvm::Value* Div = llvm_ir_builder_->CreateUDiv(Use(dividend), Use(divisor),"");
-  instr->set_llvm_value(Div);
+  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+    DCHECK(instr->left()->representation().Equals(instr->representation()));
+    DCHECK(instr->right()->representation().Equals(instr->representation()));
+    HValue* dividend = instr->left();
+    HValue* divisor = instr->right();
+    llvm::Value* Div = llvm_ir_builder_->CreateUDiv(Use(dividend), Use(divisor),"");
+    instr->set_llvm_value(Div);
+  } else if (instr->representation().IsDouble()) {
+    DCHECK(instr->representation().IsDouble());
+    DCHECK(instr->left()->representation().IsDouble());
+    DCHECK(instr->right()->representation().IsDouble());
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    llvm::Value* fDiv =  llvm_ir_builder_->CreateFDiv(Use(left), Use(right), "");
+    instr->set_llvm_value(fDiv);
+   }
+  else {
+    UNIMPLEMENTED();
+  } 
 }
 
 void LLVMChunkBuilder::DoDoubleBits(HDoubleBits* instr) {
