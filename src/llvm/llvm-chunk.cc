@@ -581,7 +581,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  //pass_manager.add(new NormalizePhisPass());
+  pass_manager.add(new NormalizePhisPass());
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
