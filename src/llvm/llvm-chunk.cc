@@ -581,7 +581,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  pass_manager.add(new NormalizePhisPass());
+  //pass_manager.add(new NormalizePhisPass());
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
@@ -1172,23 +1172,39 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     if (to.IsDouble()) {
       NumberUntagDMode mode = val->representation().IsSmi()
       ? NUMBER_CANDIDATE_IS_SMI : NUMBER_CANDIDATE_IS_ANY_TAGGED;
+      llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(context, "Cond True Block", function_);
+      llvm::BasicBlock* cond_false = llvm::BasicBlock::Create(context, "Cond False Block", function_);
+      llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(context, "Continue Block", function_);
+      llvm::LoadInst* load_d = nullptr;
+      bool not_smi = false;
+      llvm::Value* cond = SmiCheck(val, not_smi);
+
       if (mode == NUMBER_CANDIDATE_IS_ANY_TAGGED) {
+        llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
+        llvm_ir_builder_->SetInsertPoint(cond_false);
         llvm::PointerType* PointerTy = llvm::PointerType::get(llvm::Type::getDoubleTy(context), 0);
         llvm::ConstantInt* const_int32 = llvm::ConstantInt::get(context, llvm::APInt(64, llvm::StringRef("7"), 10));
         llvm::ArrayRef<llvm::Value*> paramsRef(const_int32);
         llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(val), llvm::Type::getInt8PtrTy(context));
         llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, paramsRef);
         llvm::Value* bitCast = llvm_ir_builder_->CreateBitCast(gep, PointerTy);
-        llvm::LoadInst* load_d = llvm_ir_builder_->CreateLoad(bitCast);
-        instr->set_llvm_value(load_d);
+        load_d = llvm_ir_builder_->CreateLoad(bitCast);
+        llvm_ir_builder_->CreateBr(continue_block);
         // TODO(llvm): deopt
         // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
       } else if(mode == NUMBER_CANDIDATE_IS_SMI) {
-        llvm::PointerType* PointerTy_2 = llvm::PointerType::get(llvm::Type::getDoubleTy(context), 0);
-        llvm::Value* s_to_i = SmiToInteger32(val);
-        llvm::Value* bitCast = llvm_ir_builder_->CreateSIToFP(s_to_i, PointerTy_2);
-        instr->set_llvm_value(bitCast);
+        DCHECK(mode == NUMBER_CANDIDATE_IS_SMI);
       }
+      llvm_ir_builder_->SetInsertPoint(cond_true);
+      llvm::Value* s_to_i = SmiToInteger32(val);
+      llvm::Value* bit_cast = llvm_ir_builder_->CreateSIToFP(s_to_i, llvm::Type::getDoubleTy(context));
+      llvm_ir_builder_->CreateBr(continue_block);
+      
+      llvm_ir_builder_->SetInsertPoint(continue_block);
+      llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(llvm::Type::getDoubleTy(context), 2);
+      phi->addIncoming(load_d, cond_false);
+      phi->addIncoming(bit_cast, cond_true);
+      instr->set_llvm_value(phi);
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
