@@ -515,9 +515,19 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   auto arg_count = function->nargs;
   if (arg_count != 0) UNIMPLEMENTED();
 
+  llvm::Type* int8_ptr_type =  llvm_ir_builder_->getInt8PtrTy();
+  llvm::Type* int64_type =  llvm_ir_builder_->getInt64Ty();
+
+  Address rt_target = ExternalReference(function, isolate()).address();
   // TODO(llvm): we shouldn't always save FP regs
-  // moreover, we should find a way to offload such decisions to LLVM
-  CEntryStub ces(isolate(), function->result_size, kSaveFPRegs);
+  // moreover, we should find a way to offload such decisions to LLVM.
+  // TODO(llvm): With a proper calling convention implemented in LLVM
+  // we could call the runtime functions directly.
+  // For now we call the CEntryStub which calls the function
+  // (just as CrankShaft does).
+
+  // Don't save FP regs because llvm will [try to] take care of that
+  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
   Handle<Code> code = Handle<Code>::null();
   {
     AllowHandleAllocation allow_handles;
@@ -525,8 +535,30 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
     // FIXME(llvm,gc): respect reloc info mode...
   }
 
-  // return an i8*
-  return CallForResult(code->instruction_start());
+  llvm::Value* target_address = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(code->instruction_start()));
+  bool is_var_arg = false;
+  llvm::Type* param_types[] = { int64_type ,int8_ptr_type, int64_type };
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      int8_ptr_type, param_types, is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_address,
+                                                         ptr_to_function);
+
+  auto llvm_nargs = llvm_ir_builder_->getInt64(arg_count);
+  auto target_temp = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = llvm_ir_builder_->CreateIntToPtr(
+      target_temp, int8_ptr_type);
+  auto context = GetContext();
+  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall3(
+      casted, llvm_nargs, llvm_rt_target, context);
+  // FIXME(llvm): this is not the right CC.
+  // We need a CC where everything is caller-saved.
+  call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
+  // return value has type i8*
+  return call_inst;
+
 }
 
 llvm::Value* LLVMChunkBuilder::GetContext() {
@@ -634,7 +666,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  //pass_manager.add(new NormalizePhisPass());
+  pass_manager.add(new NormalizePhisPass());
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
@@ -1215,8 +1247,8 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   if (!FLAG_inline_new) UNIMPLEMENTED();
 
   // TODO(llvm): tagged value will be i8* in the future
-  llvm::PointerType* ptr_to_tagged = llvm::PointerType::get(
-      llvm_ir_builder_->getInt64Ty(), 0);
+  llvm::Type* tagged_type = llvm_ir_builder_->getInt64Ty();
+  llvm::PointerType* ptr_to_tagged = llvm::PointerType::get(tagged_type, 0);
 
   llvm::Value* new_heap_number = AllocateHeapNumber(); // i8*
 
@@ -1226,14 +1258,16 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
                                                            llvm_offset);
   llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
                                                                 ptr_to_tagged);
-  llvm::Value* casted_val = llvm_ir_builder_->CreateBitCast(
-      Use(val), llvm_ir_builder_->getInt64Ty());
+  llvm::Value* casted_val = llvm_ir_builder_->CreateBitCast(Use(val),
+                                                            tagged_type);
   // [(i8*)new_heap_number + offset] = val;
   llvm::Value* store = llvm_ir_builder_->CreateStore(casted_val,
                                                      casted_adderss);
   USE(store);
   // Actually it's store, but store's type is void.
-  instr->set_llvm_value(casted_adderss);
+  auto address_casted_to_int = llvm_ir_builder_->CreatePtrToInt(casted_adderss,
+                                                                tagged_type);
+  instr->set_llvm_value(address_casted_to_int);
 
   llvm::outs() << "Adding module " << *(module_.get());
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
