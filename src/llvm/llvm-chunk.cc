@@ -1261,15 +1261,12 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   llvm::Value* casted_val = llvm_ir_builder_->CreateBitCast(Use(val),
                                                             tagged_type);
   // [(i8*)new_heap_number + offset] = val;
-  llvm::Value* store = llvm_ir_builder_->CreateStore(casted_val,
-                                                     casted_adderss);
-  USE(store);
-  // Actually it's store, but store's type is void.
-  auto address_casted_to_int = llvm_ir_builder_->CreatePtrToInt(casted_adderss,
-                                                                tagged_type);
-  instr->set_llvm_value(address_casted_to_int);
+  llvm_ir_builder_->CreateStore(casted_val, casted_adderss);
 
-  llvm::outs() << "Adding module " << *(module_.get());
+  auto new_heap_number_casted = llvm_ir_builder_->CreatePtrToInt(
+      new_heap_number, tagged_type);
+  instr->set_llvm_value(new_heap_number_casted); // no offset
+
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
