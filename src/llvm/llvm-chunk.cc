@@ -634,7 +634,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  pass_manager.add(new NormalizePhisPass());
+  //pass_manager.add(new NormalizePhisPass());
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
@@ -1628,7 +1628,15 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
       llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(Use(left), Use(right), "");
       instr->set_llvm_value(Mul);
     }
-  }
+  } else if (instr->representation().IsDouble()) {
+    DCHECK(instr->representation().IsDouble());
+    DCHECK(instr->left()->representation().IsDouble());
+    DCHECK(instr->right()->representation().IsDouble());
+    HValue* left = instr->left();
+    HValue* right = instr->right();
+    llvm::Value* fMul =  llvm_ir_builder_->CreateFMul(Use(left), Use(right), "");
+    instr->set_llvm_value(fMul);
+   }
   else {
     UNIMPLEMENTED();
   }
