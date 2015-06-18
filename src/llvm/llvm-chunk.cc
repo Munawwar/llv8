@@ -504,6 +504,8 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
   // fast inline allocation should be used
   // (otherwise runtime stub call should be performed).
 
+  CHECK(!FLAG_inline_new);
+
   // return an i8*
   llvm::Value* allocated = CallRuntime(Runtime::kAllocateHeapNumber);
   // RecordSafepointWithRegisters...
@@ -553,8 +555,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   auto context = GetContext();
   llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall3(
       casted, llvm_nargs, llvm_rt_target, context);
-  // FIXME(llvm): this is not the right CC.
-  // We need a CC where everything is caller-saved.
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // return value has type i8*
   return call_inst;
@@ -1244,7 +1244,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   // TODO(llvm): this case in Crankshaft utilizes deferred calling.
 
   DCHECK(Use(val)->getType()->isDoubleTy());
-  if (!FLAG_inline_new) UNIMPLEMENTED();
+  if (FLAG_inline_new) UNIMPLEMENTED();
 
   // TODO(llvm): tagged value will be i8* in the future
   llvm::Type* tagged_type = llvm_ir_builder_->getInt64Ty();
