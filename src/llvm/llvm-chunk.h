@@ -272,7 +272,6 @@ class LLVMChunk FINAL : public LowChunk {
 
   static LLVMChunk* NewChunk(HGraph *graph);
 
-
   Handle<Code> Codegen() override;
 
   void set_llvm_function_id(int id) { llvm_function_id_ = id; }
