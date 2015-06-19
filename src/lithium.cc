@@ -269,7 +269,6 @@ LChunk::LChunk(CompilationInfo* info, HGraph* graph)
       deprecation_dependencies_(32, info->zone()),
       stability_dependencies_(8, info->zone()) {}
 
-
 LLabel* LChunk::GetLabel(int block_id) const {
   HBasicBlock* block = graph()->blocks()->at(block_id);
   int first_instruction = block->first_instruction_index();

@@ -7,7 +7,7 @@
 
 //#include "compiler.h"
 #include "hydrogen.h"
-//#include "zone.h"
+#include "zone-allocator.h"
 
 
 namespace v8 {
@@ -24,8 +24,21 @@ class LowChunk : public ZoneObject {
     HGraph* graph() const { return graph_; }
     Isolate* isolate() const;
 
+    void AddStabilityDependency(Handle<Map> map) {
+      DCHECK(map->is_stable());
+      if (!map->CanTransition()) return;
+      DCHECK(!info()->IsStub());
+      stability_dependencies_.insert(map);
+    }
+
   protected:
+    using MapLess = std::less<Handle<Map> >;
+    using MapAllocator = zone_allocator<Handle<Map> >;
+    using MapSet = std::set<Handle<Map>, MapLess, MapAllocator>;
+
     LowChunk(CompilationInfo* info, HGraph* graph);
+
+    MapSet stability_dependencies_;
 
   private:
     CompilationInfo* info_;

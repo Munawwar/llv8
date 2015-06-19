@@ -24,7 +24,8 @@ Isolate* LowChunkBuilderBase::isolate() const {
 }
 
 LowChunk::LowChunk(CompilationInfo* info, HGraph* graph)
-    : info_(info),
+    : stability_dependencies_(MapLess(), MapAllocator(info->zone())),
+      info_(info),
       graph_(graph) {}
 
 Isolate* LowChunk::isolate() const {

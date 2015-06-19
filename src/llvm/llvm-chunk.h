@@ -368,6 +368,9 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
 
+  void Retry(BailoutReason reason);
+  void AddStabilityDependency(Handle<Map> map);
+
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;

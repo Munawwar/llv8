@@ -1403,7 +1403,25 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
   UNIMPLEMENTED();
 }
 
+void LLVMChunkBuilder::Retry(BailoutReason reason) {
+  info()->RetryOptimization(reason);
+  status_ = ABORTED;
+}
+
+void LLVMChunkBuilder::AddStabilityDependency(Handle<Map> map) {
+  if (!map->is_stable()) return Retry(kMapBecameUnstable);
+  chunk()->AddStabilityDependency(map);
+  // TODO(llvm): stability_dependencies_ unused yet
+}
+
 void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
+  if (instr->IsStabilityCheck()) {
+    const UniqueSet<Map>* maps = instr->maps();
+    for (int i = 0; i < maps->size(); ++i) {
+      AddStabilityDependency(maps->at(i).handle());
+    }
+    return;
+  }
   UNIMPLEMENTED();
 }
 
