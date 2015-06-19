@@ -2101,9 +2101,7 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
-    CHECK(left->llvm_value());
-    CHECK(right->llvm_value());
-    llvm::Value* Sub = llvm_ir_builder_->CreateSub(left->llvm_value(), right->llvm_value(),"");
+    llvm::Value* Sub = llvm_ir_builder_->CreateSub(Use(left), Use(right), "");
     instr->set_llvm_value(Sub);
   } else if (instr->representation().IsDouble()) {
     DCHECK(instr->representation().IsDouble());
