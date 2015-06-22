@@ -525,7 +525,7 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
 llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   const Runtime::Function* function = Runtime::FunctionForId(id);
   auto arg_count = function->nargs;
-  if (arg_count != 0) UNIMPLEMENTED();
+  // if (arg_count != 0) UNIMPLEMENTED();
 
   llvm::Type* int8_ptr_type =  llvm_ir_builder_->getInt8PtrTy();
   llvm::Type* int64_type =  llvm_ir_builder_->getInt64Ty();
@@ -568,6 +568,71 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // return value has type i8*
   return call_inst;
+}
+llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*> params) {
+  const Runtime::Function* function = Runtime::FunctionForId(id);
+  auto arg_count = function->nargs;
+//  if (arg_count != 0) UNIMPLEMENTED();
+
+  llvm::Type* int8_ptr_type =  llvm_ir_builder_->getInt8PtrTy();
+  llvm::Type* int64_type =  llvm_ir_builder_->getInt64Ty();
+
+  Address rt_target = ExternalReference(function, isolate()).address();
+  // TODO(llvm): we shouldn't always save FP regs
+  // moreover, we should find a way to offload such decisions to LLVM.
+  // TODO(llvm): With a proper calling convention implemented in LLVM
+  // we could call the runtime functions directly.
+  // For now we call the CEntryStub which calls the function
+  // (just as CrankShaft does).
+
+  // Don't save FP regs because llvm will [try to] take care of that
+  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    code = ces.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+
+  llvm::Value* target_address = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(code->instruction_start()));
+  bool is_var_arg = false;
+  // llvm::Type* param_types [] = { int64_type ,int8_ptr_type, int64_type };
+  std::vector<llvm::Type*> pTypes;
+//  for (auto i = 0; i < params.size(); ++i)
+//       pTypes.push_back(params[i]->getType());
+  pTypes.push_back(int64_type); //, int8_ptr_type, int64_type, params[0]->getType());
+  pTypes.push_back(int8_ptr_type);
+  pTypes.push_back(int64_type);
+  for (auto i = 0; i < params.size(); ++i) 
+       pTypes.push_back(params[i]->getType());
+  llvm::ArrayRef<llvm::Type*> pRef (pTypes);
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      int8_ptr_type, pRef, is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_address,
+                                                         ptr_to_function);
+
+  auto llvm_nargs = llvm_ir_builder_->getInt64(arg_count);
+  auto target_temp = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = llvm_ir_builder_->CreateIntToPtr(
+      target_temp, int8_ptr_type);
+  std::vector<llvm::Value*> actualParams;
+//  for (auto i = 0; i < params.size(); ++i)
+//     actualParams.push_back(params[i]);
+  actualParams.push_back(llvm_nargs);
+  actualParams.push_back(llvm_rt_target);
+  actualParams.push_back(context);
+  for (auto i = 0; i < params.size(); ++i)
+     actualParams.push_back(params[i]);
+  llvm::ArrayRef<llvm::Value*> args (actualParams);
+  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall(
+      casted, args );
+  call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
+  // return value has type i8*
+  return call_inst;
+
 }
 
 llvm::Value* LLVMChunkBuilder::GetContext() {
@@ -1075,7 +1140,38 @@ void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
 }
 
 void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
-  UNIMPLEMENTED();
+  std::vector<llvm::Value*> args;
+  if (instr->size()->IsConstant()) {
+    HConstant* cons = HConstant::cast(instr->size());
+/*    Smi* smi_obj = Smi::FromInt(cons->Integer32Value());
+    intptr_t smi = reinterpret_cast<intptr_t>(smi_obj);
+    llvm::Value* val = llvm_ir_builder_->getInt64(smi);*/
+    llvm::Value* val = Integer32ToSmi(cons);
+    args.push_back(val);
+    //args.push_back(val);
+  } else {
+    UNIMPLEMENTED();
+  }
+  //args.push_back(val);
+/*  int64_t flags = 0;
+  if (instr->IsOldPointerSpaceAllocation()) {
+   // DCHECK(!instr->IsOldDataSpaceAllocation());
+   // DCHECK(!instr->->IsNewSpaceAllocation());
+    flags = AllocateTargetSpace::update(flags, OLD_POINTER_SPACE);
+  } else if (instr->IsOldDataSpaceAllocation()) {
+   // DCHECK(!instr->->IsNewSpaceAllocation());
+    flags = AllocateTargetSpace::update(flags, OLD_DATA_SPACE);
+  } else {
+    flags = AllocateTargetSpace::update(flags, NEW_SPACE);
+  }
+  llvm::Value* value = llvm_ir_builder_->getInt64(flags << (kSmiShift));
+  args.push_back(value);*/
+  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
+  //llvm::Value* alloc =  CallRuntime(Runtime::kAllocateInTargetSpace);
+  if (instr->MustPrefillWithFiller()) {
+    UNIMPLEMENTED();
+  }
+  instr->set_llvm_value(alloc);
 }
 
 void LLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
@@ -1825,7 +1921,79 @@ void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  Representation representation = instr->representation();
+
+   HObjectAccess access = instr->access();
+   int offset = access.offset() - 1;
+
+  if (access.IsExternalMemory()) { 
+    UNIMPLEMENTED();
+  }
+
+  // Register object = ToRegister(instr->object());
+  // __ AssertNotSmi(object);
+
+  if (!FLAG_unbox_double_fields && representation.IsDouble()) {
+    UNIMPLEMENTED();
+  }
+
+  if (instr->has_transition()) {
+    UNIMPLEMENTED();
+  }
+
+  // Do the store.
+  // Register write_register = object;
+  if (!access.IsInobject()) {
+    UNIMPLEMENTED();
+  }
+
+  if (representation.IsSmi() && SmiValuesAre32Bits() &&
+      instr->value()->representation().IsInteger32()) {
+    UNIMPLEMENTED();
+  }
+
+  //Operand operand = FieldOperand(write_register, offset);
+
+  if (FLAG_unbox_double_fields && representation.IsDouble()) {
+    UNIMPLEMENTED();
+  } else if (!instr->value()->IsConstant()) {
+    UNIMPLEMENTED();
+  } else {
+   // LConstantOperand* operand_value = LConstantOperand::cast(instr->value());
+    HConstant* constant = HConstant::cast(instr->value());
+    if (constant->representation().IsSmiOrInteger32()) {
+      auto llvm_offset = llvm_ir_builder_->getInt64(offset);
+      llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
+                                                              llvm_offset);
+      llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+      llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+      llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
+                                                                ptr_to_type);
+      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(constant),
+                                                                  type);
+      llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
+
+
+    } else {
+      llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+      llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+      Handle<Object> handle_value = constant->handle(isolate()); 
+      int64_t value = reinterpret_cast<int64_t>(handle_value.location());
+      auto llvm_offset = llvm_ir_builder_->getInt64(offset);
+      llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
+                                                           llvm_offset);
+      llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
+                                                                ptr_to_type);
+      auto llvm_val = llvm_ir_builder_->getInt64(value);
+      llvm_ir_builder_->CreateStore(llvm_val, casted_adderss);
+
+    }
+  }
+
+  if (instr->NeedsWriteBarrier()) {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {

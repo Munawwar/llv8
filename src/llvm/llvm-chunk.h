@@ -364,6 +364,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // space is full. // FIXME(llvm): the comment
   llvm::Value* AllocateHeapNumber();
   llvm::Value* CallRuntime(Runtime::FunctionId id);
+  llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
   llvm::Value* CompareRoot(HValue* val, HChange* instr);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
