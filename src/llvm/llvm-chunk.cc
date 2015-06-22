@@ -1279,6 +1279,38 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
+llvm::Value* LLVMChunkBuilder::CompareRoot(HValue* val, HChange* instr)
+{
+  LLVMContext& context = LLVMGranularity::getInstance().context();
+  ExternalReference roots_array_start =
+        ExternalReference::roots_array_start(isolate());
+  Address target_address = roots_array_start.address();
+  auto address_val = llvm_ir_builder_->getInt64(
+      reinterpret_cast<uint64_t>(target_address));
+  
+  llvm::Value* int8_ptr_2 = llvm_ir_builder_->CreateIntToPtr(
+        address_val, llvm::Type::getInt64PtrTy(context)); 
+
+  llvm::Value* gep = llvm_ir_builder_->CreateLoad(int8_ptr_2);
+  auto value = llvm_ir_builder_->getInt64(kRootRegisterBias);
+  llvm::Value* r13_val = llvm_ir_builder_->CreateAdd(gep, value);
+
+  auto offset = llvm_ir_builder_->getInt64((Heap::kHeapNumberMapRootIndex << kPointerSizeLog2) - kRootRegisterBias);
+  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
+        r13_val, llvm_ir_builder_->getInt8PtrTy());
+  llvm::Value* gep_2 = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
+  
+  auto offset_1 = llvm_ir_builder_->getInt64(HeapObject::kMapOffset - kHeapObjectTag);
+  llvm::Value* int8_ptr_1 = llvm_ir_builder_->CreateIntToPtr(
+        Use(val), llvm_ir_builder_->getInt8PtrTy());
+  llvm::Value* gep_3 = llvm_ir_builder_->CreateGEP(int8_ptr_1, offset_1);
+ 
+  llvm::Value* cmp_result = llvm_ir_builder_->CreateICmpSGT(gep_3, gep_2);
+ 
+  return cmp_result;
+  
+}
+
 void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   LLVMContext& context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(context,
@@ -1292,6 +1324,8 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
                                                               function_);
   llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
   llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
+
+  CompareRoot(val, instr);
 
   llvm::LoadInst* load_d = nullptr;
   bool not_smi = false;

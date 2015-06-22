@@ -1646,8 +1646,9 @@ class Assembler : public AssemblerBase {
 
   // code emission
   void GrowBuffer();
-
+public:
   void emit(byte x) { *pc_++ = x; }
+private:
   inline void emitl(uint32_t x);
   inline void emitp(void* x, RelocInfo::Mode rmode);
   inline void emitq(uint64_t x);

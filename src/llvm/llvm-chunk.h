@@ -365,6 +365,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* AllocateHeapNumber();
   llvm::Value* CallRuntime(Runtime::FunctionId id);
   llvm::Value* GetContext();
+  llvm::Value* CompareRoot(HValue* val, HChange* instr);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
 
