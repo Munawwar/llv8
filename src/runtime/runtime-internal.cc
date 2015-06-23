@@ -235,9 +235,15 @@ RUNTIME_FUNCTION(Runtime_AllocateInNewSpace) {
 
 RUNTIME_FUNCTION(Runtime_AllocateInTargetSpace) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 2);
-  CONVERT_SMI_ARG_CHECKED(size, 0);
-  CONVERT_SMI_ARG_CHECKED(flags, 1);
+  // DCHECK(args.length() == 3);
+  int indx1 = 0;
+  int indx2 = 1;
+  if (args.length() == 3) {
+    indx1++;
+    indx2++;
+  }
+  CONVERT_SMI_ARG_CHECKED(size, indx1);
+  CONVERT_SMI_ARG_CHECKED(flags, indx2);
   RUNTIME_ASSERT(IsAligned(size, kPointerSize));
   RUNTIME_ASSERT(size > 0);
   RUNTIME_ASSERT(size <= Page::kMaxRegularHeapObjectSize);

@@ -477,6 +477,13 @@ llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
   return llvm_ir_builder_->CreateShl(extended_width_val, kSmiShift);
 }
 
+llvm::Value* LLVMChunkBuilder::Integer32ToSmi(llvm::Value* value) {
+  llvm::Value* extended_width_val = llvm_ir_builder_->CreateZExt(
+      value, llvm_ir_builder_->getInt64Ty());
+  return llvm_ir_builder_->CreateShl(extended_width_val, kSmiShift);
+}
+
+
 llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(target));
@@ -571,7 +578,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
 }
 llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*> params) {
   const Runtime::Function* function = Runtime::FunctionForId(id);
-  auto arg_count = function->nargs;
+  auto arg_count = function->nargs + 1;
 //  if (arg_count != 0) UNIMPLEMENTED();
 
   llvm::Type* int8_ptr_type =  llvm_ir_builder_->getInt8PtrTy();
@@ -600,12 +607,12 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id, l
   // llvm::Type* param_types [] = { int64_type ,int8_ptr_type, int64_type };
   std::vector<llvm::Type*> pTypes;
 //  for (auto i = 0; i < params.size(); ++i)
-//       pTypes.push_back(params[i]->getType());
+//     pTypes.push_back(params[i]->getType());
   pTypes.push_back(int64_type); //, int8_ptr_type, int64_type, params[0]->getType());
   pTypes.push_back(int8_ptr_type);
   pTypes.push_back(int64_type);
   for (auto i = 0; i < params.size(); ++i) 
-       pTypes.push_back(params[i]->getType());
+     pTypes.push_back(params[i]->getType());
   llvm::ArrayRef<llvm::Type*> pRef (pTypes);
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       int8_ptr_type, pRef, is_var_arg);
@@ -1141,19 +1148,8 @@ void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
 
 void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   std::vector<llvm::Value*> args;
-  if (instr->size()->IsConstant()) {
-    HConstant* cons = HConstant::cast(instr->size());
-/*    Smi* smi_obj = Smi::FromInt(cons->Integer32Value());
-    intptr_t smi = reinterpret_cast<intptr_t>(smi_obj);
-    llvm::Value* val = llvm_ir_builder_->getInt64(smi);*/
-    llvm::Value* val = Integer32ToSmi(cons);
-    args.push_back(val);
-    //args.push_back(val);
-  } else {
-    UNIMPLEMENTED();
-  }
-  //args.push_back(val);
-/*  int64_t flags = 0;
+  llvm::Value* arg1 = Integer32ToSmi(instr->size());
+  int flags = 0;
   if (instr->IsOldPointerSpaceAllocation()) {
    // DCHECK(!instr->IsOldDataSpaceAllocation());
    // DCHECK(!instr->->IsNewSpaceAllocation());
@@ -1164,10 +1160,11 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   } else {
     flags = AllocateTargetSpace::update(flags, NEW_SPACE);
   }
-  llvm::Value* value = llvm_ir_builder_->getInt64(flags << (kSmiShift));
-  args.push_back(value);*/
+  llvm::Value* value = llvm_ir_builder_->getInt32(flags);
+  llvm::Value* arg2 = Integer32ToSmi(value);
+  args.push_back(arg2);
+  args.push_back(arg1);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
-  //llvm::Value* alloc =  CallRuntime(Runtime::kAllocateInTargetSpace);
   if (instr->MustPrefillWithFiller()) {
     UNIMPLEMENTED();
   }

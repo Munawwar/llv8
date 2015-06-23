@@ -5430,7 +5430,6 @@ void LCodeGen::DoDeferredAllocate(LAllocate* instr) {
     flags = AllocateTargetSpace::update(flags, NEW_SPACE);
   }
   __ Push(Smi::FromInt(flags));
-
   CallRuntimeFromDeferred(
       Runtime::kAllocateInTargetSpace, 2, instr, instr->context());
   __ StoreToSafepointRegisterSlot(result, rax);
