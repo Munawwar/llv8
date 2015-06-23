@@ -486,23 +486,27 @@ llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   return llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
 }
 
-// TODO(llvm): Refactor. Most of the code is shared with CallVoid.
-// TODO(llvm): For now we only support functions with on arguments.
-llvm::Value* LLVMChunkBuilder::CallForResult(Address target) {
+llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
+                                           llvm::CallingConv::ID calling_conv,
+                                           std::vector<llvm::Value*>& params) {
   llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(target));
   bool is_var_arg = false;
+
+  // Tagged return type won't hurt even if in fact it's void
+  auto return_type = llvm_ir_builder_->getInt8PtrTy();
+  // TODO(llvm): tagged type
+  auto param_type = llvm_ir_builder_->getInt64Ty();
+  std::vector<llvm::Type*> param_types(params.size(), param_type);
   llvm::FunctionType* function_type = llvm::FunctionType::get(
-      llvm_ir_builder_->getInt8PtrTy(), is_var_arg);
+      return_type, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+
   llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
                                                          ptr_to_function);
+  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall(casted, params);
+  call_inst->setCallingConv(calling_conv);
 
-  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall(casted);
-  // FIXME(llvm): this is not the right CC.
-  // We need a CC where everything is caller-saved.
-  call_inst->setCallingConv(llvm::CallingConv::PreserveAll);
-  // return value has type i8*
   return call_inst;
 }
 
@@ -547,7 +551,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   llvm::Value* target_address = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(code->instruction_start()));
   bool is_var_arg = false;
-  llvm::Type* param_types[] = { int64_type ,int8_ptr_type, int64_type };
+  llvm::Type* param_types[] = { int64_type, int8_ptr_type, int64_type };
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       int8_ptr_type, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
@@ -567,7 +571,9 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   return call_inst;
 
 }
-llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*> params) {
+
+llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
+    llvm::Value* context, std::vector<llvm::Value*> params) {
   const Runtime::Function* function = Runtime::FunctionForId(id);
   auto arg_count = function->nargs + 1;
 //  if (arg_count != 0) UNIMPLEMENTED();
@@ -937,7 +943,6 @@ void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
 
 void LLVMChunkBuilder::DoContext(HContext* instr) {
   if (instr->HasNoUses()) return;
-  // std::cerr << "#Uses == " << instr->UseCount() << std::endl;
   if (info()->IsStub()) {
     UNIMPLEMENTED();
   }
@@ -976,12 +981,11 @@ void LLVMChunkBuilder::DoGoto(HGoto* instr) {
 }
 
 void LLVMChunkBuilder::DoSimulate(HSimulate* instr) {
-//  The “Simulate” instructions are for keeping track of what the stack
-//  machine state would be, in case we need to bail out and start using
-//  unoptimized code. They don’t generate any actual machine instructions.
+  //  The “Simulate” instructions are for keeping track of what the stack
+  //  machine state would be, in case we need to bail out and start using
+  //  unoptimized code. They don’t generate any actual machine instructions.
 
-  // TODO(llvm): we need to implement this for deoptimization support.
-  // seems to be the right implementation (same as for Lithium)
+  // Seems to be the right implementation (same as for Lithium)
   instr->ReplayEnvironment(current_block_->last_environment());
 }
 
@@ -1031,11 +1035,16 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     llvm::Value* value = llvm_ir_builder_->getInt32(int32_value);
     instr->set_llvm_value(value);
   } else if (r.IsDouble()) {
-    double dValue = instr->DoubleValue();
-    llvm::Value* value = llvm::ConstantFP::get(llvm_ir_builder_->getDoubleTy(), dValue);
+    llvm::Value* value = llvm::ConstantFP::get(llvm_ir_builder_->getDoubleTy(),
+                                               instr->DoubleValue());
     instr->set_llvm_value(value);
   } else if (r.IsExternal()) {
-    UNIMPLEMENTED();
+    UNIMPLEMENTED(); // See MacroAssembler::LoadAddress
+//    Address external_address = instr->ExternalReferenceValue().address();
+//    // TODO(llvm): tagged type
+//    llvm::Value* value = llvm_ir_builder_->getInt64(
+//        reinterpret_cast<uint64_t>(external_address));
+//    instr->set_llvm_value(value);
   } else if (r.IsTagged()) {
     Handle<Object> object = instr->handle(isolate());
     if (object->IsSmi()) {
@@ -1053,13 +1062,17 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
       DCHECK(object->IsHeapObject());
       if (isolate()->heap()->InNewSpace(*object)) {
         Handle<Cell> cell = isolate()->factory()->NewCell(object);
+        DCHECK(cell->IsHeapObject());
+        DCHECK(!isolate()->heap()->InNewSpace(*cell));
         // FIXME(llvm): reloc info
-        intptr_t intptr_value = reinterpret_cast<intptr_t>(*cell);
+        intptr_t intptr_value = reinterpret_cast<intptr_t>(object.location());
         llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
-        instr->set_llvm_value(value);
+        llvm::Value* ptr = llvm_ir_builder_->CreateIntToPtr(value,
+            llvm_ir_builder_->getInt64Ty()->getPointerTo());
+        llvm::Value* deref = llvm_ir_builder_->CreateLoad(ptr);
+        instr->set_llvm_value(deref);
       } else {
-//        UNIMPLEMENTED(); // TODO(llvm): untested
-        // FIXME(llvm): reloc info
+        // FIXME(llvm): reloc info RelocInfo::EMBEDDED_OBJECT
         intptr_t intptr_value = reinterpret_cast<intptr_t>(object.location());
         llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
         instr->set_llvm_value(value);
@@ -1222,10 +1235,10 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   Representation r = value->representation();
   if(r.IsInteger32()) {
     llvm::Value* zero = llvm_ir_builder_->getInt32(0);
-    llvm::Value* Compare = llvm_ir_builder_->CreateICmpNE(Use(value), zero);
-    llvm::BranchInst* Branch = llvm_ir_builder_->CreateCondBr(Compare,
+    llvm::Value* compare = llvm_ir_builder_->CreateICmpNE(Use(value), zero);
+    llvm::BranchInst* branch = llvm_ir_builder_->CreateCondBr(compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-    instr->set_llvm_value(Branch);
+    instr->set_llvm_value(branch);
 //    llvm::outs() << "Adding module " << *(module_.get());
   } else {
     UNIMPLEMENTED();
@@ -1233,13 +1246,55 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
-  UNIMPLEMENTED();
+  CallInterfaceDescriptor descriptor = instr->descriptor();
+
+  if (descriptor.GetRegisterParameterCount() != 5) UNIMPLEMENTED();
+  if (!descriptor.GetParameterRegister(0).is(rsi) ||
+      !descriptor.GetParameterRegister(1).is(rdi) ||
+      !descriptor.GetParameterRegister(2).is(rbx) ||
+      !descriptor.GetParameterRegister(3).is(rcx) ||
+      !descriptor.GetParameterRegister(4).is(rdx)) UNIMPLEMENTED();
+
+  HValue* target = instr->target();
+  // TODO(llvm): how  about a zone list?
+  std::vector<llvm::Value*> params;
+  for (int i = 1; i < instr->OperandCount(); i++)
+    params.push_back(Use(instr->OperandAt(i)));
+
+  for (int i = pending_pushed_args_.length() - 1; i >= 0; i--)
+    params.push_back(pending_pushed_args_[i]);
+  pending_pushed_args_.Clear();
+
+  if (instr->IsTailCall()) {
+    // Well, may be llvm can grok it's a tail call.
+    // This branch just needs a test.
+    UNIMPLEMENTED();
+  } else {
+    // TODO(llvm):
+    // LPointerMap* pointers = instr->pointer_map();
+    // SafepointGenerator generator(this, pointers, Safepoint::kLazyDeopt);
+
+    if (target->IsConstant()) {
+      Handle<Object> handle = HConstant::cast(target)->handle(isolate());
+      Handle<Code> code = Handle<Code>::cast(handle);
+      // TODO(llvm, gc): reloc info mode of the code (CODE_TARGET)...
+      llvm::Value* call = CallAddress(code->instruction_start(),
+                                      llvm::CallingConv::X86_64_V8_S1, params);
+      instr->set_llvm_value(call);
+    } else {
+      UNIMPLEMENTED();
+    }
+    // codegen_->RecordSafepoint(pointers_, deopt_mode_); (AfterCall)
+  }
+
+  // TODO(llvm): MarkAsCall(DefineFixed(result, rax), instr);
 }
 
 void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
-  // FIXME(llvm): must be more generic (any call)
-  // but calls other than CallJSFunction are not supported yet.
-  DCHECK(instr->next()->IsCallJSFunction());
+  // Every push must be followed with a call.
+  CHECK(pending_pushed_args_.is_empty());
+  for (int i = 0; i < instr->OperandCount(); i++)
+    pending_pushed_args_.Add(Use(instr->argument(i)), info()->zone());
 }
 
 void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
@@ -1274,7 +1329,6 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   std::vector<llvm::Type*> params(argument_count, nullptr);
   for (auto i = 0; i < argument_count; i++)
     params[i] = llvm::Type::getInt64Ty(llvm_context);
-  llvm::ArrayRef<llvm::Type*> paramsRef(params); // FIXME(llvm): unused; rm
   bool is_var_arg = false;
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       llvm::Type::getInt64Ty(llvm_context), params, is_var_arg);
@@ -1296,13 +1350,12 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   args[0] = llvm_ir_builder_->CreateAlignedLoad(js_context_ptr_val, 1);
   args[1] = js_function_val;
 
-  DCHECK(instr->previous()->IsPushArguments());
-  HPushArguments* prev = static_cast<HPushArguments*>(instr->previous());
-  DCHECK(prev->OperandCount() + 2 == argument_count);
+  DCHECK(pending_pushed_args_.length() + 2 == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
-  for (int i = 0; i < prev->OperandCount(); ++i) {
-    args[argument_count - 1 - i] = Use(prev->argument(i));
+  for (int i = 0; i < pending_pushed_args_.length(); i++) {
+    args[argument_count - 1 - i] = pending_pushed_args_[i];
   }
+  pending_pushed_args_.Clear();
 
   llvm::CallInst* call = llvm_ir_builder_->CreateCall(target_entry_val, args);
   call->setCallingConv(llvm::CallingConv::X86_64_V8);

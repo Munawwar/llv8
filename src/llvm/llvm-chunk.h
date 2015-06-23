@@ -314,7 +314,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         module_(nullptr),
         function_(nullptr),
         llvm_ir_builder_(nullptr),
-        deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())) {}
+        deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())),
+        pending_pushed_args_(4, info->zone()) {}
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
@@ -359,7 +360,9 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // Is the value (not) a smi?
   llvm::Value* SmiCheck(HValue* value, bool negate = false);
   llvm::Value* CallVoid(Address target);
-  llvm::Value* CallForResult(Address target);
+  // This is intended to be a highly reusable method for calling stuff.
+  llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
+                           std::vector<llvm::Value*>& params);
   // Allocate a heap number in new space with undefined value. Returns
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment
@@ -386,6 +389,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Function* function_;
   std::unique_ptr<llvm::IRBuilder<>> llvm_ir_builder_;
   std::unique_ptr<LLVMDeoptData> deopt_data_;
+  ZoneList<llvm::Value*> pending_pushed_args_;
 };
 
 }  // namespace internal
