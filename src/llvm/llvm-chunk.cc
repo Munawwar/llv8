@@ -137,30 +137,20 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
     UNIMPLEMENTED();
   }
 
-  // TODO(llvm): What about StoreDouble..()?
-  // It's an unimplemented case which might be hidden
-  if (location.kind == StackMaps::Location::kDirect) {
-    UNIMPLEMENTED();
-  } else if (location.kind == StackMaps::Location::kIndirect) {
-    Register reg = location.dwarf_reg.reg();
-    if (!reg.is(rbp)) UNIMPLEMENTED();
-    auto offset = location.offset;
-    DCHECK(offset % kPointerSize == 0);
-    auto index = offset / kPointerSize;
-    CHECK(index != 1 && index != 0); // rbp and return address
-    if (index >= 0)
-      index = 1 - index;
-    else {
-      index = -index -
-        (StandardFrameConstants::kFixedFrameSize / kPointerSize - 1);
-    }
+  if (location.kind == StackMaps::Location::kDirect) { // op->IsStackSlot()
     if (is_tagged) {
-      translation->StoreStackSlot(index);
+      UNIMPLEMENTED();
+//      translation->StoreStackSlot(op->index());
     } else if (is_uint32) {
-      translation->StoreUint32StackSlot(index);
+      UNIMPLEMENTED();
+//      translation->StoreUint32StackSlot(op->index());
     } else {
-      translation->StoreInt32StackSlot(index);
+      UNIMPLEMENTED();
+//      translation->StoreInt32StackSlot(op->index());
     }
+  } else if (location.kind == StackMaps::Location::kIndirect) { // FIXME(llvm): it's wrong
+    UNIMPLEMENTED();
+//    translation->StoreDoubleStackSlot(op->index());
   } else if (location.kind == StackMaps::Location::kRegister) {
     Register reg = location.dwarf_reg.reg();
     if (is_tagged) {
@@ -575,6 +565,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // return value has type i8*
   return call_inst;
+
 }
 llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*> params) {
   const Runtime::Function* function = Runtime::FunctionForId(id);
@@ -1406,6 +1397,11 @@ llvm::Value* LLVMChunkBuilder::CompareRoot(HValue* val, HChange* instr)
 
 void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   LLVMContext& context = LLVMGranularity::getInstance().context();
+  bool can_convert_undefined_to_nan =
+      instr->can_convert_undefined_to_nan();
+  
+  bool deoptimize_on_minus_zero = instr->deoptimize_on_minus_zero();
+  
   llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(context,
                                                          "Cond True Block",
                                                          function_);
@@ -1418,7 +1414,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
   llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
 
-  CompareRoot(val, instr);
+  llvm::Value* cmp_val = nullptr;// = CompareRoot(val, instr);
 
   llvm::LoadInst* load_d = nullptr;
   bool not_smi = false;
@@ -1426,6 +1422,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   if (!val->representation().IsSmi()) {
     llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
     llvm_ir_builder_->SetInsertPoint(cond_false);
+    cmp_val = CompareRoot(val, instr);
     auto offset = llvm_ir_builder_->getInt64(
         HeapNumber::kValueOffset - kHeapObjectTag);
     llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
@@ -1433,11 +1430,24 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
     llvm::Value* bitcast = llvm_ir_builder_->CreateBitCast(gep, ptr_to_double);
     load_d = llvm_ir_builder_->CreateLoad(bitcast);
-    llvm_ir_builder_->CreateBr(continue_block);
     // TODO(llvm): deopt
     // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
+
+    if (can_convert_undefined_to_nan && false) {
+      UNIMPLEMENTED();
+    } else {
+      DeoptimizeIf(cmp_val, instr->block());
+    }
+
+    if (deoptimize_on_minus_zero) {
+      UNIMPLEMENTED();
+    }
+    
+    //llvm_ir_builder_->CreateBr(continue_block);
   }
 
+  llvm_ir_builder_->CreateBr(continue_block);
+  
   llvm_ir_builder_->SetInsertPoint(cond_true);
   llvm::Value* int32_val = SmiToInteger32(val);
   llvm::Value* double_val = llvm_ir_builder_->CreateSIToFP(int32_val,
@@ -1530,25 +1540,7 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::Retry(BailoutReason reason) {
-  info()->RetryOptimization(reason);
-  status_ = ABORTED;
-}
-
-void LLVMChunkBuilder::AddStabilityDependency(Handle<Map> map) {
-  if (!map->is_stable()) return Retry(kMapBecameUnstable);
-  chunk()->AddStabilityDependency(map);
-  // TODO(llvm): stability_dependencies_ unused yet
-}
-
 void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
-  if (instr->IsStabilityCheck()) {
-    const UniqueSet<Map>* maps = instr->maps();
-    for (int i = 0; i < maps->size(); ++i) {
-      AddStabilityDependency(maps->at(i).handle());
-    }
-    return;
-  }
   UNIMPLEMENTED();
 }
 
