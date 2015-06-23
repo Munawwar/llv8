@@ -1467,7 +1467,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
   llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
 
-  llvm::Value* cmp_val = nullptr;// = CompareRoot(val, instr);
+  llvm::Value* cmp_val = nullptr;
 
   llvm::LoadInst* load_d = nullptr;
   bool not_smi = false;
