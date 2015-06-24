@@ -137,20 +137,30 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
     UNIMPLEMENTED();
   }
 
-  if (location.kind == StackMaps::Location::kDirect) { // op->IsStackSlot()
-    if (is_tagged) {
-      UNIMPLEMENTED();
-//      translation->StoreStackSlot(op->index());
-    } else if (is_uint32) {
-      UNIMPLEMENTED();
-//      translation->StoreUint32StackSlot(op->index());
-    } else {
-      UNIMPLEMENTED();
-//      translation->StoreInt32StackSlot(op->index());
-    }
-  } else if (location.kind == StackMaps::Location::kIndirect) { // FIXME(llvm): it's wrong
+  // TODO(llvm): What about StoreDouble..()?
+  // It's an unimplemented case which might be hidden
+  if (location.kind == StackMaps::Location::kDirect) {
     UNIMPLEMENTED();
-//    translation->StoreDoubleStackSlot(op->index());
+  } else if (location.kind == StackMaps::Location::kIndirect) {
+    Register reg = location.dwarf_reg.reg();
+    if (!reg.is(rbp)) UNIMPLEMENTED();
+    auto offset = location.offset;
+    DCHECK(offset % kPointerSize == 0);
+    auto index = offset / kPointerSize;
+    CHECK(index != 1 && index != 0); // rbp and return address
+    if (index >= 0)
+      index = 1 - index;
+    else {
+      index = -index -
+        (StandardFrameConstants::kFixedFrameSize / kPointerSize - 1);
+    }
+    if (is_tagged) {
+      translation->StoreStackSlot(index);
+    } else if (is_uint32) {
+      translation->StoreUint32StackSlot(index);
+    } else {
+      translation->StoreInt32StackSlot(index);
+    }
   } else if (location.kind == StackMaps::Location::kRegister) {
     Register reg = location.dwarf_reg.reg();
     if (is_tagged) {
@@ -569,7 +579,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // return value has type i8*
   return call_inst;
-
 }
 
 llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
@@ -1593,7 +1602,25 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
   UNIMPLEMENTED();
 }
 
+void LLVMChunkBuilder::Retry(BailoutReason reason) {
+  info()->RetryOptimization(reason);
+  status_ = ABORTED;
+}
+
+void LLVMChunkBuilder::AddStabilityDependency(Handle<Map> map) {
+  if (!map->is_stable()) return Retry(kMapBecameUnstable);
+  chunk()->AddStabilityDependency(map);
+  // TODO(llvm): stability_dependencies_ unused yet
+}
+
 void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
+  if (instr->IsStabilityCheck()) {
+    const UniqueSet<Map>* maps = instr->maps();
+    for (int i = 0; i < maps->size(); ++i) {
+      AddStabilityDependency(maps->at(i).handle());
+    }
+    return;
+  }
   UNIMPLEMENTED();
 }
 
