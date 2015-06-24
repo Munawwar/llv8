@@ -1048,12 +1048,12 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
                                                instr->DoubleValue());
     instr->set_llvm_value(value);
   } else if (r.IsExternal()) {
-    UNIMPLEMENTED(); // See MacroAssembler::LoadAddress
-//    Address external_address = instr->ExternalReferenceValue().address();
-//    // TODO(llvm): tagged type
-//    llvm::Value* value = llvm_ir_builder_->getInt64(
-//        reinterpret_cast<uint64_t>(external_address));
-//    instr->set_llvm_value(value);
+    Address external_address = instr->ExternalReferenceValue().address();
+    // TODO(llvm): tagged type
+    // TODO(llvm): RelocInfo::EXTERNAL_REFERENCE
+    llvm::Value* value = llvm_ir_builder_->getInt64(
+        reinterpret_cast<uint64_t>(external_address));
+    instr->set_llvm_value(value);
   } else if (r.IsTagged()) {
     Handle<Object> object = instr->handle(isolate());
     if (object->IsSmi()) {
@@ -1070,11 +1070,14 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
       AllowHandleAllocation allow_handles;
       DCHECK(object->IsHeapObject());
       if (isolate()->heap()->InNewSpace(*object)) {
-        Handle<Cell> cell = isolate()->factory()->NewCell(object);
-        DCHECK(cell->IsHeapObject());
-        DCHECK(!isolate()->heap()->InNewSpace(*cell));
-        // FIXME(llvm): reloc info
-        intptr_t intptr_value = reinterpret_cast<intptr_t>(object.location());
+        Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
+        DCHECK(new_cell->IsHeapObject());
+        DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
+        // FIXME(llvm): reloc info (CELL). It's a real trouble,
+        // because the newly created cell handle dies when the HandleScope is
+        // destroyed (which happens in __RT_impl_Runtime_CompileOptimized
+        // i.e. right after the code is emitted).
+        auto intptr_value = reinterpret_cast<uintptr_t>(new_cell.location());
         llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
         llvm::Value* ptr = llvm_ir_builder_->CreateIntToPtr(value,
             llvm_ir_builder_->getInt64Ty()->getPointerTo());
@@ -1425,8 +1428,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
-llvm::Value* LLVMChunkBuilder::CompareRoot(HValue* val, HChange* instr)
-{
+llvm::Value* LLVMChunkBuilder::CompareRoot(HValue* val, HChange* instr) {
   LLVMContext& context = LLVMGranularity::getInstance().context();
   ExternalReference roots_array_start =
         ExternalReference::roots_array_start(isolate());
