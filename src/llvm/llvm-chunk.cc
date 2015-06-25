@@ -1508,6 +1508,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     // TODO(llvm): deopt
     // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
 
+    //FIXME: false must me deleted after full implementation
     if (can_convert_undefined_to_nan && false) {
       UNIMPLEMENTED();
     } else {
