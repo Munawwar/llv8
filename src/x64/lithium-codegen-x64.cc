@@ -4916,7 +4916,7 @@ void LCodeGen::EmitNumberUntagD(LNumberUntagD* instr, Register input_reg,
     // check, since all heap objects are at least two words long.
     __ movsd(result_reg, FieldOperand(input_reg, HeapNumber::kValueOffset));
 
-    if (can_convert_undefined_to_nan && false) {
+    if (can_convert_undefined_to_nan) {
       __ j(not_equal, &convert, Label::kNear);
     } else {
       DeoptimizeIf(not_equal, instr, Deoptimizer::kNotAHeapNumber);
