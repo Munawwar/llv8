@@ -5,6 +5,7 @@
 #include <cstdio>
 #include "llvm-chunk.h"
 #include "llvm-passes.h"
+#include <llvm/IR/InlineAsm.h>
 #include "llvm-stackmaps.h"
 
 namespace v8 {
@@ -1428,32 +1429,37 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
-llvm::Value* LLVMChunkBuilder::CompareRoot(HValue* val, HChange* instr) {
+llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, HChange* instr)
+{
   LLVMContext& context = LLVMGranularity::getInstance().context();
   ExternalReference roots_array_start =
         ExternalReference::roots_array_start(isolate());
   Address target_address = roots_array_start.address();
   auto address_val = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(target_address));
-  
+ 
   llvm::Value* int8_ptr_2 = llvm_ir_builder_->CreateIntToPtr(
         address_val, llvm::Type::getInt64PtrTy(context)); 
-
+ 
   llvm::Value* gep = llvm_ir_builder_->CreateLoad(int8_ptr_2);
   auto value = llvm_ir_builder_->getInt64(kRootRegisterBias);
   llvm::Value* r13_val = llvm_ir_builder_->CreateAdd(gep, value);
-
-  auto offset = llvm_ir_builder_->getInt64((Heap::kHeapNumberMapRootIndex << kPointerSizeLog2) - kRootRegisterBias);
+  
+  auto offset = llvm_ir_builder_->getInt64((Heap::kHeapNumberMapRootIndex
+        << kPointerSizeLog2) - kRootRegisterBias);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
         r13_val, llvm_ir_builder_->getInt8PtrTy());
   llvm::Value* gep_2 = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
-  
-  auto offset_1 = llvm_ir_builder_->getInt64(HeapObject::kMapOffset - kHeapObjectTag);
-  llvm::Value* int8_ptr_1 = llvm_ir_builder_->CreateIntToPtr(
-        Use(val), llvm_ir_builder_->getInt8PtrTy());
-  llvm::Value* gep_3 = llvm_ir_builder_->CreateGEP(int8_ptr_1, offset_1);
  
-  llvm::Value* cmp_result = llvm_ir_builder_->CreateICmpSGT(gep_3, gep_2);
+  llvm::Type* int_type = llvm_ir_builder_->getInt64Ty();
+  llvm::PointerType* ptr_to_int = llvm::PointerType::get(int_type, 0);
+ 
+  llvm::Value* bitcast_1 = llvm_ir_builder_->CreateBitCast(gep_2, ptr_to_int);
+  llvm::Value* bitcast_2 = llvm_ir_builder_->CreateBitCast(val, ptr_to_int);
+  llvm::Value* load_first = llvm_ir_builder_->CreateLoad(bitcast_2);
+  llvm::Value* load_second = llvm_ir_builder_->CreateLoad(bitcast_1);
+ 
+  llvm::Value* cmp_result = llvm_ir_builder_->CreateICmpSGT(load_first, load_second);
  
   return cmp_result;
   
@@ -1486,7 +1492,12 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   if (!val->representation().IsSmi()) {
     llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
     llvm_ir_builder_->SetInsertPoint(cond_false);
-    cmp_val = CompareRoot(val, instr);
+
+    auto offset_1 = llvm_ir_builder_->getInt64(HeapObject::kMapOffset - kHeapObjectTag);
+    llvm::Value* int8_ptr_1 = llvm_ir_builder_->CreateIntToPtr(
+        Use(val), llvm_ir_builder_->getInt8PtrTy());
+    llvm::Value* cmp_first = llvm_ir_builder_->CreateGEP(int8_ptr_1, offset_1);
+    cmp_val = CompareRoot(cmp_first, instr);
     auto offset = llvm_ir_builder_->getInt64(
         HeapNumber::kValueOffset - kHeapObjectTag);
     llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
@@ -1507,10 +1518,8 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
       UNIMPLEMENTED();
     }
     
-    //llvm_ir_builder_->CreateBr(continue_block);
+    llvm_ir_builder_->CreateBr(continue_block);
   }
-
-  llvm_ir_builder_->CreateBr(continue_block);
   
   llvm_ir_builder_->SetInsertPoint(cond_true);
   llvm::Value* int32_val = SmiToInteger32(val);

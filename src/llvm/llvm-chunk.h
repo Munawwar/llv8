@@ -370,7 +370,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* CallRuntime(Runtime::FunctionId id);
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
-  llvm::Value* CompareRoot(HValue* val, HChange* instr);
+  llvm::Value* CompareRoot(llvm::Value* val, HChange* instr);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
 
