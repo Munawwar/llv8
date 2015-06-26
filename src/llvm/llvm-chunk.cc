@@ -754,7 +754,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  pass_manager.add(new NormalizePhisPass());
+  //pass_manager.add(new NormalizePhisPass());
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
@@ -1856,11 +1856,42 @@ void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
-  UNIMPLEMENTED();
+
+   HObjectAccess access = instr->access();
+   int offset = access.offset() - 1;
+  if (access.IsExternalMemory()) {
+    UNIMPLEMENTED();
+  }
+
+  if (instr->representation().IsDouble()){
+    UNIMPLEMENTED();
+  }
+
+  if(!access.IsInobject()) {
+    UNIMPLEMENTED();
+  }
+
+  Representation representation = access.representation();
+  if (representation.IsSmi() && SmiValuesAre32Bits() &&
+    instr->representation().IsInteger32()) {
+    if(FLAG_debug_code) {
+      UNIMPLEMENTED();
+    }
+    STATIC_ASSERT(kSmiTag == 0);
+    DCHECK(kSmiTagSize + kSmiShiftSize == 32);
+    offset += kPointerSize / 2;
+    representation = Representation::Integer32();
+  }
+  
+  auto offset_1 = llvm_ir_builder_->getInt64(offset);
+  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), llvm_ir_builder_->getInt8PtrTy());
+  llvm::Value* obj = llvm_ir_builder_->CreateGEP(int8_ptr, offset_1);
+  llvm_ir_builder_->CreateLoad(obj);
+ 
 }
 
 void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
-  UNIMPLEMENTED();
+    UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
