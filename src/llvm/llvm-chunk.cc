@@ -1236,7 +1236,8 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
 }
 
 void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  //FIXME: in progress
 }
 
 void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexInformation* instr) {
@@ -1857,8 +1858,8 @@ void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
 
 void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
 
-   HObjectAccess access = instr->access();
-   int offset = access.offset() - 1;
+  HObjectAccess access = instr->access();
+  int offset = access.offset() - 1;
   if (access.IsExternalMemory()) {
     UNIMPLEMENTED();
   }
@@ -1886,7 +1887,8 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
   auto offset_1 = llvm_ir_builder_->getInt64(offset);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), llvm_ir_builder_->getInt8PtrTy());
   llvm::Value* obj = llvm_ir_builder_->CreateGEP(int8_ptr, offset_1);
-  llvm_ir_builder_->CreateLoad(obj);
+  llvm::Value* res = llvm_ir_builder_->CreateLoad(obj);
+  instr->set_llvm_value(res);
  
 }
 
