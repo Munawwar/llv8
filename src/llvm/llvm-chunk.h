@@ -237,24 +237,34 @@ class LLVMEnvironment FINAL:  public ZoneObject {
 // So TODO(llvm): more zone objects!
 class LLVMRelocationData : public ZoneObject {
  public:
+  union ExtendedInfo {
+    bool cell_extended;
+  };
+
   LLVMRelocationData(Zone* zone)
      : relocations_(4, zone),
+       meta_info_(4, zone),
        is_transferred_(false),
        zone_(zone) {}
 
-  void Add(RelocInfo rinfo) {
+  void Add(RelocInfo rinfo, ExtendedInfo ex_info) {
     DCHECK(!is_transferred_);
     relocations_.Add(rinfo, zone_);
+    meta_info_.Add(ex_info, zone_);
   }
 
   int RelocCount() {
     return relocations_.length();
   }
 
+  ZoneList<RelocInfo>& relocations() { return relocations_; }
+  ZoneList<ExtendedInfo>& meta_info() { return meta_info_; }
+
   void transfer() { is_transferred_ = true; }
 
  private:
   ZoneList<RelocInfo> relocations_;
+  ZoneList<ExtendedInfo> meta_info_;
   bool is_transferred_;
   Zone* zone_;
 };
@@ -317,6 +327,7 @@ class LLVMChunk FINAL : public LowChunk {
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi
 
   void SetUpDeoptimizationData(Handle<Code> code);
+  void SetUpRelocationData(Handle<Code> code);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);
   void WriteTranslation(LLVMEnvironment* environment,
@@ -376,6 +387,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
 #define DECLARE_DO(type) void Do##type(H##type* node);
   HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)
 #undef DECLARE_DO
+  static const uintptr_t kExtFillingValue = 0xabcdbeef;
 
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
@@ -414,6 +426,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
 
   void Retry(BailoutReason reason);
   void AddStabilityDependency(Handle<Map> map);
+  void CallStackMap(int stackmap_id, llvm::Value* value);
+  void CallStackMap(int stackmap_id, std::vector<llvm::Value*>& values);
 
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;

@@ -13,6 +13,7 @@ namespace internal {
 
 LLVMChunk::~LLVMChunk() {}
 
+
 Handle<Code> LLVMChunk::Codegen() {
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
@@ -38,7 +39,8 @@ Handle<Code> LLVMChunk::Codegen() {
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
-  SetUpDeoptimizationData(code);
+//  SetUpDeoptimizationData(code);
+  SetUpRelocationData(code);
 #ifdef DEBUG
   std::cerr << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
@@ -291,6 +293,53 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   // We assume a new function gets attention after the previous one
   // has been fully processed by llv8.
   LLVMGranularity::getInstance().memory_manager_ref()->DropStackmaps();
+}
+
+void LLVMChunk::SetUpRelocationData(Handle<Code> code) {
+  // FIXME(llvm): refactor this crap out!
+  // Find a way to interleave deopt and reloc stackmaps!..
+  List<byte*>& stackmap_list =
+      LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
+  if (stackmap_list.length() == 0) return;
+  DCHECK(stackmap_list.length() == 1);
+
+  StackMaps stackmaps;
+  DataView view(stackmap_list[0]);
+  stackmaps.parse(&view);
+  stackmaps.dumpMultiline(std::cerr, "  ");
+  auto length = reloc_data_->RelocCount();
+
+  uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
+      llvm_function_id_);
+  auto it = std::find_if(std::begin(stackmaps.stack_sizes),
+                         std::end(stackmaps.stack_sizes),
+                         [address](const StackMaps::StackSize& s) {
+                           return s.functionOffset ==  address;
+                         });
+  DCHECK(it != std::end(stackmaps.stack_sizes));
+
+  RelocInfoBuffer buffer_writer(code->relocation_size(),
+                                code->instruction_start());
+  for (auto id = 0; id < length; id++) {
+    StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
+
+    RelocInfo& rinfo = reloc_data_->relocations()[id];
+    LLVMRelocationData::ExtendedInfo minfo = reloc_data_->meta_info()[id];
+    if (rinfo.rmode() == RelocInfo::CELL) {
+      auto pc = reinterpret_cast<Address>(stackmap_record.instructionOffset);
+      pc += 2; // immediate offset in the 'mov' instruction encoding is 2 bytes
+      pc += address;
+      if (minfo.cell_extended) { // immediate was extended from 32 bit to 64.
+        auto imm = Memory::uintptr_at(pc);
+        DCHECK((imm & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
+        Memory::uintptr_at(pc) = imm >> 32;
+      }
+      rinfo.set_pc(pc);
+      buffer_writer.Write(&rinfo);
+    } else {
+      UNIMPLEMENTED();
+    }
+  }
 }
 
 LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
@@ -1036,6 +1085,27 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 //  UNIMPLEMENTED();
 }
 
+// TODO(llvm): this version of stackmap call is most often
+// used only for program counter (pc) and should be replaced in the
+// future by less optimization-constraining intrinsic
+// (which should be added to LLVM).
+void LLVMChunkBuilder::CallStackMap(int stackmap_id, llvm::Value* value) {
+  auto vector = std::vector<llvm::Value*>(1, value);
+  CallStackMap(stackmap_id, vector);
+}
+
+void LLVMChunkBuilder::CallStackMap(int stackmap_id,
+                                    std::vector<llvm::Value*>& values) {
+  llvm::Function* stackmap = llvm::Intrinsic::getDeclaration(
+      module_.get(), llvm::Intrinsic::experimental_stackmap);
+  std::vector<llvm::Value*> mapped_values;
+  mapped_values.push_back(llvm_ir_builder_->getInt64(stackmap_id));
+  int shadow_bytes = 0;
+  mapped_values.push_back(llvm_ir_builder_->getInt32(shadow_bytes));
+  mapped_values.insert(mapped_values.end(), values.begin(), values.end());
+  llvm_ir_builder_->CreateCall(stackmap, mapped_values);
+}
+
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
   // Note: constants might have EmitAtUses() == true
   Representation r = instr->representation();
@@ -1079,30 +1149,22 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
         Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
         DCHECK(new_cell->IsHeapObject());
         DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
-        // FIXME(llvm): reloc info (CELL). It's a real trouble,
-        // because the newly created cell handle dies when the HandleScope is
-        // destroyed (which happens in __RT_impl_Runtime_CompileOptimized
-        // i.e. right after the code is emitted).
+
         auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
-
-        if (is_uint32(intptr_value))
-          intptr_value = (intptr_value << 32) | 0xabcdbeef;
-
+        bool extended = false;
+        if (is_uint32(intptr_value)) {
+          intptr_value = (intptr_value << 32) | kExtFillingValue;
+          extended = true;
+        }
         llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
 
         RelocInfo rinfo(RelocInfo::CELL);
-        reloc_data_->Add(rinfo);
-        // StackMap (id = #deopts, shadow_bytes=0, ...)
-        llvm::Function* stackmap = llvm::Intrinsic::getDeclaration(module_.get(),
-            llvm::Intrinsic::experimental_stackmap);
-        std::vector<llvm::Value*> mapped_values;
+        LLVMRelocationData::ExtendedInfo meta_info;
+        meta_info.cell_extended = extended;
+        reloc_data_->Add(rinfo, meta_info);
         int stackmap_id = deopt_data_->DeoptCount()
             + reloc_data_->RelocCount() - 1;
-        mapped_values.push_back(llvm_ir_builder_->getInt64(stackmap_id));
-        int shadow_bytes = 0;
-        mapped_values.push_back(llvm_ir_builder_->getInt32(shadow_bytes));
-        mapped_values.push_back(value);
-        llvm_ir_builder_->CreateCall(stackmap, mapped_values);
+        CallStackMap(stackmap_id, value);
 
         llvm::Value* ptr = llvm_ir_builder_->CreateIntToPtr(value,
             llvm_ir_builder_->getInt64Ty()->getPointerTo());
