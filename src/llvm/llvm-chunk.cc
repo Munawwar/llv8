@@ -1873,7 +1873,18 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
-  UNIMPLEMENTED();
+  HValue* key = instr->key();
+  int shift_size = ElementsKindToShiftSize(FAST_ELEMENTS);
+  uint32_t inst_offset = instr->base_offset();
+  uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+  auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) - inst_offset);
+  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
+        Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+  llvm::Value* gep_2 = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
+  
+  llvm_ir_builder_->CreateLoad(gep_2);
+  
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {

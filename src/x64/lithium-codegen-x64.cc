@@ -3110,7 +3110,7 @@ void LCodeGen::DoLoadKeyedFixedArray(LLoadKeyed* instr) {
     DCHECK(kSmiTagSize + kSmiShiftSize == 32);
     offset += kPointerSize / 2;
   }
-
+  
   __ Load(result,
           BuildFastArrayOperand(instr->elements(), key,
                                 instr->hydrogen()->key()->representation(),
