@@ -235,7 +235,11 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   Handle<DeoptimizationInputData> data =
       DeoptimizationInputData::New(isolate(), length, TENURED);
 
-  DCHECK(length == stackmaps.records.size());
+  // FIXME(llvm): separate deopt data's stackmaps from reloc data's
+  // Also, it's a sum.
+  DCHECK(length == stackmaps.records.size() || stackmaps.records.size() == reloc_data_->RelocCount());
+  if (!length) return;
+
   for (auto id = 0; id < length; id++) {
     StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
     // Time to make a Translation from Stackmaps and Environments.
@@ -355,6 +359,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   DCHECK(module_);
   chunk()->set_llvm_function_id(std::stoi(module_->getModuleIdentifier()));
   chunk()->set_deopt_data(std::move(deopt_data_));
+  chunk()->set_reloc_data(reloc_data_);
   status_ = DONE;
   return *this;
 }
@@ -1078,8 +1083,27 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
         // because the newly created cell handle dies when the HandleScope is
         // destroyed (which happens in __RT_impl_Runtime_CompileOptimized
         // i.e. right after the code is emitted).
-        auto intptr_value = reinterpret_cast<uintptr_t>(new_cell.location());
+        auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
+
+        if (is_uint32(intptr_value))
+          intptr_value = (intptr_value << 32) | 0xabcdbeef;
+
         llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+
+        RelocInfo rinfo(RelocInfo::CELL);
+        reloc_data_->Add(rinfo);
+        // StackMap (id = #deopts, shadow_bytes=0, ...)
+        llvm::Function* stackmap = llvm::Intrinsic::getDeclaration(module_.get(),
+            llvm::Intrinsic::experimental_stackmap);
+        std::vector<llvm::Value*> mapped_values;
+        int stackmap_id = deopt_data_->DeoptCount()
+            + reloc_data_->RelocCount() - 1;
+        mapped_values.push_back(llvm_ir_builder_->getInt64(stackmap_id));
+        int shadow_bytes = 0;
+        mapped_values.push_back(llvm_ir_builder_->getInt32(shadow_bytes));
+        mapped_values.push_back(value);
+        llvm_ir_builder_->CreateCall(stackmap, mapped_values);
+
         llvm::Value* ptr = llvm_ir_builder_->CreateIntToPtr(value,
             llvm_ir_builder_->getInt64Ty()->getPointerTo());
         llvm::Value* deref = llvm_ir_builder_->CreateLoad(ptr);

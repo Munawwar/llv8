@@ -232,6 +232,33 @@ class LLVMEnvironment FINAL:  public ZoneObject {
   bool has_been_used_;
 };
 
+// ZoneObject is probably a better approach than the fancy
+// C++11 smart pointers which I have been using all over the place.
+// So TODO(llvm): more zone objects!
+class LLVMRelocationData : public ZoneObject {
+ public:
+  LLVMRelocationData(Zone* zone)
+     : relocations_(4, zone),
+       is_transferred_(false),
+       zone_(zone) {}
+
+  void Add(RelocInfo rinfo) {
+    DCHECK(!is_transferred_);
+    relocations_.Add(rinfo, zone_);
+  }
+
+  int RelocCount() {
+    return relocations_.length();
+  }
+
+  void transfer() { is_transferred_ = true; }
+
+ private:
+  ZoneList<RelocInfo> relocations_;
+  bool is_transferred_;
+  Zone* zone_;
+};
+
 class LLVMDeoptData {
  public:
   LLVMDeoptData(Zone* zone)
@@ -268,6 +295,7 @@ class LLVMChunk FINAL : public LowChunk {
   LLVMChunk(CompilationInfo* info, HGraph* graph)
     : LowChunk(info, graph),
       llvm_function_id_(-1),
+      reloc_data_(nullptr),
       deopt_data_(nullptr) {}
 
   static LLVMChunk* NewChunk(HGraph *graph);
@@ -279,6 +307,10 @@ class LLVMChunk FINAL : public LowChunk {
 
   void set_deopt_data(std::unique_ptr<LLVMDeoptData> deopt_data) {
     deopt_data_ = std::move(deopt_data);
+  }
+  void set_reloc_data(LLVMRelocationData* reloc_data) {
+    reloc_data_ = reloc_data;
+    reloc_data->transfer();
   }
  private:
   static const int kStackSlotSize = kPointerSize;
@@ -300,7 +332,9 @@ class LLVMChunk FINAL : public LowChunk {
                         int* dematerialized_index_pointer);
 
   int llvm_function_id_;
-  // Ownership gets transfered from LLVMChunkBuilder
+  // Ownership gets transferred from LLVMChunkBuilder
+  LLVMRelocationData* reloc_data_;
+  // Ownership gets transferred from LLVMChunkBuilder
   std::unique_ptr<LLVMDeoptData> deopt_data_;
 };
 
@@ -315,7 +349,10 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         function_(nullptr),
         llvm_ir_builder_(nullptr),
         deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())),
-        pending_pushed_args_(4, info->zone()) {}
+        reloc_data_(nullptr),
+        pending_pushed_args_(4, info->zone()) {
+    reloc_data_ = new(zone()) LLVMRelocationData(zone());
+  }
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
@@ -371,6 +408,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
   llvm::Value* CompareRoot(llvm::Value* val, HChange* instr);
+  void RecordRelocInfo(RelocInfo::Mode rmode);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
 
@@ -389,6 +427,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Function* function_;
   std::unique_ptr<llvm::IRBuilder<>> llvm_ir_builder_;
   std::unique_ptr<LLVMDeoptData> deopt_data_;
+  LLVMRelocationData* reloc_data_;
   ZoneList<llvm::Value*> pending_pushed_args_;
 };
 

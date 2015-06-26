@@ -431,6 +431,10 @@ class RelocInfo {
       : pc_(pc), rmode_(rmode), data_(data), host_(host) {
   }
 
+  RelocInfo(Mode rmode, intptr_t data = NULL)
+      : pc_(NULL), rmode_(rmode), data_(data), host_(NULL) {
+  }
+
   static inline bool IsRealRelocMode(Mode mode) {
     return mode >= FIRST_REAL_RELOC_MODE &&
         mode <= LAST_REAL_RELOC_MODE;
