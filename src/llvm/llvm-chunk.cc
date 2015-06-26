@@ -2098,9 +2098,19 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   } else if (!instr->value()->IsConstant()) {
     UNIMPLEMENTED();
   } else {
-   // LConstantOperand* operand_value = LConstantOperand::cast(instr->value());
     HConstant* constant = HConstant::cast(instr->value());
-    if (constant->representation().IsSmiOrInteger32()) {
+    if (constant->representation().IsInteger32()) {
+      auto llvm_offset = llvm_ir_builder_->getInt64(offset);
+      llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
+                                                              llvm_offset);
+      llvm::Type* type = llvm_ir_builder_->getInt32Ty();
+      llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+      llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
+                                                                ptr_to_type);
+      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(constant),
+                                                                  type);
+      llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
+    } else if (constant->representation().IsSmi()){
       auto llvm_offset = llvm_ir_builder_->getInt64(offset);
       llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
                                                               llvm_offset);
@@ -2111,8 +2121,6 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(constant),
                                                                   type);
       llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
-
-
     } else {
       llvm::Type* type = llvm_ir_builder_->getInt64Ty();
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
