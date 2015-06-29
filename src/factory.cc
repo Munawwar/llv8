@@ -1380,11 +1380,13 @@ Handle<Code> Factory::NewCodeRaw(int object_size, bool immovable) {
 }
 
 Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
+                                  const Vector<byte>* reloc_data,
                                   Code::Flags flags,
                                   bool immovable,
                                   int prologue_offset,
                                   bool is_debug) {
-  Handle<ByteArray> reloc_info = NewByteArray(desc.reloc_size, TENURED);
+  DCHECK(desc.reloc_size == 0);
+  Handle<ByteArray> reloc_info = NewByteArray(reloc_data->length(), TENURED);
 //  Handle<ConstantPoolArray> constant_pool =
 //      desc.origin->NewConstantPool(isolate());
 
@@ -1407,13 +1409,14 @@ Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
   code->set_flags(flags);
   code->set_raw_kind_specific_flags1(0);
   code->set_raw_kind_specific_flags2(0);
-  code->set_is_crankshafted(false);
   code->set_is_llvmed(true);
   code->set_deoptimization_data(*empty_fixed_array(), SKIP_WRITE_BARRIER);
   code->set_raw_type_feedback_info(Smi::FromInt(0));
   code->set_next_code_link(*undefined_value());
   code->set_handler_table(*empty_fixed_array(), SKIP_WRITE_BARRIER);
   code->set_prologue_offset(prologue_offset);
+  // FIXME(llvm): bad bad not good
+  code->set_is_crankshafted(false);
   code->set_is_crankshafted(true);
   if (code->kind() == Code::OPTIMIZED_FUNCTION) {
     code->set_marked_for_deoptimization(false);
@@ -1436,7 +1439,7 @@ Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
   // that are dereferenced during the copy to point directly to the actual heap
   // objects. These pointers can include references to the code object itself,
   // through the self_reference parameter.
-  code->CopyFrom(desc); // FIXME(llvm): it dereferences desc.origin
+  code->CopyFrom(desc, reloc_data); // FIXME(llvm): it dereferences desc.origin
 
 #ifdef VERIFY_HEAP
   if (FLAG_verify_heap) code->ObjectVerify();

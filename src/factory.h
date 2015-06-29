@@ -538,6 +538,7 @@ class Factory final {
                        bool is_debug = false);
 
   Handle<Code> NewLLVMCode(const CodeDesc& desc,
+                           const Vector<byte>* reloc_data,
                            Code::Flags flags,
                            bool immovable = false,
                            int prologue_offset = Code::kPrologueOffsetNotSet,

@@ -11629,7 +11629,7 @@ void Code::Relocate(intptr_t delta) {
 }
 
 
-void Code::CopyFrom(const CodeDesc& desc) {
+void Code::CopyFrom(const CodeDesc& desc, const Vector<byte>* reloc_data) {
   DCHECK(Marking::Color(this) == Marking::WHITE_OBJECT);
 
   // copy code
@@ -11637,9 +11637,12 @@ void Code::CopyFrom(const CodeDesc& desc) {
             static_cast<size_t>(desc.instr_size));
 
   // copy reloc info
-  CopyBytes(relocation_start(),
-            desc.buffer + desc.buffer_size - desc.reloc_size,
-            static_cast<size_t>(desc.reloc_size));
+  if (!reloc_data) {
+    CopyBytes(relocation_start(),
+              desc.buffer + desc.buffer_size - desc.reloc_size,
+              static_cast<size_t>(desc.reloc_size));
+  } else
+    CopyBytes(relocation_start(), reloc_data->start(), reloc_data->length());
 
   // unbox handles and relocate
   intptr_t delta = instruction_start() - desc.buffer;

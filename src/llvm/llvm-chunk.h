@@ -327,7 +327,7 @@ class LLVMChunk FINAL : public LowChunk {
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi
 
   void SetUpDeoptimizationData(Handle<Code> code);
-  void SetUpRelocationData(Handle<Code> code);
+  Vector<byte> GetRelocationData(CodeDesc& code_desc);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);
   void WriteTranslation(LLVMEnvironment* environment,

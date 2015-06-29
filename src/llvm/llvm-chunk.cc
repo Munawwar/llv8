@@ -32,15 +32,17 @@ Handle<Code> LLVMChunk::Codegen() {
 #endif
 
   Isolate* isolate = info()->isolate();
+  CodeDesc code_desc =
+      LLVMGranularity::getInstance().memory_manager_ref()->LastAllocatedCode();
+  Vector<byte> reloc_data = GetRelocationData(code_desc);
+
   // Allocate and install the code.
-  Handle<Code> code = isolate->factory()->NewLLVMCode(
-      LLVMGranularity::getInstance().memory_manager_ref()->LastAllocatedCode(),
-      info()->flags());
+  Handle<Code> code = isolate->factory()->NewLLVMCode(code_desc, &reloc_data,
+                                                      info()->flags());
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
 //  SetUpDeoptimizationData(code);
-  SetUpRelocationData(code);
 #ifdef DEBUG
   std::cerr << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
@@ -295,12 +297,12 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   LLVMGranularity::getInstance().memory_manager_ref()->DropStackmaps();
 }
 
-void LLVMChunk::SetUpRelocationData(Handle<Code> code) {
+Vector<byte> LLVMChunk::GetRelocationData(CodeDesc& code_desc) {
   // FIXME(llvm): refactor this crap out!
   // Find a way to interleave deopt and reloc stackmaps!..
   List<byte*>& stackmap_list =
       LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
-  if (stackmap_list.length() == 0) return;
+  if (stackmap_list.length() == 0) return Vector<byte>();
   DCHECK(stackmap_list.length() == 1);
 
   StackMaps stackmaps;
@@ -311,6 +313,8 @@ void LLVMChunk::SetUpRelocationData(Handle<Code> code) {
 
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
+  // TODO(llvm): is it address == code_desc.buffer?
+  DCHECK(reinterpret_cast<Address>(address) == code_desc.buffer);
   auto it = std::find_if(std::begin(stackmaps.stack_sizes),
                          std::end(stackmaps.stack_sizes),
                          [address](const StackMaps::StackSize& s) {
@@ -318,8 +322,7 @@ void LLVMChunk::SetUpRelocationData(Handle<Code> code) {
                          });
   DCHECK(it != std::end(stackmaps.stack_sizes));
 
-  RelocInfoBuffer buffer_writer(code->relocation_size(),
-                                code->instruction_start());
+  RelocInfoBuffer buffer_writer(4, code_desc.buffer);
   for (auto id = 0; id < length; id++) {
     StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
 
@@ -340,6 +343,8 @@ void LLVMChunk::SetUpRelocationData(Handle<Code> code) {
       UNIMPLEMENTED();
     }
   }
+  // Here we just rightfully hope for RVO
+  return buffer_writer.GetResult();
 }
 
 LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
