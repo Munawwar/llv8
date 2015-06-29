@@ -328,12 +328,16 @@ Vector<byte> LLVMChunk::GetRelocationData(CodeDesc& code_desc) {
 
     RelocInfo& rinfo = reloc_data_->relocations()[id];
     LLVMRelocationData::ExtendedInfo minfo = reloc_data_->meta_info()[id];
-    if (rinfo.rmode() == RelocInfo::CELL) {
+    if (rinfo.rmode() == RelocInfo::CELL ||
+        rinfo.rmode() == RelocInfo::EMBEDDED_OBJECT) {
       auto pc = reinterpret_cast<Address>(stackmap_record.instructionOffset);
       pc += 2; // immediate offset in the 'mov' instruction encoding is 2 bytes
       pc += address;
       if (minfo.cell_extended) { // immediate was extended from 32 bit to 64.
         auto imm = Memory::uintptr_at(pc);
+#if DEBUG
+        std::cerr << "RELOC CONST: " << imm << std::endl;
+#endif
         DCHECK((imm & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
         Memory::uintptr_at(pc) = imm >> 32;
       }
@@ -1111,6 +1115,25 @@ void LLVMChunkBuilder::CallStackMap(int stackmap_id,
   llvm_ir_builder_->CreateCall(stackmap, mapped_values);
 }
 
+llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
+                                               RelocInfo::Mode rmode) {
+  bool extended = false;
+  if (is_uint32(intptr_value)) {
+    intptr_value = (intptr_value << 32) | kExtFillingValue;
+    extended = true;
+  }
+  llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+
+  RelocInfo rinfo(rmode);
+  LLVMRelocationData::ExtendedInfo meta_info;
+  meta_info.cell_extended = extended;
+  reloc_data_->Add(rinfo, meta_info);
+  int stackmap_id = deopt_data_->DeoptCount() + reloc_data_->RelocCount() - 1;
+  CallStackMap(stackmap_id, value);
+
+  return value;
+}
+
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
   // Note: constants might have EmitAtUses() == true
   Representation r = instr->representation();
@@ -1156,29 +1179,16 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
         DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
 
         auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
-        bool extended = false;
-        if (is_uint32(intptr_value)) {
-          intptr_value = (intptr_value << 32) | kExtFillingValue;
-          extended = true;
-        }
-        llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
-
-        RelocInfo rinfo(RelocInfo::CELL);
-        LLVMRelocationData::ExtendedInfo meta_info;
-        meta_info.cell_extended = extended;
-        reloc_data_->Add(rinfo, meta_info);
-        int stackmap_id = deopt_data_->DeoptCount()
-            + reloc_data_->RelocCount() - 1;
-        CallStackMap(stackmap_id, value);
+        llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
 
         llvm::Value* ptr = llvm_ir_builder_->CreateIntToPtr(value,
             llvm_ir_builder_->getInt64Ty()->getPointerTo());
         llvm::Value* deref = llvm_ir_builder_->CreateLoad(ptr);
         instr->set_llvm_value(deref);
       } else {
-        // FIXME(llvm): reloc info RelocInfo::EMBEDDED_OBJECT
-        intptr_t intptr_value = reinterpret_cast<intptr_t>(object.location());
-        llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+        uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
+        llvm::Value* value = RecordRelocInfo(intptr_value,
+                                             RelocInfo::EMBEDDED_OBJECT);
         instr->set_llvm_value(value);
       }
     }
