@@ -1337,8 +1337,37 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
 }
 
 void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
-  //UNIMPLEMENTED();
-  //FIXME: in progress
+  Representation representation = instr->length()->representation();
+  DCHECK(representation.Equals(instr->index()->representation()));
+  DCHECK(representation.IsSmiOrInteger32());
+  if (instr->length()->IsConstant()) {
+    UNIMPLEMENTED();
+  } else if (instr->index()->IsConstant()) {
+    int32_t index = (HConstant::cast(instr->index()))->Integer32Value();
+    auto index_l = llvm_ir_builder_->getInt64(index);
+      if (representation.IsSmi()) {
+        llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(Use(instr->length()),
+            index_l);
+        instr->set_llvm_value(compare);
+      } else {
+        LLVMContext& context = LLVMGranularity::getInstance().context();
+        llvm::Type* int_type = llvm_ir_builder_->getInt64Ty();
+        llvm::PointerType* ptr_to_int = llvm::PointerType::get(int_type, 0);
+        llvm::Value* int8_ptr_2 = llvm_ir_builder_->CreateIntToPtr(Use(instr->length()),
+            llvm::Type::getInt64PtrTy(context));
+        llvm::Value* bitcast_1 = llvm_ir_builder_->CreateBitCast(int8_ptr_2, ptr_to_int);
+        llvm::Value* load_second = llvm_ir_builder_->CreateLoad(bitcast_1);
+        llvm::Value* compare = llvm_ir_builder_->CreateICmpULT(load_second, index_l);
+        instr->set_llvm_value(compare);
+      }
+  } else {
+    UNIMPLEMENTED();
+  }
+  if (FLAG_debug_code && instr->skip_check()) {
+    UNIMPLEMENTED();
+  } else {
+    DeoptimizeIf(Use(instr), instr->block());
+  }
 }
 
 void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexInformation* instr) {
