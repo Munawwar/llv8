@@ -833,8 +833,8 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
-  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
-  LLVMGranularity::getInstance().OptimizeModule(module_.get());
+//  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
+//  LLVMGranularity::getInstance().OptimizeModule(module_.get());
 #ifdef DEBUG
   std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
   llvm::errs() << *(module_.get());
@@ -1980,17 +1980,43 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
   HValue* key = instr->key();
+  Representation representation = instr->representation();
+  bool requires_hole_check = instr->RequiresHoleCheck();
   int shift_size = ElementsKindToShiftSize(FAST_ELEMENTS);
   uint32_t inst_offset = instr->base_offset();
   uint32_t const_val = (HConstant::cast(key))->Integer32Value();
-  auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) - inst_offset);
-  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
-        Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
-  llvm::Value* gep_2 = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
-  
-  llvm_ir_builder_->CreateLoad(gep_2);
-  
-  //UNIMPLEMENTED();
+  llvm::Value* gep_0 = nullptr;
+  if (kPointerSize == kInt32Size && !key->IsConstant() &&
+      instr->IsDehoisted()) {
+    UNIMPLEMENTED();
+  }
+  if (representation.IsInteger32() && SmiValuesAre32Bits() &&
+      instr->elements_kind() == FAST_SMI_ELEMENTS) {
+    DCHECK(!requires_hole_check);
+    if (FLAG_debug_code) {
+      UNIMPLEMENTED();
+    }
+    inst_offset += kPointerSize / 2;
+    
+  }
+  if (key->IsConstant()) {
+    auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
+          inst_offset);
+    llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
+          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+    gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, offset);
+  } else {
+    UNIMPLEMENTED();
+  }
+  llvm::Value* load = llvm_ir_builder_->CreateLoad(gep_0);
+  if (requires_hole_check) {
+    if (IsFastSmiElementsKind(instr->elements_kind())) {
+      UNIMPLEMENTED();
+    } else {
+      UNIMPLEMENTED();
+    }
+  }
+  instr->set_llvm_value(load);
 }
 
 void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
@@ -2028,6 +2054,8 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
   llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0); 
   auto offset_1 = llvm_ir_builder_->getInt64(offset);
+  llvm::Type* int_type = llvm_ir_builder_->getInt64Ty();
+  llvm::PointerType* ptr_to_int = llvm::PointerType::get(int_type, 0);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), llvm_ir_builder_->getInt8PtrTy());
   llvm::Value* obj = llvm_ir_builder_->CreateGEP(int8_ptr, offset_1);
   llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(obj, ptr_to_type);

@@ -3084,7 +3084,6 @@ void LCodeGen::DoLoadKeyedFixedArray(LLoadKeyed* instr) {
   bool requires_hole_check = hinstr->RequiresHoleCheck();
   Representation representation = hinstr->representation();
   int offset = instr->base_offset();
-
   if (kPointerSize == kInt32Size && !key->IsConstantOperand() &&
       instr->hydrogen()->IsDehoisted()) {
     // Sign extend key because it could be a 32 bit negative value
