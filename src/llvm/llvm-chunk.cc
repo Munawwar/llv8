@@ -2024,11 +2024,14 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     offset += kPointerSize / 2;
     representation = Representation::Integer32();
   }
-  
+ 
+  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+  llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0); 
   auto offset_1 = llvm_ir_builder_->getInt64(offset);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), llvm_ir_builder_->getInt8PtrTy());
   llvm::Value* obj = llvm_ir_builder_->CreateGEP(int8_ptr, offset_1);
-  llvm::Value* res = llvm_ir_builder_->CreateLoad(obj);
+  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(obj, ptr_to_type);
+  llvm::Value* res = llvm_ir_builder_->CreateLoad(casted_address);
   instr->set_llvm_value(res);
  
 }
@@ -2176,7 +2179,6 @@ void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
-  //UNIMPLEMENTED();
   Representation representation = instr->representation();
 
    HObjectAccess access = instr->access();
@@ -2242,7 +2244,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       llvm::Type* type = llvm_ir_builder_->getInt64Ty();
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       Handle<Object> handle_value = constant->handle(isolate()); 
-      int64_t value = reinterpret_cast<int64_t>(handle_value.location());
+      int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
       auto llvm_offset = llvm_ir_builder_->getInt64(offset);
       llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
                                                            llvm_offset);
