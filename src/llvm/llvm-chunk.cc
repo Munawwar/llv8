@@ -1347,7 +1347,7 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
      right = llvm_ir_builder_->CreateSExt(right, type);
   }  
   llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(left, right);
-        instr->set_llvm_value(compare);
+  instr->set_llvm_value(compare);
   if (FLAG_debug_code && instr->skip_check()) {
     UNIMPLEMENTED();
   } else {
@@ -1956,7 +1956,20 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
-  UNIMPLEMENTED();
+  Handle<Object> handle_value = instr->cell().handle(); 
+  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+  llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+  int64_t value = reinterpret_cast<int64_t>(*handle_value.location());
+  auto address_val = llvm_ir_builder_->getInt64(value); 
+  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
+        address_val, llvm_ir_builder_->getInt8PtrTy());
+  llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(0));
+  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
+  llvm::Value* load_cell = llvm_ir_builder_->CreateLoad(casted_address);
+  instr->set_llvm_value(load_cell); 
+  if(instr->RequiresHoleCheck()){
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
@@ -2191,7 +2204,21 @@ void LLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
-  UNIMPLEMENTED();
+  if (instr->RequiresHoleCheck()) {
+    UNIMPLEMENTED();
+  } else {
+    Handle<Object> handle_value = instr->cell().handle();
+    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+    llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+    int64_t value = reinterpret_cast<int64_t>(*handle_value.location());
+    auto address_val = llvm_ir_builder_->getInt64(value);
+    llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
+          address_val, llvm_ir_builder_->getInt8PtrTy());
+    llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(0));
+    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
+    llvm::Value* load_cell = llvm_ir_builder_->CreateStore(Use(instr->value()),casted_address);
+    instr->set_llvm_value(load_cell);
+   }
 }
 
 void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
