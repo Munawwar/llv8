@@ -1349,7 +1349,7 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
         llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(Use(instr->length()),
             index_l);
         instr->set_llvm_value(compare);
-      } else {
+      } else { //FIXME: Check if this is right
         LLVMContext& context = LLVMGranularity::getInstance().context();
         llvm::Type* int_type = llvm_ir_builder_->getInt64Ty();
         llvm::PointerType* ptr_to_int = llvm::PointerType::get(int_type, 0);
@@ -1359,7 +1359,7 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
         llvm::Value* load_second = llvm_ir_builder_->CreateLoad(bitcast_1);
         llvm::Value* compare = llvm_ir_builder_->CreateICmpULT(load_second, index_l);
         instr->set_llvm_value(compare);
-      }
+      } 
   } else {
     UNIMPLEMENTED();
   }
@@ -2054,8 +2054,6 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
   llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0); 
   auto offset_1 = llvm_ir_builder_->getInt64(offset);
-  llvm::Type* int_type = llvm_ir_builder_->getInt64Ty();
-  llvm::PointerType* ptr_to_int = llvm::PointerType::get(int_type, 0);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), llvm_ir_builder_->getInt8PtrTy());
   llvm::Value* obj = llvm_ir_builder_->CreateGEP(int8_ptr, offset_1);
   llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(obj, ptr_to_type);
