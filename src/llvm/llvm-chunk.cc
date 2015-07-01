@@ -44,7 +44,7 @@ Handle<Code> LLVMChunk::Codegen() {
 
 //  SetUpDeoptimizationData(code);
 #ifdef DEBUG
-  std::cerr << "Instruction start: "
+  std::cout << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
 #endif
   return code;
@@ -833,8 +833,8 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
-//  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
-//  LLVMGranularity::getInstance().OptimizeModule(module_.get());
+  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
+  LLVMGranularity::getInstance().OptimizeModule(module_.get());
 #ifdef DEBUG
   std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
   llvm::errs() << *(module_.get());
@@ -1340,29 +1340,14 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
   Representation representation = instr->length()->representation();
   DCHECK(representation.Equals(instr->index()->representation()));
   DCHECK(representation.IsSmiOrInteger32());
-  if (instr->length()->IsConstant()) {
-    UNIMPLEMENTED();
-  } else if (instr->index()->IsConstant()) {
-    int32_t index = (HConstant::cast(instr->index()))->Integer32Value();
-    auto index_l = llvm_ir_builder_->getInt64(index);
-      if (representation.IsSmi()) {
-        llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(Use(instr->length()),
-            index_l);
+  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+  llvm::Value* left = Use(instr->length());
+  llvm::Value* right = Use(instr->index());
+  if (instr->index()->representation().IsInteger32()) {
+     right = llvm_ir_builder_->CreateSExt(right, type);
+  }  
+  llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(left, right);
         instr->set_llvm_value(compare);
-      } else { //FIXME: Check if this is right
-        LLVMContext& context = LLVMGranularity::getInstance().context();
-        llvm::Type* int_type = llvm_ir_builder_->getInt64Ty();
-        llvm::PointerType* ptr_to_int = llvm::PointerType::get(int_type, 0);
-        llvm::Value* int8_ptr_2 = llvm_ir_builder_->CreateIntToPtr(Use(instr->length()),
-            llvm::Type::getInt64PtrTy(context));
-        llvm::Value* bitcast_1 = llvm_ir_builder_->CreateBitCast(int8_ptr_2, ptr_to_int);
-        llvm::Value* load_second = llvm_ir_builder_->CreateLoad(bitcast_1);
-        llvm::Value* compare = llvm_ir_builder_->CreateICmpULT(load_second, index_l);
-        instr->set_llvm_value(compare);
-      } 
-  } else {
-    UNIMPLEMENTED();
-  }
   if (FLAG_debug_code && instr->skip_check()) {
     UNIMPLEMENTED();
   } else {
@@ -1980,11 +1965,11 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
   HValue* key = instr->key();
+  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   Representation representation = instr->representation();
   bool requires_hole_check = instr->RequiresHoleCheck();
   int shift_size = ElementsKindToShiftSize(FAST_ELEMENTS);
   uint32_t inst_offset = instr->base_offset();
-  uint32_t const_val = (HConstant::cast(key))->Integer32Value();
   llvm::Value* gep_0 = nullptr;
   if (kPointerSize == kInt32Size && !key->IsConstant() &&
       instr->IsDehoisted()) {
@@ -2000,13 +1985,26 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
     
   }
   if (key->IsConstant()) {
+    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
     auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
           inst_offset);
     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
           Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
     gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, offset);
   } else {
-    UNIMPLEMENTED();
+     llvm::Value* lkey = Use(key);
+     if (key->representation().IsInteger32()) {
+        lkey = llvm_ir_builder_->CreateSExt(lkey, type);
+     }
+     // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
+     llvm::Value* scale = llvm_ir_builder_->getInt64(8); //FIXME: //find a way to pass by ScaleFactor
+     llvm::Value* mul = llvm_ir_builder_->CreateMul(lkey, scale);
+     auto offset = llvm_ir_builder_->getInt64(inst_offset);
+     llvm::Value* add = llvm_ir_builder_->CreateAdd(mul, offset);
+     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
+          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+     gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, add);
+   
   }
   llvm::Value* load = llvm_ir_builder_->CreateLoad(gep_0);
   if (requires_hole_check) {

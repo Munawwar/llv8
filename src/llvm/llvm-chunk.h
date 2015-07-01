@@ -443,6 +443,16 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   std::unique_ptr<LLVMDeoptData> deopt_data_;
   LLVMRelocationData* reloc_data_;
   ZoneList<llvm::Value*> pending_pushed_args_;
+  enum ScaleFactor {
+    times_1 = 0,
+    times_2 = 1,
+    times_4 = 2,
+    times_8 = 3,
+    times_int_size = times_4,
+    times_half_pointer_size = times_2,
+    times_pointer_size = times_4,
+    times_twice_pointer_size = times_8
+  };
 };
 
 }  // namespace internal
