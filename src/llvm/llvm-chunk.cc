@@ -323,6 +323,7 @@ Vector<byte> LLVMChunk::GetRelocationData(CodeDesc& code_desc) {
   DCHECK(it != std::end(stackmaps.stack_sizes));
 
   RelocInfoBuffer buffer_writer(4, code_desc.buffer);
+  std::set<Address> processed;
   for (auto id = 0; id < length; id++) {
     StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
 
@@ -330,9 +331,19 @@ Vector<byte> LLVMChunk::GetRelocationData(CodeDesc& code_desc) {
     LLVMRelocationData::ExtendedInfo minfo = reloc_data_->meta_info()[id];
     if (rinfo.rmode() == RelocInfo::CELL ||
         rinfo.rmode() == RelocInfo::EMBEDDED_OBJECT) {
-      auto pc = reinterpret_cast<Address>(stackmap_record.instructionOffset);
+      auto pc = reinterpret_cast<Address>(stackmap_record.instructionOffset)
+          + address;
+
+      DCHECK(stackmap_record.locations.size() == 1);
+      DCHECK(stackmap_record.locations[0].kind
+             == StackMaps::Location::kConstantIndex);
+      auto recorded_imm =
+          stackmaps.constants[stackmap_record.locations[0].offset].integer;
       pc += 2; // immediate offset in the 'mov' instruction encoding is 2 bytes
-      pc += address;
+      // mov imm64 takes 10 bytes
+      while (Memory::uint64_at(pc) != recorded_imm || processed.count(pc))
+        pc += 10;
+      processed.insert(pc);
       if (minfo.cell_extended) { // immediate was extended from 32 bit to 64.
         auto imm = Memory::uintptr_at(pc);
 #if DEBUG
@@ -347,7 +358,7 @@ Vector<byte> LLVMChunk::GetRelocationData(CodeDesc& code_desc) {
       UNIMPLEMENTED();
     }
   }
-  // Here we just rightfully hope for RVO
+  // Here we just (rightfully) hope for RVO
   return buffer_writer.GetResult();
 }
 
