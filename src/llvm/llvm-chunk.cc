@@ -1974,7 +1974,7 @@ void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
   auto address_val = llvm_ir_builder_->getInt64(value); 
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
         address_val, llvm_ir_builder_->getInt8PtrTy());
-  llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(0));
+  llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(7));
   llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
   llvm::Value* load_cell = llvm_ir_builder_->CreateLoad(casted_address);
   instr->set_llvm_value(load_cell); 
@@ -2225,10 +2225,10 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
     auto address_val = llvm_ir_builder_->getInt64(value);
     llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
           address_val, llvm_ir_builder_->getInt8PtrTy());
-    llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(0));
+    llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(7));
     llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
-    llvm::Value* load_cell = llvm_ir_builder_->CreateStore(Use(instr->value()),casted_address);
-    instr->set_llvm_value(load_cell);
+    llvm::Value* store_cell = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address);
+    instr->set_llvm_value(store_cell);
    }
 }
 
