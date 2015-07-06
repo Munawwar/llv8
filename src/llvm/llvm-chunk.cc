@@ -37,8 +37,14 @@ Handle<Code> LLVMChunk::Codegen() {
   CodeDesc code_desc =
       LLVMGranularity::getInstance().memory_manager_ref()->LastAllocatedCode();
 
-  LLVMGranularity::getInstance().Disass(code_desc);
-  Vector<byte> reloc_data = GetRelocationData(code_desc);
+#ifdef DEBUG
+  LLVMGranularity::getInstance().Disass(
+      code_desc.buffer, code_desc.buffer + code_desc.instr_size);
+#endif
+
+  Vector<byte> reloc_data = LLVMGranularity::getInstance().Patch(
+      code_desc.buffer, code_desc.buffer + code_desc.instr_size,
+      reloc_data_->reloc_map());
 
   // Allocate and install the code.
   Handle<Code> code = isolate->factory()->NewLLVMCode(code_desc, &reloc_data,
@@ -46,10 +52,16 @@ Handle<Code> LLVMChunk::Codegen() {
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
-//  SetUpDeoptimizationData(code);
+  SetUpDeoptimizationData(code);
 #ifdef DEBUG
   std::cout << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
+#endif
+
+#ifdef DEBUG
+  LLVMGranularity::getInstance().Disass(
+      code->instruction_start(),
+      code->instruction_start() + code->instruction_size());
 #endif
   return code;
 }
@@ -245,7 +257,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
   // FIXME(llvm): separate deopt data's stackmaps from reloc data's
   // Also, it's a sum.
-  DCHECK(length == stackmaps.records.size() || stackmaps.records.size() == reloc_data_->RelocCount());
+  DCHECK(length == stackmaps.records.size());
   if (!length) return;
 
   for (auto id = 0; id < length; id++) {
@@ -301,66 +313,45 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   LLVMGranularity::getInstance().memory_manager_ref()->DropStackmaps();
 }
 
-Vector<byte> LLVMChunk::GetRelocationData(CodeDesc& code_desc) {
-  // FIXME(llvm): refactor this crap out!
-  // Find a way to interleave deopt and reloc stackmaps!..
-  List<byte*>& stackmap_list =
-      LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
-  if (stackmap_list.length() == 0) return Vector<byte>();
-  DCHECK(stackmap_list.length() == 1);
+Vector<byte> LLVMGranularity::Patch(Address start, Address end,
+                                    LLVMRelocationData::RelocMap& reloc_map) {
+  RelocInfoBuffer buffer_writer(4, start);
 
-  StackMaps stackmaps;
-  DataView view(stackmap_list[0]);
-  stackmaps.parse(&view);
-  stackmaps.dumpMultiline(std::cerr, "  ");
-  auto length = reloc_data_->RelocCount();
+  auto pos = start;
+  while (pos < end) {
+    llvm::MCInst inst;
+    uint64_t size;
+    auto address = 0;
 
-  uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
-      llvm_function_id_);
-  // TODO(llvm): is it address == code_desc.buffer?
-  DCHECK(reinterpret_cast<Address>(address) == code_desc.buffer);
-  auto it = std::find_if(std::begin(stackmaps.stack_sizes),
-                         std::end(stackmaps.stack_sizes),
-                         [address](const StackMaps::StackSize& s) {
-                           return s.functionOffset ==  address;
-                         });
-  DCHECK(it != std::end(stackmaps.stack_sizes));
+    llvm::MCDisassembler::DecodeStatus s = disasm_->getInstruction(
+        inst /* out */, size /* out */, llvm::ArrayRef<uint8_t>(pos, end),
+        address, llvm::nulls(), llvm::nulls());
+    DCHECK(s == llvm::MCDisassembler::Success);
 
-  RelocInfoBuffer buffer_writer(4, code_desc.buffer);
-  std::set<Address> processed;
-  for (auto id = 0; id < length; id++) {
-    StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
+    // const llvm::MCInstrDesc& desc = mii_->get(inst.getOpcode());
+    // and testing desc.isMoveImmediate() did't work :(
 
-    RelocInfo& rinfo = reloc_data_->relocations()[id];
-    LLVMRelocationData::ExtendedInfo minfo = reloc_data_->meta_info()[id];
-    if (rinfo.rmode() == RelocInfo::CELL ||
-        rinfo.rmode() == RelocInfo::EMBEDDED_OBJECT) {
-      auto pc = reinterpret_cast<Address>(stackmap_record.instructionOffset)
-          + address;
-
-      DCHECK(stackmap_record.locations.size() == 1);
-      DCHECK(stackmap_record.locations[0].kind
-             == StackMaps::Location::kConstantIndex);
-      auto recorded_imm =
-          stackmaps.constants[stackmap_record.locations[0].offset].integer;
-      pc += 2; // immediate offset in the 'mov' instruction encoding is 2 bytes
-      // mov imm64 takes 10 bytes
-      while (Memory::uint64_at(pc) != recorded_imm || processed.count(pc))
-        pc += 10;
-      processed.insert(pc);
-      if (minfo.cell_extended) { // immediate was extended from 32 bit to 64.
-        auto imm = Memory::uintptr_at(pc);
-#if DEBUG
-        std::cerr << "RELOC CONST: " << imm << std::endl;
-#endif
-        DCHECK((imm & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
-        Memory::uintptr_at(pc) = imm >> 32;
+    if (inst.getNumOperands() == 2 && inst.getOperand(1).isImm()) {
+      auto imm = static_cast<uint64_t>(inst.getOperand(1).getImm());
+      if (!is_uint32(imm) && reloc_map.count(imm)) {
+        DCHECK(size == 10); // size of mov imm64
+        auto pair = reloc_map[imm];
+        RelocInfo rinfo = pair.first;
+        LLVMRelocationData::ExtendedInfo minfo = pair.second;
+        if (rinfo.rmode() == RelocInfo::CELL ||
+            rinfo.rmode() == RelocInfo::EMBEDDED_OBJECT) {
+          if (minfo.cell_extended) { // immediate was extended from 32 bit to 64.
+            DCHECK((imm & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
+            Memory::uintptr_at(pos + 2) = imm >> 32;
+          }
+          rinfo.set_pc(pos + 2);
+          buffer_writer.Write(&rinfo);
+        } else {
+          UNIMPLEMENTED();
+        }
       }
-      rinfo.set_pc(pc);
-      buffer_writer.Write(&rinfo);
-    } else {
-      UNIMPLEMENTED();
     }
+    pos += size;
   }
   // Here we just (rightfully) hope for RVO
   return buffer_writer.GetResult();
@@ -1143,8 +1134,9 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
   LLVMRelocationData::ExtendedInfo meta_info;
   meta_info.cell_extended = extended;
   reloc_data_->Add(rinfo, meta_info);
-  int stackmap_id = deopt_data_->DeoptCount() + reloc_data_->RelocCount() - 1;
-  CallStackMap(stackmap_id, value);
+
+//  int stackmap_id = deopt_data_->DeoptCount() + reloc_data_->RelocCount() - 1;
+//  CallStackMap(stackmap_id, value);
 
   return value;
 }

@@ -20,6 +20,38 @@
 namespace v8 {
 namespace internal {
 
+// ZoneObject is probably a better approach than the fancy
+// C++11 smart pointers which I have been using all over the place.
+// So TODO(llvm): more zone objects!
+class LLVMRelocationData : public ZoneObject {
+ public:
+  union ExtendedInfo {
+    bool cell_extended;
+  };
+
+  using RelocMap = std::map<uint64_t, std::pair<RelocInfo, ExtendedInfo>>;
+
+  LLVMRelocationData()
+     : reloc_map_(),
+       is_transferred_(false) {}
+
+  void Add(RelocInfo rinfo, ExtendedInfo ex_info) {
+    DCHECK(!is_transferred_);
+    reloc_map_[rinfo.data()] = std::make_pair(rinfo, ex_info);
+  }
+
+  RelocMap& reloc_map() {
+    return reloc_map_;
+  }
+
+  void transfer() { is_transferred_ = true; }
+
+ private:
+  // TODO(llvm): re-think the design and probably use ZoneHashMap
+  RelocMap reloc_map_;
+  bool is_transferred_;
+};
+
 // TODO(llvm): move this class to a separate file. Or, better, 2 files
 class LLVMGranularity FINAL {
  public:
@@ -101,10 +133,8 @@ class LLVMGranularity FINAL {
     std::cerr << err_str_ << std::endl;
   }
 
-  void Disass(CodeDesc& code_desc) {
-    SetUpDisassembler();
-    auto pos = code_desc.buffer;
-    auto end = code_desc.buffer + code_desc.instr_size;
+  void Disass(Address start, Address end) {
+    auto pos = start;
     while (pos < end) {
       llvm::MCInst inst;
       uint64_t size;
@@ -114,17 +144,13 @@ class LLVMGranularity FINAL {
           inst /* out */, size /* out */, llvm::ArrayRef<uint8_t>(pos, end),
           address, llvm::nulls(), llvm::nulls());
       DCHECK(s == llvm::MCDisassembler::Success);
-
-//      auto opcode = inst.getOpcode();
-      const llvm::MCInstrDesc& desc = mii_->get(inst.getOpcode());
-      if (desc.isMoveImmediate()) {
-        llvm::errs() << "\tmove immediate\t";
-      }
       inst_printer_->printInst(&inst, llvm::errs(), "");
       llvm::errs() << "\n";
       pos += size;
     }
   }
+
+  Vector<byte> Patch(Address, Address, LLVMRelocationData::RelocMap&);
 
   static const char* x64_target_triple;
  private:
@@ -153,7 +179,7 @@ class LLVMGranularity FINAL {
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
     pass_manager_builder_.OptLevel = 3; // -O3
-//    SetUpDisassembler();
+    SetUpDisassembler();
   }
 
   void SetUpDisassembler() {
@@ -295,43 +321,6 @@ class LLVMEnvironment FINAL:  public ZoneObject {
   bool has_been_used_;
 };
 
-// ZoneObject is probably a better approach than the fancy
-// C++11 smart pointers which I have been using all over the place.
-// So TODO(llvm): more zone objects!
-class LLVMRelocationData : public ZoneObject {
- public:
-  union ExtendedInfo {
-    bool cell_extended;
-  };
-
-  LLVMRelocationData(Zone* zone)
-     : relocations_(4, zone),
-       meta_info_(4, zone),
-       is_transferred_(false),
-       zone_(zone) {}
-
-  void Add(RelocInfo rinfo, ExtendedInfo ex_info) {
-    DCHECK(!is_transferred_);
-    relocations_.Add(rinfo, zone_);
-    meta_info_.Add(ex_info, zone_);
-  }
-
-  int RelocCount() {
-    return relocations_.length();
-  }
-
-  ZoneList<RelocInfo>& relocations() { return relocations_; }
-  ZoneList<ExtendedInfo>& meta_info() { return meta_info_; }
-
-  void transfer() { is_transferred_ = true; }
-
- private:
-  ZoneList<RelocInfo> relocations_;
-  ZoneList<ExtendedInfo> meta_info_;
-  bool is_transferred_;
-  Zone* zone_;
-};
-
 class LLVMDeoptData {
  public:
   LLVMDeoptData(Zone* zone)
@@ -425,7 +414,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())),
         reloc_data_(nullptr),
         pending_pushed_args_(4, info->zone()) {
-    reloc_data_ = new(zone()) LLVMRelocationData(zone());
+    reloc_data_ = new(zone()) LLVMRelocationData();
   }
   ~LLVMChunkBuilder() {}
 
