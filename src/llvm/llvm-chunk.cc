@@ -1357,6 +1357,9 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
   if (instr->index()->representation().IsInteger32()) {
      right = llvm_ir_builder_->CreateSExt(right, type);
   }  
+  if (instr->length()->representation().IsInteger32()) {
+     left = llvm_ir_builder_->CreateSExt(right, type);
+  }
   llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(left, right);
   instr->set_llvm_value(compare);
   if (FLAG_debug_code && instr->skip_check()) {
@@ -1825,7 +1828,22 @@ void LLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* ins
 }
 
 void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
-  UNIMPLEMENTED();
+   LLVMContext& context = LLVMGranularity::getInstance().context();
+   auto offset = llvm_ir_builder_->getInt64(HeapObject::kMapOffset - kHeapObjectTag);
+   Handle<Object> handle_value = instr->map().handle();
+   int64_t value = reinterpret_cast<int64_t>((handle_value.location()));
+   auto address_val = llvm_ir_builder_->getInt64(value);
+   //llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
+     //    address_val, llvm::Type::getInt64PtrTy(context));
+   llvm::Value* int8_ptr_1 = llvm_ir_builder_->CreateIntToPtr(
+         Use(instr->value()), llvm::Type::getInt64PtrTy(context));
+   llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr_1, offset);
+   llvm::Value* load = llvm_ir_builder_->CreateLoad(gep); 
+   llvm::Value* compare = llvm_ir_builder_->CreateICmpNE(load, address_val);
+   llvm::BranchInst* branch = llvm_ir_builder_->CreateCondBr(compare,
+         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+   instr->set_llvm_value(branch);
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
@@ -1967,11 +1985,12 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
+  LLVMContext& context = LLVMGranularity::getInstance().context();
   Handle<Object> handle_value = instr->cell().handle(); 
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-  llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
-  int64_t value = reinterpret_cast<int64_t>(*handle_value.location());
-  auto address_val = llvm_ir_builder_->getInt64(value); 
+  //llv::Type* type = llvm_ir_builder_->getInt64Ty();
+  //llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+  int64_t value = reinterpret_cast<int64_t>((handle_value.location()));
+  auto address_val = llvm_ir_builder_->getInt64(value);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
         address_val, llvm_ir_builder_->getInt8PtrTy());
   llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(7));
@@ -2218,10 +2237,11 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
   if (instr->RequiresHoleCheck()) {
     UNIMPLEMENTED();
   } else {
+    LLVMContext& context = LLVMGranularity::getInstance().context();
     Handle<Object> handle_value = instr->cell().handle();
-    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-    llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
-    int64_t value = reinterpret_cast<int64_t>(*handle_value.location());
+    //llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+    //llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+    int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
     auto address_val = llvm_ir_builder_->getInt64(value);
     llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
           address_val, llvm_ir_builder_->getInt8PtrTy());
