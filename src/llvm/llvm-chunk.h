@@ -7,12 +7,11 @@
 
 #include "llvm-headers.h"
 
-// TODO(llvm): get rid of the ugly ".."
-#include "../hydrogen.h"
-#include "../hydrogen-instructions.h"
-#include "../handles.h"
-#include "../x64/lithium-codegen-x64.h"
-#include "../lithium.h"
+#include "src/hydrogen.h"
+#include "src/hydrogen-instructions.h"
+#include "src/handles.h"
+#include "src/x64/lithium-codegen-x64.h"
+#include "src/lithium.h"
 #include "llvm-stackmaps.h"
 #include "mcjit-memory-manager.h"
 
@@ -101,10 +100,40 @@ class LLVMGranularity FINAL {
   void Err() {
     std::cerr << err_str_ << std::endl;
   }
+
+  void Disass(CodeDesc& code_desc) {
+    SetUpDisassembler();
+    auto pos = code_desc.buffer;
+    auto end = code_desc.buffer + code_desc.instr_size;
+    while (pos < end) {
+      llvm::MCInst inst;
+      uint64_t size;
+      auto address = 0;
+
+      llvm::MCDisassembler::DecodeStatus s = disasm_->getInstruction(
+          inst /* out */, size /* out */, llvm::ArrayRef<uint8_t>(pos, end),
+          address, llvm::nulls(), llvm::nulls());
+      DCHECK(s == llvm::MCDisassembler::Success);
+
+//      auto opcode = inst.getOpcode();
+      const llvm::MCInstrDesc& desc = mii_->get(inst.getOpcode());
+      if (desc.isMoveImmediate()) {
+        llvm::errs() << "\tmove immediate\t";
+      }
+      inst_printer_->printInst(&inst, llvm::errs(), "");
+      llvm::errs() << "\n";
+      pos += size;
+    }
+  }
+
+  static const char* x64_target_triple;
  private:
   LLVMContext context_;
   llvm::PassManagerBuilder pass_manager_builder_;
   std::unique_ptr<llvm::ExecutionEngine> engine_;
+  std::unique_ptr<llvm::MCDisassembler> disasm_;
+  std::unique_ptr<llvm::MCInstPrinter> inst_printer_;
+  std::unique_ptr<llvm::MCInstrInfo> mii_;
   int count_;
   MCJITMemoryManager* memory_manager_ref_; // non-owning ptr
   std::string err_str_;
@@ -113,13 +142,47 @@ class LLVMGranularity FINAL {
       : context_(),
         pass_manager_builder_(),
         engine_(nullptr),
+        disasm_(nullptr),
+        inst_printer_(nullptr),
+        mii_(nullptr),
         count_(0),
         memory_manager_ref_(nullptr),
         err_str_() {
     llvm::InitializeNativeTarget();
+    LLVMInitializeX86Disassembler();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
     pass_manager_builder_.OptLevel = 3; // -O3
+//    SetUpDisassembler();
+  }
+
+  void SetUpDisassembler() {
+    auto triple = x64_target_triple;
+    std::string err;
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, err);
+    DCHECK(target);
+    std::unique_ptr<llvm::MCRegisterInfo> mri(target->createMCRegInfo(triple));
+    DCHECK(mri);
+    std::unique_ptr<llvm::MCAsmInfo> mai(target->createMCAsmInfo(*mri.get(),
+                                                                 triple));
+    DCHECK(mai);
+    mii_ = std::unique_ptr<llvm::MCInstrInfo>(target->createMCInstrInfo());
+    DCHECK(mii_);
+    std::string feature_str;
+    const llvm::StringRef cpu = "";
+    std::unique_ptr<llvm::MCSubtargetInfo> sti(
+        target->createMCSubtargetInfo(triple, cpu, feature_str));
+    DCHECK(sti);
+    auto intel_syntax = 1;
+    inst_printer_ = std::unique_ptr<llvm::MCInstPrinter>(
+        target->createMCInstPrinter(intel_syntax, *mai, *mii_, *mri, *sti));
+    DCHECK(inst_printer_);
+    std::unique_ptr<llvm::MCObjectFileInfo> mofi(new llvm::MCObjectFileInfo());
+    DCHECK(mofi);
+    llvm::MCContext mc_context(mai.get(), mri.get(), mofi.get());
+    disasm_ = std::unique_ptr<llvm::MCDisassembler> (
+        target->createMCDisassembler(*sti, mc_context));
+    DCHECK(disasm_);
   }
 
   std::string GenerateName() {

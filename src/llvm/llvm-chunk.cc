@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <cstdio>
+#include "src/disassembler.h"
 #include "llvm-chunk.h"
 #include "llvm-passes.h"
 #include <llvm/IR/InlineAsm.h>
@@ -11,8 +12,9 @@
 namespace v8 {
 namespace internal {
 
-LLVMChunk::~LLVMChunk() {}
+auto LLVMGranularity::x64_target_triple = "x86_64-unknown-linux-gnu";
 
+LLVMChunk::~LLVMChunk() {}
 
 Handle<Code> LLVMChunk::Codegen() {
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
@@ -34,6 +36,8 @@ Handle<Code> LLVMChunk::Codegen() {
   Isolate* isolate = info()->isolate();
   CodeDesc code_desc =
       LLVMGranularity::getInstance().memory_manager_ref()->LastAllocatedCode();
+
+  LLVMGranularity::getInstance().Disass(code_desc);
   Vector<byte> reloc_data = GetRelocationData(code_desc);
 
   // Allocate and install the code.
@@ -379,7 +383,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
   module_ = LLVMGranularity::getInstance().CreateModule();
-  module_->setTargetTriple("x86_64-unknown-linux-gnu");
+  module_->setTargetTriple(LLVMGranularity::x64_target_triple);
   std::cerr << module_->getTargetTriple() << std::endl;
   status_ = BUILDING;
 
