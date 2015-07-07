@@ -1130,7 +1130,8 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
   }
   llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
 
-  RelocInfo rinfo(rmode);
+  // Here we use the intptr_value (data) only to identify the entry in the map
+  RelocInfo rinfo(rmode, intptr_value);
   LLVMRelocationData::ExtendedInfo meta_info;
   meta_info.cell_extended = extended;
   reloc_data_->Add(rinfo, meta_info);
