@@ -763,6 +763,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block) {
       LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
   llvm_ir_builder_->SetInsertPoint(deopt_block);
 
+  // TODO(llvm): refactor (use the CallStackMap method)
   // StackMap (id = #deopts, shadow_bytes=0, ...)
   llvm::Function* stackmap = llvm::Intrinsic::getDeclaration(module_.get(),
       llvm::Intrinsic::experimental_stackmap);
@@ -823,7 +824,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
 #endif
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  //pass_manager.add(new NormalizePhisPass());
+  if (FLAG_phi_normalize) pass_manager.add(new NormalizePhisPass());
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
@@ -1556,8 +1557,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
-llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, HChange* instr)
-{
+llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, HChange* instr) {
   LLVMContext& context = LLVMGranularity::getInstance().context();
   ExternalReference roots_array_start =
         ExternalReference::roots_array_start(isolate());
@@ -1586,7 +1586,8 @@ llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, HChange* instr)
   llvm::Value* load_first = llvm_ir_builder_->CreateLoad(bitcast_2);
   llvm::Value* load_second = llvm_ir_builder_->CreateLoad(bitcast_1);
  
-  llvm::Value* cmp_result = llvm_ir_builder_->CreateICmpSGT(load_first, load_second);
+  llvm::Value* cmp_result = llvm_ir_builder_->CreateICmpSGT(load_first,
+                                                            load_second);
  
   return cmp_result;
   
@@ -1599,15 +1600,12 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   
   bool deoptimize_on_minus_zero = instr->deoptimize_on_minus_zero();
   
-  llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(context,
-                                                         "Cond True Block",
-                                                         function_);
-  llvm::BasicBlock* cond_false = llvm::BasicBlock::Create(context,
-                                                          "Cond False Block",
-                                                          function_);
-  llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(context,
-                                                              "Continue Block",
-                                                              function_);
+  llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(
+      context, "Cond True Block", function_);
+  llvm::BasicBlock* cond_false = llvm::BasicBlock::Create(
+      context, "Cond False Block", function_);
+  llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(
+      context, "Continue Block", function_);
   llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
   llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
 
@@ -1620,7 +1618,8 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
     llvm_ir_builder_->SetInsertPoint(cond_false);
 
-    auto offset_1 = llvm_ir_builder_->getInt64(HeapObject::kMapOffset - kHeapObjectTag);
+    auto offset_1 = llvm_ir_builder_->getInt64(
+        HeapObject::kMapOffset - kHeapObjectTag);
     llvm::Value* int8_ptr_1 = llvm_ir_builder_->CreateIntToPtr(
         Use(val), llvm_ir_builder_->getInt8PtrTy());
     llvm::Value* cmp_first = llvm_ir_builder_->CreateGEP(int8_ptr_1, offset_1);

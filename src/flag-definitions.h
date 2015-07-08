@@ -403,6 +403,8 @@ DEFINE_BOOL(omit_map_checks_for_leaf_maps, true,
 // Flags for LLVM
 DEFINE_STRING(llvm_filter, "~", "filter for functions to be lowered to "
     "llvm instead of Lithium")
+DEFINE_BOOL(phi_normalize, true, "enable phi normalization phaze"
+    " (it's a temporary hack, phis must always be normalized")
 
 // Flags for TurboFan.
 DEFINE_BOOL(turbo, false, "enable TurboFan compiler")
