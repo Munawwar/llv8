@@ -590,6 +590,13 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
   return call_inst;
 }
 
+llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
+  llvm::Value* offset_val = llvm_ir_builder_->getInt64(offset - kHeapObjectTag);
+  llvm::Value* base_casted = llvm_ir_builder_->CreateIntToPtr(
+      base, llvm_ir_builder_->getInt8PtrTy());
+  return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
+}
+
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
   // FIXME(llvm): if FLAG_inline_new is set (which is the default)
   // fast inline allocation should be used
@@ -1539,6 +1546,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
 
   llvm::Value* new_heap_number = AllocateHeapNumber(); // i8*
 
+  // TODO(llvm): refactor to use FieldOperand()
   auto offset = HeapNumber::kValueOffset - kHeapObjectTag;
   auto llvm_offset = llvm_ir_builder_->getInt64(offset);
   llvm::Value* store_address = llvm_ir_builder_->CreateGEP(new_heap_number,
@@ -1557,7 +1565,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
-llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, HChange* instr) {
+llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val) {
   LLVMContext& context = LLVMGranularity::getInstance().context();
   ExternalReference roots_array_start =
         ExternalReference::roots_array_start(isolate());
@@ -1590,7 +1598,6 @@ llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, HChange* instr) {
                                                             load_second);
  
   return cmp_result;
-  
 }
 
 void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
@@ -1618,12 +1625,9 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
     llvm_ir_builder_->SetInsertPoint(cond_false);
 
-    auto offset_1 = llvm_ir_builder_->getInt64(
-        HeapObject::kMapOffset - kHeapObjectTag);
-    llvm::Value* int8_ptr_1 = llvm_ir_builder_->CreateIntToPtr(
-        Use(val), llvm_ir_builder_->getInt8PtrTy());
-    llvm::Value* cmp_first = llvm_ir_builder_->CreateGEP(int8_ptr_1, offset_1);
-    cmp_val = CompareRoot(cmp_first, instr);
+    llvm::Value* cmp_first = FieldOperand(Use(val), HeapObject::kMapOffset);
+    cmp_val = CompareRoot(cmp_first);
+    // TODO(llvm): refator to use FieldOperand()
     auto offset = llvm_ir_builder_->getInt64(
         HeapNumber::kValueOffset - kHeapObjectTag);
     llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
@@ -1660,6 +1664,83 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   instr->set_llvm_value(phi);
 }
 
+void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
+  llvm::Type* int32_type = llvm_ir_builder_->getInt32Ty();
+  llvm::Value* cond = SmiCheck(val);
+
+  LLVMContext& context = LLVMGranularity::getInstance().context();
+  llvm::BasicBlock* is_smi = llvm::BasicBlock::Create(
+      context, "is Smi fast case", function_);
+  llvm::BasicBlock* not_smi = llvm::BasicBlock::Create(
+      context, "'deferred' case", function_);
+  llvm::BasicBlock* merge_and_ret = llvm::BasicBlock::Create(
+      context, "merge and ret", function_);
+  llvm::BasicBlock* not_smi_merge = nullptr;
+
+  llvm_ir_builder_->CreateCondBr(cond, is_smi, not_smi);
+
+  llvm_ir_builder_->SetInsertPoint(is_smi);
+  llvm::Value* relult_for_smi = SmiToInteger32(val);
+  llvm_ir_builder_->CreateBr(merge_and_ret);
+
+  llvm_ir_builder_->SetInsertPoint(not_smi);
+  llvm::Value* relult_for_not_smi = nullptr;
+  bool truncating = instr->CanTruncateToInt32();
+  if (truncating) {
+    llvm::Value* vals_map = FieldOperand(Use(val), HeapObject::kMapOffset);
+    llvm::Value* cmp = CompareRoot(vals_map);
+
+    llvm::BasicBlock* truncate_heap_number = llvm::BasicBlock::Create(
+        context, "TruncateHeapNumberToI", function_);
+    llvm::BasicBlock* no_heap_number = llvm::BasicBlock::Create(
+        context, "Not a heap number", function_);
+    // TODO(llvm): probably redundant
+    llvm::BasicBlock* merge_inner = llvm::BasicBlock::Create(
+        context, "inner merge", function_);
+
+    llvm_ir_builder_->CreateCondBr(cmp, truncate_heap_number, no_heap_number);
+
+    llvm_ir_builder_->SetInsertPoint(truncate_heap_number);
+    llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
+    // cast to ptr to double, fetch the double and convert to i32
+    llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
+    llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
+    llvm::Value* double_addr = llvm_ir_builder_->CreateBitCast(value_addr,
+                                                               ptr_to_double);
+    llvm::Value* double_val = llvm_ir_builder_->CreateLoad(double_addr);
+    llvm::Value* truncate_heap_number_result = llvm_ir_builder_->CreateFPToSI(
+        double_val, int32_type);
+
+    // FIXME(llvm): add NaN check
+    // cmpq(result_reg, Immediate(1)); (MacroAssembler::TruncateHeapNumberToI)
+    // And implement the slow case call (SlowTruncateToI)
+
+    llvm_ir_builder_->CreateBr(merge_inner);
+
+    llvm_ir_builder_->SetInsertPoint(no_heap_number);
+    llvm_ir_builder_->CreateUnreachable();
+    // FIXME(llvm): deal with oddballs
+    llvm_ir_builder_->CreateBr(merge_inner);
+
+    llvm_ir_builder_->SetInsertPoint(merge_inner);
+    llvm::PHINode* phi_inner = llvm_ir_builder_->CreatePHI(int32_type, 2);
+    phi_inner->addIncoming(llvm_ir_builder_->getInt32(0x0badbeef), no_heap_number); // FIXME
+    phi_inner->addIncoming(truncate_heap_number_result, truncate_heap_number);
+    relult_for_not_smi = phi_inner;
+    llvm_ir_builder_->CreateBr(merge_and_ret);
+    not_smi_merge = merge_inner;
+  } else {
+    UNIMPLEMENTED();
+  }
+  llvm_ir_builder_->CreateBr(merge_and_ret);
+
+  llvm_ir_builder_->SetInsertPoint(merge_and_ret);
+  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(int32_type, 2);
+  phi->addIncoming(relult_for_smi, is_smi);
+  phi->addIncoming(relult_for_not_smi, not_smi_merge);
+  instr->set_llvm_value(phi);
+}
+
 void LLVMChunkBuilder::DoChange(HChange* instr) {
   Representation from = instr->from();
   Representation to = instr->to();
@@ -1688,21 +1769,9 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         // lithium codegen does __ AssertSmi(input)
         instr->set_llvm_value(SmiToInteger32(val));
       } else {
-#ifdef DEBUG
-      std::cerr << "SECOND " << instr->from().IsSmi()
-          << " " << instr->from().IsTagged() << std::endl;
-#endif
-        bool truncating = instr->CanTruncateToInt32();
-        USE(truncating);
-        // TODO(llvm): perform smi check, bailout if not a smi
-        // see LCodeGen::DoTaggedToI
-        if (!val->representation().IsSmi()) {
-          bool not_smi = true;
-          llvm::Value* cond = SmiCheck(val, not_smi);
-          DeoptimizeIf(cond, instr->block());
-        }
-        instr->set_llvm_value(SmiToInteger32(val));
-//        if (!val->representation().IsSmi()) result = AssignEnvironment(result);
+        ChangeTaggedToISlow(val, instr);
+
+// TODO(llvm): if (!val->representation().IsSmi()) result = AssignEnvironment(result);
       }
     }
   } else if (from.IsDouble()) {

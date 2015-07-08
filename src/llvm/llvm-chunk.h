@@ -464,6 +464,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // This is intended to be a highly reusable method for calling stuff.
   llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params);
+  llvm::Value* FieldOperand(llvm::Value* base, int offset);
   // Allocate a heap number in new space with undefined value. Returns
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment
@@ -471,10 +472,11 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* CallRuntime(Runtime::FunctionId id);
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
-  llvm::Value* CompareRoot(llvm::Value* val, HChange* instr);
+  llvm::Value* CompareRoot(llvm::Value* val);
   llvm::Value* RecordRelocInfo(uint64_t intptr_value, RelocInfo::Mode rmode);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
+  void ChangeTaggedToISlow(HValue* val, HChange* instr);
 
   void Retry(BailoutReason reason);
   void AddStabilityDependency(Handle<Map> map);
