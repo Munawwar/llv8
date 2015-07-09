@@ -1256,30 +1256,39 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     bool can_overflow = instr->CheckFlag(HValue::kCanOverflow);
     HValue* left = instr->left();
     HValue* right = instr->right();
+    llvm::Value* llvm_left = Use(left);
+    llvm::Value* llvm_right = Use(right);
+    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
     if (!can_overflow) {
-      llvm::Value* add = llvm_ir_builder_->CreateAdd(Use(left), Use(right),"");
-      instr->set_llvm_value(add);
+      if (left->representation().IsInteger32()) {
+        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, type);
+      }
+      if (right->representation().IsInteger32()) {
+        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, type);
+      }
+      llvm::Value* Add = llvm_ir_builder_->CreateAdd(llvm_left, llvm_right, "");
+      instr->set_llvm_value(Add);
     } else {
       auto type = instr->representation().IsSmi()
           ? llvm_ir_builder_->getInt64Ty() : llvm_ir_builder_->getInt32Ty();
       llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
           llvm::Intrinsic::sadd_with_overflow, type);
 
-      llvm::Value* params[] = { Use(left), Use(right) };
+      llvm::Value* params[] = { llvm_left, llvm_right };
       llvm::Value* call = llvm_ir_builder_->CreateCall(intrinsic, params);
 
       llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
       llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
       DeoptimizeIf(overflow, instr->block());
-    }
+      }
   } else if (instr->representation().IsDouble()) {
-    DCHECK(instr->left()->representation().IsDouble());
-    DCHECK(instr->right()->representation().IsDouble());
-    HValue* left = instr->BetterLeftOperand();
-    HValue* right = instr->BetterRightOperand();
-    llvm::Value* fadd = llvm_ir_builder_->CreateFAdd(Use(left), Use(right));
-    instr->set_llvm_value(fadd);
+      DCHECK(instr->left()->representation().IsDouble());
+      DCHECK(instr->right()->representation().IsDouble());
+      HValue* left = instr->BetterLeftOperand();
+      HValue* right = instr->BetterRightOperand();
+      llvm::Value* fadd = llvm_ir_builder_->CreateFAdd(Use(left), Use(right));
+      instr->set_llvm_value(fadd);
   } else {
     UNIMPLEMENTED();
   }
@@ -1801,7 +1810,15 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         UNIMPLEMENTED();
       }
     } else if (to.IsSmi()) {
-      UNIMPLEMENTED();
+      if (instr->CheckFlag(HValue::kCanOverflow) &&
+          instr->value()->CheckFlag(HValue::kUint32)) {
+        UNIMPLEMENTED();
+      }
+      instr->set_llvm_value(Integer32ToSmi(val));  
+      if (instr->CheckFlag(HValue::kCanOverflow) &&
+          !instr->value()->CheckFlag(HValue::kUint32)) { 
+        UNIMPLEMENTED();
+      }
     } else {
       DCHECK(to.IsDouble());
       UNIMPLEMENTED();
@@ -1863,6 +1880,7 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
   Representation r = instr->representation();
   HValue* left = instr->left();
   HValue* right = instr->right();
+  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   DCHECK(left->representation().Equals(r));
   DCHECK(right->representation().Equals(r));
   bool is_unsigned = r.IsDouble()
@@ -1873,8 +1891,16 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
   if (r.IsSmi()) {
     UNIMPLEMENTED();
   } else if (r.IsInteger32()) {
-    llvm::Value* compare = llvm_ir_builder_->CreateICmp(pred, Use(left),
-                                                        Use(right));
+    llvm::Value* llvm_left = Use(left);
+    llvm::Value* llvm_right = Use(right);
+    if (left->representation().IsInteger32()) {
+        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, type);
+    }
+    if (right->representation().IsInteger32()) {
+        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, type);
+    }
+    llvm::Value* compare = llvm_ir_builder_->CreateICmp(pred, llvm_left,
+                                                        llvm_right);
     llvm::Value* branch = llvm_ir_builder_->CreateCondBr(compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
     instr->set_llvm_value(branch);
@@ -2058,7 +2084,7 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
-  Handle<Object> handle_value = instr->cell().handle(); 
+  Handle<Object> handle_value = instr->cell().handle();
   llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
   int64_t value = reinterpret_cast<int64_t>((handle_value.location()));
@@ -2068,7 +2094,7 @@ void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
   llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(7));
   llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
   llvm::Value* load_cell = llvm_ir_builder_->CreateLoad(casted_address);
-  instr->set_llvm_value(load_cell); 
+  instr->set_llvm_value(load_cell);
   if(instr->RequiresHoleCheck()){
     UNIMPLEMENTED();
   }
@@ -2079,6 +2105,18 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
+  if (instr->is_typed_elements()) {
+    //DoLoadKeyedExternalArray(instr);
+    UNIMPLEMENTED();
+  } else if (instr->representation().IsDouble()) {
+    //DoLoadKeyedFixedDoubleArray(instr);
+    UNIMPLEMENTED();
+  } else {
+    DoLoadKeyedFixedArray(instr);
+  }
+}
+
+void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   HValue* key = instr->key();
   llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   Representation representation = instr->representation();
@@ -2205,15 +2243,24 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
+    llvm::Value* llvm_left = Use(left);
+    llvm::Value* llvm_right = Use(right);
+    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
     if (instr->representation().IsSmi()) {
       // FIXME (llvm):
       // 1) overflow check?
       // 2) see if we can refactor using SmiToInteger32() or the like
-      llvm::Value* shift = llvm_ir_builder_->CreateAShr(Use(left), 32);
-      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(shift, Use(right), "");
+      llvm::Value* shift = llvm_ir_builder_->CreateAShr(llvm_left, 32);
+      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(shift, llvm_right, "");
       instr->set_llvm_value(Mul);
     } else {
-      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(Use(left), Use(right), "");
+      if (left->representation().IsInteger32()) {
+         llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, type);
+      }
+      if (right->representation().IsInteger32()) {
+         llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, type);
+      }  
+      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(llvm_left, llvm_right, "");
       instr->set_llvm_value(Mul);
     }
   } else if (instr->representation().IsDouble()) {
@@ -2323,11 +2370,88 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
     llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
     llvm::Value* store_cell = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(store_cell);
-   }
+  }
 }
 
 void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
-  UNIMPLEMENTED();
+  if (instr->is_typed_elements()) {
+    //DoStoreKeyedExternalArray(instr);
+    UNIMPLEMENTED();
+  } else if (instr->value()->representation().IsDouble()) {
+    //DoStoreKeyedFixedDoubleArray(instr);
+    UNIMPLEMENTED();
+  } else {
+    DoStoreKeyedFixedArray(instr);
+  }
+}
+
+void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
+  HValue* key = instr->key();
+  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+  Representation representation = instr->representation();
+  int shift_size = ElementsKindToShiftSize(FAST_ELEMENTS);
+  uint32_t inst_offset = instr->base_offset();
+  llvm::Value* gep_0 = nullptr;
+  if (kPointerSize == kInt32Size && !key->IsConstant() &&
+      instr->IsDehoisted()) {
+    UNIMPLEMENTED();
+  }
+  if (representation.IsInteger32() && SmiValuesAre32Bits()) {
+    DCHECK(instr->store_mode() == STORE_TO_INITIALIZED_ENTRY);
+    DCHECK(instr->elements_kind() == FAST_SMI_ELEMENTS);
+    if (FLAG_debug_code) {
+      UNIMPLEMENTED();
+    }
+    inst_offset += kPointerSize / 2;
+
+  }
+  if (key->IsConstant()) {
+    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+    auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
+          inst_offset);
+    llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
+          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+    gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, offset); 
+  } else {
+     llvm::Value* lkey = Use(key);
+     if (key->representation().IsInteger32()) {
+        lkey = llvm_ir_builder_->CreateSExt(lkey, type);
+     }
+     // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
+     llvm::Value* scale = llvm_ir_builder_->getInt64(8); //FIXME: //find a way to pass by ScaleFactor
+     llvm::Value* mul = llvm_ir_builder_->CreateMul(lkey, scale);
+     auto offset = llvm_ir_builder_->getInt64(inst_offset);
+     llvm::Value* add = llvm_ir_builder_->CreateAdd(mul, offset);
+     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
+          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+     gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, add);
+  }
+ 
+  if(!instr->value()->IsConstant()){
+    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+    llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep_0,
+                                                              ptr_to_type);    
+    llvm::Value* Store = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address); 
+    instr->set_llvm_value(Store);
+  } else {
+    HConstant* constant = HConstant::cast(instr->value());
+    //llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+    //llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+    Handle<Object> handle_value = constant->handle(isolate());
+    int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
+    auto llvm_val = llvm_ir_builder_->getInt64(value);
+    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+    llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep_0,
+                                                              ptr_to_type);
+    llvm::Value* Store = llvm_ir_builder_->CreateStore(llvm_val, casted_address);
+    instr->set_llvm_value(Store);
+  }
+ 
+  if (instr->NeedsWriteBarrier()) {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
@@ -2370,11 +2494,9 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
 
   if (FLAG_unbox_double_fields && representation.IsDouble()) {
     UNIMPLEMENTED();
-  } else if (!instr->value()->IsConstant()) {
-    UNIMPLEMENTED();
   } else {
-    HConstant* constant = HConstant::cast(instr->value());
-    if (constant->representation().IsInteger32()) {
+    HValue* hValue = instr->value();
+    if (hValue->representation().IsInteger32()) {
       auto llvm_offset = llvm_ir_builder_->getInt64(offset);
       llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
                                                               llvm_offset);
@@ -2382,10 +2504,10 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
                                                                 ptr_to_type);
-      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(constant),
+      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(hValue),
                                                                   type);
       llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
-    } else if (constant->representation().IsSmi()){
+    } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
       auto llvm_offset = llvm_ir_builder_->getInt64(offset);
       llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
                                                               llvm_offset);
@@ -2393,10 +2515,12 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
                                                                 ptr_to_type);
-      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(constant),
+      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(hValue),
                                                                   type);
       llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
     } else {
+      DCHECK(hValue->IsConstant());
+      HConstant* constant = HConstant::cast(instr->value());
       llvm::Type* type = llvm_ir_builder_->getInt64Ty();
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       Handle<Object> handle_value = constant->handle(isolate()); 

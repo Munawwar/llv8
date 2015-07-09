@@ -482,6 +482,9 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
   void ChangeTaggedToISlow(HValue* val, HChange* instr);
 
+  void DoStoreKeyedFixedArray(HStoreKeyed* value);
+  void DoLoadKeyedFixedArray(HLoadKeyed* value);
+  
   void Retry(BailoutReason reason);
   void AddStabilityDependency(Handle<Map> map);
   void CallStackMap(int stackmap_id, llvm::Value* value);
