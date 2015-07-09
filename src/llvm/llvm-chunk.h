@@ -143,7 +143,11 @@ class LLVMGranularity FINAL {
       llvm::MCDisassembler::DecodeStatus s = disasm_->getInstruction(
           inst /* out */, size /* out */, llvm::ArrayRef<uint8_t>(pos, end),
           address, llvm::nulls(), llvm::nulls());
-      DCHECK(s == llvm::MCDisassembler::Success);
+      if (s == llvm::MCDisassembler::Fail) {
+        std::cerr << "disassembler failed at "
+            << reinterpret_cast<void*>(pos) << std::endl;
+        break;
+      }
       inst_printer_->printInst(&inst, llvm::errs(), "");
       llvm::errs() << "\n";
       pos += size;

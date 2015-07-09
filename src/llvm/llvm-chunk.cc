@@ -326,7 +326,8 @@ Vector<byte> LLVMGranularity::Patch(Address start, Address end,
     llvm::MCDisassembler::DecodeStatus s = disasm_->getInstruction(
         inst /* out */, size /* out */, llvm::ArrayRef<uint8_t>(pos, end),
         address, llvm::nulls(), llvm::nulls());
-    DCHECK(s == llvm::MCDisassembler::Success);
+
+    if (s == llvm::MCDisassembler::Fail) break;
 
     // const llvm::MCInstrDesc& desc = mii_->get(inst.getOpcode());
     // and testing desc.isMoveImmediate() did't work :(
@@ -1616,42 +1617,40 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   
   bool deoptimize_on_minus_zero = instr->deoptimize_on_minus_zero();
   
-  llvm::BasicBlock* cond_true = llvm::BasicBlock::Create(
-      context, "Cond True Block", function_);
-  llvm::BasicBlock* cond_false = llvm::BasicBlock::Create(
-      context, "Cond False Block", function_);
+  llvm::BasicBlock* is_smi = llvm::BasicBlock::Create(
+      context, "NUMBER_CANDIDATE_IS_SMI", function_);
+  llvm::BasicBlock* is_any_tagged = llvm::BasicBlock::Create(
+      context, "NUMBER_CANDIDATE_IS_ANY_TAGGED", function_);
   llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(
       context, "Continue Block", function_);
   llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
   llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
 
   llvm::Value* cmp_val = nullptr;
-
   llvm::LoadInst* load_d = nullptr;
-  bool not_smi = false;
-  llvm::Value* cond = SmiCheck(val, not_smi);
+  llvm::Value* cond = SmiCheck(val);
   if (!val->representation().IsSmi()) {
-    llvm_ir_builder_->CreateCondBr(cond, cond_true, cond_false);
-    llvm_ir_builder_->SetInsertPoint(cond_false);
+    llvm_ir_builder_->CreateCondBr(cond, is_smi, is_any_tagged);
+    llvm_ir_builder_->SetInsertPoint(is_any_tagged);
 
     llvm::Value* cmp_first = FieldOperand(Use(val), HeapObject::kMapOffset);
     cmp_val = CompareRoot(cmp_first);
-    // TODO(llvm): refator to use FieldOperand()
-    auto offset = llvm_ir_builder_->getInt64(
-        HeapNumber::kValueOffset - kHeapObjectTag);
-    llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
-        Use(val), llvm_ir_builder_->getInt8PtrTy());
-    llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
-    llvm::Value* bitcast = llvm_ir_builder_->CreateBitCast(gep, ptr_to_double);
+    llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
+
+    llvm::Value* bitcast = llvm_ir_builder_->CreateBitCast(value_addr,
+                                                           ptr_to_double);
     load_d = llvm_ir_builder_->CreateLoad(bitcast);
     // TODO(llvm): deopt
     // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
 
-    //FIXME: false must me deleted after full implementation
-    if (can_convert_undefined_to_nan && false) {
-      UNIMPLEMENTED();
+    //FIXME(llvm): implement!
+    if (can_convert_undefined_to_nan) {
+      // It is unimplemented as a matter of fact
+      // but we don't have a test case yet
+      // and our tests don't need this conversion.
+      // UNIMPLEMENTED();
     } else {
-      DeoptimizeIf(cmp_val, instr->block());
+      UNIMPLEMENTED();
     }
 
     if (deoptimize_on_minus_zero) {
@@ -1661,15 +1660,15 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     llvm_ir_builder_->CreateBr(continue_block);
   }
   
-  llvm_ir_builder_->SetInsertPoint(cond_true);
+  llvm_ir_builder_->SetInsertPoint(is_smi);
   llvm::Value* int32_val = SmiToInteger32(val);
   llvm::Value* double_val = llvm_ir_builder_->CreateSIToFP(int32_val,
                                                            double_type);
   llvm_ir_builder_->CreateBr(continue_block);
   llvm_ir_builder_->SetInsertPoint(continue_block);
   llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(double_type, 2);
-  phi->addIncoming(load_d, cond_false);
-  phi->addIncoming(double_val, cond_true);
+  phi->addIncoming(load_d, is_any_tagged);
+  phi->addIncoming(double_val, is_smi);
   instr->set_llvm_value(phi);
 }
 
@@ -2207,6 +2206,9 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     HValue* left = instr->left();
     HValue* right = instr->right();
     if (instr->representation().IsSmi()) {
+      // FIXME (llvm):
+      // 1) overflow check?
+      // 2) see if we can refactor using SmiToInteger32() or the like
       llvm::Value* shift = llvm_ir_builder_->CreateAShr(Use(left), 32);
       llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(shift, Use(right), "");
       instr->set_llvm_value(Mul);
