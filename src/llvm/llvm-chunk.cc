@@ -662,7 +662,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
     llvm::Value* context, std::vector<llvm::Value*> params) {
   const Runtime::Function* function = Runtime::FunctionForId(id);
   auto arg_count = function->nargs + 1;
-//  if (arg_count != 0) UNIMPLEMENTED();
 
   llvm::Type* int8_ptr_type =  llvm_ir_builder_->getInt8PtrTy();
   llvm::Type* int64_type =  llvm_ir_builder_->getInt64Ty();
@@ -687,11 +686,12 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   llvm::Value* target_address = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(code->instruction_start()));
   bool is_var_arg = false;
-  // llvm::Type* param_types [] = { int64_type ,int8_ptr_type, int64_type };
   std::vector<llvm::Type*> pTypes;
-//  for (auto i = 0; i < params.size(); ++i)
-//     pTypes.push_back(params[i]->getType());
-  pTypes.push_back(int64_type); //, int8_ptr_type, int64_type, params[0]->getType());
+  LLVMContext& lcontext = LLVMGranularity::getInstance().context();
+  std::vector<llvm::Type*>FuncTy_3_args;
+  llvm::FunctionType* FuncTy_3 = llvm::FunctionType::get(
+       llvm::Type::getVoidTy(lcontext), FuncTy_3_args, false);
+  pTypes.push_back(int64_type); 
   pTypes.push_back(int8_ptr_type);
   pTypes.push_back(int64_type);
   for (auto i = 0; i < params.size(); ++i) 
@@ -709,8 +709,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   auto llvm_rt_target = llvm_ir_builder_->CreateIntToPtr(
       target_temp, int8_ptr_type);
   std::vector<llvm::Value*> actualParams;
-//  for (auto i = 0; i < params.size(); ++i)
-//     actualParams.push_back(params[i]);
   actualParams.push_back(llvm_nargs);
   actualParams.push_back(llvm_rt_target);
   actualParams.push_back(context);
@@ -720,6 +718,16 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall(
       casted, args );
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
+  // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
+  // It will also fix arguments offset mismatch problem in runtime functions
+  std::string argOffset = std::to_string(arg_count * 8);
+  std::string asm_string1 = "sub $$";
+  std::string asm_string2 = ", %rsp";
+  std::string final_strig = asm_string1 + argOffset+asm_string2;
+  llvm::InlineAsm* ptr_121 = llvm::InlineAsm::get(FuncTy_3, final_strig, "~{dirflag},~{fpsr},~{flags}",true);
+  llvm::CallInst* void_111 = llvm_ir_builder_->CreateCall(ptr_121, "");
+  void_111->setCallingConv(llvm::CallingConv::C);
+
   // return value has type i8*
   return call_inst;
 
@@ -1297,6 +1305,7 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   llvm::Value* value = llvm_ir_builder_->getInt32(flags);
   llvm::Value* arg2 = Integer32ToSmi(value);
   args.push_back(arg2);
+  args.push_back(arg1);
   args.push_back(arg1);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
   if (instr->MustPrefillWithFiller()) {
