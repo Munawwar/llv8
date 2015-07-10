@@ -610,6 +610,7 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
 
 llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
   llvm::Value* offset_val = llvm_ir_builder_->getInt64(offset - kHeapObjectTag);
+  // I don't know why, but it works OK even if base was already an i8*
   llvm::Value* base_casted = llvm_ir_builder_->CreateIntToPtr(
       base, llvm_ir_builder_->getInt8PtrTy());
   return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
@@ -1586,12 +1587,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   llvm::PointerType* ptr_to_tagged = llvm::PointerType::get(tagged_type, 0);
 
   llvm::Value* new_heap_number = AllocateHeapNumber(); // i8*
-
-  // TODO(llvm): refactor to use FieldOperand()
-  auto offset = HeapNumber::kValueOffset - kHeapObjectTag;
-  auto llvm_offset = llvm_ir_builder_->getInt64(offset);
-  llvm::Value* store_address = llvm_ir_builder_->CreateGEP(new_heap_number,
-                                                           llvm_offset);
+  auto store_address = FieldOperand(new_heap_number, HeapNumber::kValueOffset);
   llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
                                                                 ptr_to_tagged);
   llvm::Value* casted_val = llvm_ir_builder_->CreateBitCast(Use(val),
@@ -2131,10 +2127,9 @@ void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
   llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
   int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
+  // TODO(llvm): RelocInfo::CELL Shall we?
   auto address_val = llvm_ir_builder_->getInt64(value);
-  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
-        address_val, llvm_ir_builder_->getInt8PtrTy());
-  llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(7));
+  auto gep = FieldOperand(address_val, 8);
   llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
   llvm::Value* load_cell = llvm_ir_builder_->CreateLoad(casted_address);
   instr->set_llvm_value(load_cell);
@@ -2182,6 +2177,7 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   }
   if (key->IsConstant()) {
     uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+    // TODO(llvm): Refactor to use  FieldOperand()
     auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
           inst_offset);
     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
@@ -2407,9 +2403,7 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
     llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
     int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
     auto address_val = llvm_ir_builder_->getInt64(value);
-    llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
-          address_val, llvm_ir_builder_->getInt8PtrTy());
-    llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr, llvm_ir_builder_->getInt64(7));
+    auto gep = FieldOperand(address_val, 8);
     llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
     llvm::Value* store_cell = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(store_cell);
