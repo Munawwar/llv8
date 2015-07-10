@@ -68,7 +68,8 @@ Handle<Code> LLVMChunk::Codegen() {
 
 void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
                                  StackMaps::Record& stackmap,
-                                 Translation* translation) {
+                                 Translation* translation,
+                                 const StackMaps& stackmaps) {
   if (environment == nullptr) return;
 
   // The translation includes one command per value in the environment.
@@ -76,7 +77,7 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   // The output frame height does not include the parameters.
   int height = translation_size - environment->parameter_count();
 
-  WriteTranslation(environment->outer(), stackmap, translation);
+  WriteTranslation(environment->outer(), stackmap, translation, stackmaps);
   bool has_closure_id = !info()->closure().is_null() &&
       !info()->closure().is_identical_to(environment->closure());
 
@@ -139,6 +140,7 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
                      translation,
                      value,
                      location,
+                     stackmaps,
                      environment->HasTaggedValueAt(i),
                      environment->HasUint32ValueAt(i),
                      &object_index,
@@ -150,6 +152,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
                                  Translation* translation,
                                  llvm::Value* op,
                                  StackMaps::Location& location,
+                                 const StackMaps& stackmaps,
                                  bool is_tagged,
                                  bool is_uint32,
                                  int* object_index_pointer,
@@ -191,21 +194,35 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
     } else {
       translation->StoreInt32Register(reg);
     }
-  } else if (location.kind == StackMaps::Location::kConstantIndex) { // FIXME(llvm): it's wrong
-    UNIMPLEMENTED();
-//    XMMRegister reg = ToDoubleRegister(op);
-//    translation->StoreDoubleRegister(reg);
+  } else if (location.kind == StackMaps::Location::kConstantIndex) {
+    // FIXME(llvm): We assume large constant is a heap object address
+    // this block has not really been thoroughly tested
+    auto value = stackmaps.constants[location.offset].integer;
+
+    if (reloc_data_->reloc_map().count(value)) {
+      auto pair = reloc_data_->reloc_map()[value];
+      LLVMRelocationData::ExtendedInfo minfo = pair.second;
+      if (minfo.cell_extended) {
+        DCHECK((value & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
+        value >>= 32;
+      }
+    }
+    Handle<Object> const_obj =  bit_cast<Handle<HeapObject> >(
+        static_cast<intptr_t>(value));
+    int literal_id = deopt_data_->DefineDeoptimizationLiteral(const_obj);
+    translation->StoreLiteral(literal_id);
   } else if (location.kind == StackMaps::Location::kConstant) {
-    int src_index = deopt_data_->DefineDeoptimizationLiteral(
+    int literal_id = deopt_data_->DefineDeoptimizationLiteral(
         isolate()->factory()->NewNumberFromInt(location.offset, TENURED));
-    translation->StoreLiteral(src_index);
+    translation->StoreLiteral(literal_id);
   } else {
     UNREACHABLE();
   }
 }
 
 int LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
-                                    StackMaps::Record& stackmap) {
+                                   StackMaps::Record& stackmap,
+                                   const StackMaps& stackmaps) {
   int frame_count = 0;
   int jsframe_count = 0;
   for (LLVMEnvironment* e = env; e != NULL; e = e->outer()) {
@@ -216,7 +233,7 @@ int LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
   }
   Translation translation(&deopt_data_->translations(), frame_count,
                           jsframe_count, zone());
-  WriteTranslation(env, stackmap, &translation);
+  WriteTranslation(env, stackmap, &translation, stackmaps);
   return translation.index();
 }
 
@@ -265,7 +282,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
     // Time to make a Translation from Stackmaps and Environments.
     LLVMEnvironment* env = deopt_data_->deoptimizations()[id];
 
-    int translation_index = WriteTranslationFor(env, stackmap_record);
+    int translation_index = WriteTranslationFor(env, stackmap_record, stackmaps);
 
     data->SetAstId(id, env->ast_id());
     data->SetTranslationIndex(id, Smi::FromInt(translation_index));
@@ -1144,6 +1161,7 @@ void LLVMChunkBuilder::CallStackMap(int stackmap_id,
 
 llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
                                                RelocInfo::Mode rmode) {
+  std::cerr << __FUNCTION__ << std::endl;
   bool extended = false;
   if (is_uint32(intptr_value)) {
     intptr_value = (intptr_value << 32) | kExtFillingValue;
@@ -1157,13 +1175,12 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
   meta_info.cell_extended = extended;
   reloc_data_->Add(rinfo, meta_info);
 
-//  int stackmap_id = deopt_data_->DeoptCount() + reloc_data_->RelocCount() - 1;
-//  CallStackMap(stackmap_id, value);
-
+  std::cerr << "END " << __FUNCTION__ << " " << intptr_value << std::endl;
   return value;
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
+  std::cerr << __FUNCTION__ << std::endl;
   // Note: constants might have EmitAtUses() == true
   Representation r = instr->representation();
   if (r.IsSmi()) {
@@ -1469,6 +1486,7 @@ void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
 }
 
 void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
+  std::cerr << __FUNCTION__ << std::endl;
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   // Don't know what this is yet.
   if (instr->pass_argument_count()) UNIMPLEMENTED();

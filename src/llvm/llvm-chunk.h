@@ -385,14 +385,18 @@ class LLVMChunk FINAL : public LowChunk {
   void SetUpDeoptimizationData(Handle<Code> code);
   Vector<byte> GetRelocationData(CodeDesc& code_desc);
   // Returns translation index of the newly generated translation
-  int WriteTranslationFor(LLVMEnvironment* env, StackMaps::Record& stackmap);
+  int WriteTranslationFor(LLVMEnvironment* env,
+                          StackMaps::Record& stackmap,
+                          const StackMaps& stackmaps);
   void WriteTranslation(LLVMEnvironment* environment,
                         StackMaps::Record& stackmap,
-                        Translation* translation);
+                        Translation* translation,
+                        const StackMaps& stackmaps);
   void AddToTranslation(LLVMEnvironment* environment,
                         Translation* translation,
                         llvm::Value* op, //change
                         StackMaps::Location& location,
+                        const StackMaps& stackmaps,
                         bool is_tagged,
                         bool is_uint32,
                         int* object_index_pointer,
