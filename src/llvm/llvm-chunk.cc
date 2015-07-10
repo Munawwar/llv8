@@ -2130,7 +2130,7 @@ void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
   Handle<Object> handle_value = instr->cell().handle();
   llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
-  int64_t value = reinterpret_cast<int64_t>((handle_value.location()));
+  int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
   auto address_val = llvm_ir_builder_->getInt64(value);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
         address_val, llvm_ir_builder_->getInt8PtrTy());
