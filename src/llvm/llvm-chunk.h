@@ -189,7 +189,8 @@ class LLVMGranularity FINAL {
   void SetUpDisassembler() {
     auto triple = x64_target_triple;
     std::string err;
-    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, err);
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple,
+                                                                    err);
     DCHECK(target);
     std::unique_ptr<llvm::MCRegisterInfo> mri(target->createMCRegInfo(triple));
     DCHECK(mri);
@@ -220,6 +221,38 @@ class LLVMGranularity FINAL {
   }
 
   DISALLOW_COPY_AND_ASSIGN(LLVMGranularity);
+};
+
+struct Types FINAL : public AllStatic {
+   static llvm::Type* tagged;
+   static llvm::PointerType* ptr_tagged;
+
+   static llvm::Type* i8;
+   static llvm::Type* i32;
+   static llvm::Type* i64;
+   static llvm::Type* float64;
+
+   static llvm::PointerType* ptr_i8;
+   static llvm::PointerType* ptr_i32;
+   static llvm::PointerType* ptr_i64;
+   static llvm::PointerType* ptr_float64;
+
+  static void Init(llvm::IRBuilder<>* ir_builder) {
+    i8 = ir_builder->getInt8Ty();
+    i32 = ir_builder->getInt32Ty();
+    i64 = ir_builder->getInt64Ty();
+    float64 = ir_builder->getDoubleTy();
+
+    auto address_space = 0;
+    ptr_i8 = ir_builder->getInt8PtrTy();
+    ptr_i32 = llvm::PointerType::get(ir_builder->getInt32Ty(), address_space);
+    ptr_i64 = llvm::PointerType::get(ir_builder->getInt64Ty(), address_space);
+    ptr_float64 = llvm::PointerType::get(ir_builder->getDoubleTy(),
+                                         address_space);
+    // TODO(llvm): we should probably switch to i8*
+    tagged = i64;
+    ptr_tagged = ptr_i64;
+  }
 };
 
 class LLVMEnvironment FINAL:  public ZoneObject {

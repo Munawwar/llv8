@@ -13,6 +13,16 @@ namespace v8 {
 namespace internal {
 
 auto LLVMGranularity::x64_target_triple = "x86_64-unknown-linux-gnu";
+llvm::Type* Types::i8 = nullptr;
+llvm::Type* Types::i32 = nullptr;
+llvm::Type* Types::i64 = nullptr;
+llvm::Type* Types::float64 = nullptr;
+llvm::PointerType* Types::ptr_i8 = nullptr;
+llvm::PointerType* Types::ptr_i32 = nullptr;
+llvm::PointerType* Types::ptr_i64 = nullptr;
+llvm::PointerType* Types::ptr_float64 = nullptr;
+llvm::Type* Types::tagged = nullptr;
+llvm::PointerType* Types::ptr_tagged = nullptr;
 
 LLVMChunk::~LLVMChunk() {}
 
@@ -394,6 +404,9 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   module_ = LLVMGranularity::getInstance().CreateModule();
   module_->setTargetTriple(LLVMGranularity::x64_target_triple);
   std::cerr << module_->getTargetTriple() << std::endl;
+  llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
+      LLVMGranularity::getInstance().context());
+  Types::Init(llvm_ir_builder_.get());
   status_ = BUILDING;
 
 //  // If compiling for OSR, reserve space for the unoptimized frame,
@@ -404,8 +417,6 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
 //    }
 //  }
 
-  LLVMContext& context = LLVMGranularity::getInstance().context();
-
   // First param is context (v8, js context) which goes to rsi,
   // second param is the callee's JSFunction object (rdi),
   // third param is Parameter 0 which is I am not sure what
@@ -415,10 +426,10 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   for (auto i = 0; i < num_parameters; i++) {
     // For now everything is Int64. Probably it is even right for x64.
     // So in that case we are going to do come casts AFAIK
-    params[i] = llvm::Type::getInt64Ty(context);
+    params[i] = Types::i64;
   }
   llvm::FunctionType* function_type = llvm::FunctionType::get(
-      llvm::Type::getInt64Ty(context), params, false);
+      Types::i64, params, false);
 
   // TODO(llvm): return type for void JS functions?
   // I think it's all right, because undefined is a tagged value
@@ -541,7 +552,7 @@ llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
   llvm::Value* res = nullptr;
   if (SmiValuesAre32Bits()) {
     res = llvm_ir_builder_->CreateLShr(Use(value), kSmiShift);
-    res = llvm_ir_builder_->CreateTrunc(res, llvm_ir_builder_->getInt32Ty());
+    res = llvm_ir_builder_->CreateTrunc(res, Types::i32);
   } else {
     DCHECK(SmiValuesAre31Bits());
     UNIMPLEMENTED();
@@ -561,13 +572,13 @@ llvm::Value* LLVMChunkBuilder::SmiCheck(HValue* value, bool negate) {
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
   llvm::Value* int32_val = Use(value);
   llvm::Value* extended_width_val = llvm_ir_builder_->CreateZExt(
-      int32_val, llvm_ir_builder_->getInt64Ty());
+      int32_val, Types::i64);
   return llvm_ir_builder_->CreateShl(extended_width_val, kSmiShift);
 }
 
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(llvm::Value* value) {
   llvm::Value* extended_width_val = llvm_ir_builder_->CreateZExt(
-      value, llvm_ir_builder_->getInt64Ty());
+      value, Types::i64);
   return llvm_ir_builder_->CreateShl(extended_width_val, kSmiShift);
 }
 
@@ -592,9 +603,8 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
   bool is_var_arg = false;
 
   // Tagged return type won't hurt even if in fact it's void
-  auto return_type = llvm_ir_builder_->getInt8PtrTy();
-  // TODO(llvm): tagged type
-  auto param_type = llvm_ir_builder_->getInt64Ty();
+  auto return_type = Types::ptr_i8;
+  auto param_type = Types::tagged;
   std::vector<llvm::Type*> param_types(params.size(), param_type);
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       return_type, param_types, is_var_arg);
@@ -612,14 +622,14 @@ llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
   llvm::Value* offset_val = llvm_ir_builder_->getInt64(offset - kHeapObjectTag);
   // I don't know why, but it works OK even if base was already an i8*
   llvm::Value* base_casted = llvm_ir_builder_->CreateIntToPtr(
-      base, llvm_ir_builder_->getInt8PtrTy());
+      base, Types::ptr_i8);
   return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
 }
 
 llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
     llvm::Value* offset_val = llvm_ir_builder_->getInt64(offset);
     llvm::Value* base_casted = llvm_ir_builder_->CreateIntToPtr(
-         base, llvm_ir_builder_->getInt8PtrTy());
+         base, Types::ptr_i8);
     return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
 }
 
@@ -641,9 +651,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   auto arg_count = function->nargs;
   // if (arg_count != 0) UNIMPLEMENTED();
 
-  llvm::Type* int8_ptr_type =  llvm_ir_builder_->getInt8PtrTy();
-  llvm::Type* int64_type =  llvm_ir_builder_->getInt64Ty();
-
   Address rt_target = ExternalReference(function, isolate()).address();
   // TODO(llvm): we shouldn't always save FP regs
   // moreover, we should find a way to offload such decisions to LLVM.
@@ -664,9 +671,9 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   llvm::Value* target_address = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(code->instruction_start()));
   bool is_var_arg = false;
-  llvm::Type* param_types[] = { int64_type, int8_ptr_type, int64_type };
+  llvm::Type* param_types[] = { Types::i64, Types::ptr_i8, Types::i64 };
   llvm::FunctionType* function_type = llvm::FunctionType::get(
-      int8_ptr_type, param_types, is_var_arg);
+      Types::ptr_i8, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_address,
                                                          ptr_to_function);
@@ -675,7 +682,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
   auto target_temp = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(rt_target));
   auto llvm_rt_target = llvm_ir_builder_->CreateIntToPtr(
-      target_temp, int8_ptr_type);
+      target_temp, Types::ptr_i8);
   auto context = GetContext();
   llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall3(
       casted, llvm_nargs, llvm_rt_target, context);
@@ -688,9 +695,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
     llvm::Value* context, std::vector<llvm::Value*> params) {
   const Runtime::Function* function = Runtime::FunctionForId(id);
   auto arg_count = function->nargs + 1;
-
-  llvm::Type* int8_ptr_type =  llvm_ir_builder_->getInt8PtrTy();
-  llvm::Type* int64_type =  llvm_ir_builder_->getInt64Ty();
 
   Address rt_target = ExternalReference(function, isolate()).address();
   // TODO(llvm): we shouldn't always save FP regs
@@ -717,14 +721,14 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   std::vector<llvm::Type*>FuncTy_3_args;
   llvm::FunctionType* FuncTy_3 = llvm::FunctionType::get(
        llvm::Type::getVoidTy(lcontext), FuncTy_3_args, false);
-  pTypes.push_back(int64_type); 
-  pTypes.push_back(int8_ptr_type);
-  pTypes.push_back(int64_type);
+  pTypes.push_back(Types::i64);
+  pTypes.push_back(Types::ptr_i8);
+  pTypes.push_back(Types::i64);
   for (auto i = 0; i < params.size(); ++i) 
      pTypes.push_back(params[i]->getType());
   llvm::ArrayRef<llvm::Type*> pRef (pTypes);
   llvm::FunctionType* function_type = llvm::FunctionType::get(
-      int8_ptr_type, pRef, is_var_arg);
+      Types::ptr_i8, pRef, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_address,
                                                          ptr_to_function);
@@ -733,7 +737,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   auto target_temp = llvm_ir_builder_->getInt64(
       reinterpret_cast<uint64_t>(rt_target));
   auto llvm_rt_target = llvm_ir_builder_->CreateIntToPtr(
-      target_temp, int8_ptr_type);
+      target_temp, Types::ptr_i8);
   std::vector<llvm::Value*> actualParams;
   actualParams.push_back(llvm_nargs);
   actualParams.push_back(llvm_rt_target);
@@ -901,10 +905,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   std::cerr << __FUNCTION__ << std::endl;
 #endif
   DCHECK(is_building());
-  Use(block);
-  // TODO(llvm): is it OK to create a new builder each time?
-  // we could just set the insertion point for the irbuilder.
-  llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(Use(block));
+  llvm_ir_builder_->SetInsertPoint(Use(block));
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
@@ -1044,11 +1045,11 @@ void LLVMChunkBuilder::DoPhi(HPhi* phi) {
   llvm::Type* phi_type;
   switch (r.kind()) {
     case Representation::Kind::kInteger32:
-      phi_type = llvm_ir_builder_->getInt32Ty();
+      phi_type = Types::i32;
       break;
     case Representation::Kind::kTagged:
     case Representation::Kind::kSmi:
-      phi_type = llvm_ir_builder_->getInt64Ty();
+      phi_type = Types::i64;
       break;
     default:
       UNIMPLEMENTED();
@@ -1202,7 +1203,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     llvm::Value* value = llvm_ir_builder_->getInt32(int32_value);
     instr->set_llvm_value(value);
   } else if (r.IsDouble()) {
-    llvm::Value* value = llvm::ConstantFP::get(llvm_ir_builder_->getDoubleTy(),
+    llvm::Value* value = llvm::ConstantFP::get(Types::float64,
                                                instr->DoubleValue());
     instr->set_llvm_value(value);
   } else if (r.IsExternal()) {
@@ -1236,7 +1237,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
         llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
 
         llvm::Value* ptr = llvm_ir_builder_->CreateIntToPtr(value,
-            llvm_ir_builder_->getInt64Ty()->getPointerTo());
+                                                            Types::ptr_i64);
         llvm::Value* deref = llvm_ir_builder_->CreateLoad(ptr);
         instr->set_llvm_value(deref);
       } else {
@@ -1287,19 +1288,17 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     HValue* right = instr->right();
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
-    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
     if (!can_overflow) {
       if (left->representation().IsInteger32()) {
-        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, type);
+        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, Types::i64);
       }
       if (right->representation().IsInteger32()) {
-        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, type);
+        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, Types::i64);
       }
       llvm::Value* Add = llvm_ir_builder_->CreateAdd(llvm_left, llvm_right, "");
       instr->set_llvm_value(Add);
     } else {
-      auto type = instr->representation().IsSmi()
-          ? llvm_ir_builder_->getInt64Ty() : llvm_ir_builder_->getInt32Ty();
+      auto type = instr->representation().IsSmi() ? Types::i64 : Types::i32;
       llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
           llvm::Intrinsic::sadd_with_overflow, type);
 
@@ -1347,8 +1346,7 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   args.push_back(arg1);
   args.push_back(arg1);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-  auto alloc_casted = llvm_ir_builder_->CreatePtrToInt(alloc, type);
+  auto alloc_casted = llvm_ir_builder_->CreatePtrToInt(alloc, Types::i64);
   if (instr->MustPrefillWithFiller()) {
     UNIMPLEMENTED();
   }
@@ -1406,14 +1404,13 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
   Representation representation = instr->length()->representation();
   DCHECK(representation.Equals(instr->index()->representation()));
   DCHECK(representation.IsSmiOrInteger32());
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   llvm::Value* left = Use(instr->length());
   llvm::Value* right = Use(instr->index());
   if (instr->index()->representation().IsInteger32()) {
-     right = llvm_ir_builder_->CreateSExt(right, type);
+     right = llvm_ir_builder_->CreateSExt(right, Types::i64);
   }  
   if (instr->length()->representation().IsInteger32()) {
-     left = llvm_ir_builder_->CreateSExt(right, type);
+     left = llvm_ir_builder_->CreateSExt(right, Types::i64);
   }
   llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(left, right);
   instr->set_llvm_value(compare);
@@ -1591,21 +1588,17 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   DCHECK(Use(val)->getType()->isDoubleTy());
   if (FLAG_inline_new) UNIMPLEMENTED();
 
-  // TODO(llvm): tagged value will be i8* in the future
-  llvm::Type* tagged_type = llvm_ir_builder_->getInt64Ty();
-  llvm::PointerType* ptr_to_tagged = llvm::PointerType::get(tagged_type, 0);
-
   llvm::Value* new_heap_number = AllocateHeapNumber(); // i8*
   auto store_address = FieldOperand(new_heap_number, HeapNumber::kValueOffset);
-  llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
-                                                                ptr_to_tagged);
+  llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(
+      store_address, Types::ptr_tagged);
   llvm::Value* casted_val = llvm_ir_builder_->CreateBitCast(Use(val),
-                                                            tagged_type);
+                                                            Types::tagged);
   // [(i8*)new_heap_number + offset] = val;
   llvm_ir_builder_->CreateStore(casted_val, casted_adderss);
 
   auto new_heap_number_casted = llvm_ir_builder_->CreatePtrToInt(
-      new_heap_number, tagged_type);
+      new_heap_number, Types::tagged);
   instr->set_llvm_value(new_heap_number_casted); // no offset
 
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
@@ -1631,14 +1624,11 @@ llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val) {
   auto offset = llvm_ir_builder_->getInt64((Heap::kHeapNumberMapRootIndex
         << kPointerSizeLog2) - kRootRegisterBias);
   llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
-        r13_val, llvm_ir_builder_->getInt8PtrTy());
+        r13_val, Types::ptr_i8);
   llvm::Value* gep_2 = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
  
-  llvm::Type* int_type = llvm_ir_builder_->getInt64Ty();
-  llvm::PointerType* ptr_to_int = llvm::PointerType::get(int_type, 0);
- 
-  llvm::Value* bitcast_1 = llvm_ir_builder_->CreateBitCast(gep_2, ptr_to_int);
-  llvm::Value* bitcast_2 = llvm_ir_builder_->CreateBitCast(val, ptr_to_int);
+  llvm::Value* bitcast_1 = llvm_ir_builder_->CreateBitCast(gep_2, Types::ptr_i64);
+  llvm::Value* bitcast_2 = llvm_ir_builder_->CreateBitCast(val, Types::ptr_i64);
   llvm::Value* load_first = llvm_ir_builder_->CreateLoad(bitcast_2);
   llvm::Value* load_second = llvm_ir_builder_->CreateLoad(bitcast_1);
  
@@ -1661,8 +1651,6 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
       context, "NUMBER_CANDIDATE_IS_ANY_TAGGED", function_);
   llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(
       context, "Continue Block", function_);
-  llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
-  llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
 
   llvm::Value* cmp_val = nullptr;
   llvm::LoadInst* load_d = nullptr;
@@ -1676,7 +1664,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
 
     llvm::Value* bitcast = llvm_ir_builder_->CreateBitCast(value_addr,
-                                                           ptr_to_double);
+                                                           Types::ptr_float64);
     load_d = llvm_ir_builder_->CreateLoad(bitcast);
     // TODO(llvm): deopt
     // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
@@ -1701,20 +1689,16 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   llvm_ir_builder_->SetInsertPoint(is_smi);
   llvm::Value* int32_val = SmiToInteger32(val);
   llvm::Value* double_val = llvm_ir_builder_->CreateSIToFP(int32_val,
-                                                           double_type);
+                                                           Types::float64);
   llvm_ir_builder_->CreateBr(continue_block);
   llvm_ir_builder_->SetInsertPoint(continue_block);
-  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(double_type, 2);
+  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(Types::float64, 2);
   phi->addIncoming(load_d, is_any_tagged);
   phi->addIncoming(double_val, is_smi);
   instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
-  // TODO(llvm): create shortcuts for frequently used types
-  llvm::Type* int32_type = llvm_ir_builder_->getInt32Ty();
-  llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
-  llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
   llvm::Value* cond = SmiCheck(val);
 
   LLVMContext& context = LLVMGranularity::getInstance().context();
@@ -1752,11 +1736,11 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     llvm_ir_builder_->SetInsertPoint(truncate_heap_number);
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
     // cast to ptr to double, fetch the double and convert to i32
-    llvm::Value* double_addr = llvm_ir_builder_->CreateBitCast(value_addr,
-                                                               ptr_to_double);
+    llvm::Value* double_addr = llvm_ir_builder_->CreateBitCast(
+        value_addr, Types::ptr_float64);
     llvm::Value* double_val = llvm_ir_builder_->CreateLoad(double_addr);
     llvm::Value* truncate_heap_number_result = llvm_ir_builder_->CreateFPToSI(
-        double_val, int32_type);
+        double_val, Types::i32);
 
     // FIXME(llvm): add NaN check
     // cmpq(result_reg, Immediate(1)); (MacroAssembler::TruncateHeapNumberToI)
@@ -1770,7 +1754,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     llvm_ir_builder_->CreateBr(merge_inner);
 
     llvm_ir_builder_->SetInsertPoint(merge_inner);
-    llvm::PHINode* phi_inner = llvm_ir_builder_->CreatePHI(int32_type, 2);
+    llvm::PHINode* phi_inner = llvm_ir_builder_->CreatePHI(Types::i32, 2);
     phi_inner->addIncoming(llvm_ir_builder_->getInt32(0x0badbeef), no_heap_number); // FIXME
     phi_inner->addIncoming(truncate_heap_number_result, truncate_heap_number);
     relult_for_not_smi = phi_inner;
@@ -1781,13 +1765,14 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     DeoptimizeIf(cmp, instr->block(), negate); // Deoptimizer::kNotAHeapNumber
 
     auto address = FieldOperand(Use(val), HeapNumber::kValueOffset);
-    auto double_addr = llvm_ir_builder_->CreateBitCast(address, ptr_to_double);
+    auto double_addr = llvm_ir_builder_->CreateBitCast(address,
+                                                       Types::ptr_float64);
     auto double_val = llvm_ir_builder_->CreateLoad(double_addr);
     // Convert the double to int32; convert it back do double and
     // see it the 2 doubles are equal and neither is a NaN.
     // If not, deopt (kLostPrecision or kNaN)
-    auto int32 = llvm_ir_builder_->CreateFPToSI(double_val, int32_type);
-    auto double_2 = llvm_ir_builder_->CreateSIToFP(int32, double_type);
+    auto int32 = llvm_ir_builder_->CreateFPToSI(double_val, Types::i32);
+    auto double_2 = llvm_ir_builder_->CreateSIToFP(int32, Types::float64);
     auto ordered_and_equal = llvm_ir_builder_->CreateFCmpOEQ(double_val,
                                                              double_2);
     negate = true;
@@ -1800,7 +1785,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   llvm_ir_builder_->CreateBr(merge_and_ret);
 
   llvm_ir_builder_->SetInsertPoint(merge_and_ret);
-  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(int32_type, 2);
+  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(Types::i32, 2);
   phi->addIncoming(relult_for_smi, is_smi);
   phi->addIncoming(relult_for_not_smi, not_smi_merge);
   instr->set_llvm_value(phi);
@@ -1841,9 +1826,8 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     }
   } else if (from.IsDouble()) {
       if (to.IsInteger32()) {
-        llvm::Type* type = llvm_ir_builder_->getInt32Ty();
         llvm::Value* casted_int =  llvm_ir_builder_->CreateFPToSI(Use(val),
-                                                                  type);
+                                                                  Types::i32);
         instr->set_llvm_value(casted_int);
       } else if (to.IsTagged()) {
         ChangeDoubleToTagged(val, instr);
@@ -1928,7 +1912,6 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
   Representation r = instr->representation();
   HValue* left = instr->left();
   HValue* right = instr->right();
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   DCHECK(left->representation().Equals(r));
   DCHECK(right->representation().Equals(r));
   bool is_unsigned = r.IsDouble()
@@ -1942,10 +1925,10 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
     if (left->representation().IsInteger32()) {
-        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, type);
+        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, Types::i64);
     }
     if (right->representation().IsInteger32()) {
-        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, type);
+        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, Types::i64);
     }
     llvm::Value* compare = llvm_ir_builder_->CreateICmp(pred, llvm_left,
                                                         llvm_right);
@@ -2133,13 +2116,12 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
 
 void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
   Handle<Object> handle_value = instr->cell().handle();
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-  llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
   int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
   // TODO(llvm): RelocInfo::CELL Shall we?
   auto address_val = llvm_ir_builder_->getInt64(value);
   auto gep = FieldOperand(address_val, 8);
-  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
+  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep,
+                                                                Types::ptr_i64);
   llvm::Value* load_cell = llvm_ir_builder_->CreateLoad(casted_address);
   instr->set_llvm_value(load_cell);
   if(instr->RequiresHoleCheck()){
@@ -2165,7 +2147,6 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
 
 void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   HValue* key = instr->key();
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   Representation representation = instr->representation();
   bool requires_hole_check = instr->RequiresHoleCheck();
   int shift_size = ElementsKindToShiftSize(FAST_ELEMENTS);
@@ -2190,12 +2171,12 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
     auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
           inst_offset);
     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+          Use(instr->elements()), Types::ptr_i8);
     gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, offset);
   } else {
      llvm::Value* lkey = Use(key);
      if (key->representation().IsInteger32()) {
-        lkey = llvm_ir_builder_->CreateSExt(lkey, type);
+        lkey = llvm_ir_builder_->CreateSExt(lkey, Types::i64);
      }
      // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
      llvm::Value* scale = llvm_ir_builder_->getInt64(8); //FIXME: //find a way to pass by ScaleFactor
@@ -2203,7 +2184,7 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
      auto offset = llvm_ir_builder_->getInt64(inst_offset);
      llvm::Value* add = llvm_ir_builder_->CreateAdd(mul, offset);
      llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+          Use(instr->elements()), Types::ptr_i8);
      gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, add);
    
   }
@@ -2250,15 +2231,12 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     representation = Representation::Integer32();
   }
  
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-  llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0); 
   auto offset_1 = llvm_ir_builder_->getInt64(offset);
-  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), llvm_ir_builder_->getInt8PtrTy());
+  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
   llvm::Value* obj = llvm_ir_builder_->CreateGEP(int8_ptr, offset_1);
-  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(obj, ptr_to_type);
+  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(obj, Types::ptr_i64);
   llvm::Value* res = llvm_ir_builder_->CreateLoad(casted_address);
   instr->set_llvm_value(res);
- 
 }
 
 void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
@@ -2293,7 +2271,6 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     HValue* right = instr->right();
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
-    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
     if (instr->representation().IsSmi()) {
       // FIXME (llvm):
       // 1) overflow check?
@@ -2303,10 +2280,10 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
       instr->set_llvm_value(Mul);
     } else {
       if (left->representation().IsInteger32()) {
-         llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, type);
+         llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, Types::i64);
       }
       if (right->representation().IsInteger32()) {
-         llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, type);
+         llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, Types::i64);
       }  
       llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(llvm_left, llvm_right, "");
       instr->set_llvm_value(Mul);
@@ -2408,12 +2385,10 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
     UNIMPLEMENTED();
   } else {
     Handle<Object> handle_value = instr->cell().handle();
-    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-    llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
     int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
     auto address_val = llvm_ir_builder_->getInt64(value);
     auto gep = FieldOperand(address_val, 8);
-    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, ptr_to_type);
+    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, Types::ptr_i64);
     llvm::Value* store_cell = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(store_cell);
   }
@@ -2433,7 +2408,6 @@ void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
 
 void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   HValue* key = instr->key();
-  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
   Representation representation = instr->representation();
   int shift_size = ElementsKindToShiftSize(FAST_ELEMENTS);
   uint32_t inst_offset = instr->base_offset();
@@ -2456,12 +2430,12 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
     auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
           inst_offset);
     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+          Use(instr->elements()), Types::ptr_i8);
     gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, offset); 
   } else {
      llvm::Value* lkey = Use(key);
      if (key->representation().IsInteger32()) {
-        lkey = llvm_ir_builder_->CreateSExt(lkey, type);
+        lkey = llvm_ir_builder_->CreateSExt(lkey, Types::i64);
      }
      // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
      llvm::Value* scale = llvm_ir_builder_->getInt64(8); //FIXME: //find a way to pass by ScaleFactor
@@ -2469,15 +2443,13 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
      auto offset = llvm_ir_builder_->getInt64(inst_offset);
      llvm::Value* add = llvm_ir_builder_->CreateAdd(mul, offset);
      llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), llvm_ir_builder_->getInt8PtrTy());
+          Use(instr->elements()), Types::ptr_i8);
      gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, add);
   }
  
   if(!instr->value()->IsConstant()){
-    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-    llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
     llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep_0,
-                                                              ptr_to_type);    
+                                                                  Types::ptr_i64);
     llvm::Value* Store = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address); 
     instr->set_llvm_value(Store);
   } else {
@@ -2487,10 +2459,8 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
     Handle<Object> handle_value = constant->handle(isolate());
     int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
     auto llvm_val = llvm_ir_builder_->getInt64(value);
-    llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-    llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
-    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep_0,
-                                                              ptr_to_type);
+    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(
+        gep_0, Types::ptr_i64);
     llvm::Value* Store = llvm_ir_builder_->CreateStore(llvm_val, casted_address);
     instr->set_llvm_value(Store);
   }
@@ -2544,32 +2514,26 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     HValue* hValue = instr->value();
     if (hValue->representation().IsInteger32()) {
       llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
-      llvm::Type* type = llvm_ir_builder_->getInt32Ty();
-      llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
-                                                                ptr_to_type);
+                                                                    Types::ptr_i32);
       llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(hValue),
-                                                                  type);
+                                                                  Types::i32);
       llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
     } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
       llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
-      llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-      llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
-                                                                ptr_to_type);
+                                                                    Types::ptr_i64);
       llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(hValue),
-                                                                  type);
+                                                                  Types::i64);
       llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
     } else {
       DCHECK(hValue->IsConstant());
       HConstant* constant = HConstant::cast(instr->value());
-      llvm::Type* type = llvm_ir_builder_->getInt64Ty();
-      llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       Handle<Object> handle_value = constant->handle(isolate()); 
       int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
       llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
-                                                                ptr_to_type);
+                                                                    Types::ptr_i64);
       auto llvm_val = llvm_ir_builder_->getInt64(value);
       llvm_ir_builder_->CreateStore(llvm_val, casted_adderss);
 
