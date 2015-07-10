@@ -12,6 +12,8 @@
 namespace v8 {
 namespace internal {
 
+#define __ llvm_ir_builder_->
+
 auto LLVMGranularity::x64_target_triple = "x86_64-unknown-linux-gnu";
 llvm::Type* Types::i8 = nullptr;
 llvm::Type* Types::i32 = nullptr;
@@ -512,7 +514,7 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
         HControlInstruction::cast(current)->KnownSuccessorBlock(&successor) &&
         successor != NULL) {
       // Goto(successor)
-      llvm_ir_builder_->CreateBr(Use(successor));
+      __ CreateBr(Use(successor));
     } else {
       current->CompileToLLVM(this); // the meat
     }
@@ -551,8 +553,8 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
 llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
   llvm::Value* res = nullptr;
   if (SmiValuesAre32Bits()) {
-    res = llvm_ir_builder_->CreateLShr(Use(value), kSmiShift);
-    res = llvm_ir_builder_->CreateTrunc(res, Types::i32);
+    res = __ CreateLShr(Use(value), kSmiShift);
+    res = __ CreateTrunc(res, Types::i32);
   } else {
     DCHECK(SmiValuesAre31Bits());
     UNIMPLEMENTED();
@@ -562,44 +564,37 @@ llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
 }
 
 llvm::Value* LLVMChunkBuilder::SmiCheck(HValue* value, bool negate) {
-  llvm::Value* res = llvm_ir_builder_->CreateAnd(Use(value),
-                                                 llvm_ir_builder_->getInt64(1));
-  return llvm_ir_builder_->CreateICmp(
-      negate ? llvm::CmpInst::ICMP_NE : llvm::CmpInst::ICMP_EQ,
-      res, llvm_ir_builder_->getInt64(0));
+  llvm::Value* res = __ CreateAnd(Use(value), __ getInt64(1));
+  return __ CreateICmp(negate ? llvm::CmpInst::ICMP_NE : llvm::CmpInst::ICMP_EQ,
+      res, __ getInt64(0));
 }
 
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
   llvm::Value* int32_val = Use(value);
-  llvm::Value* extended_width_val = llvm_ir_builder_->CreateZExt(
-      int32_val, Types::i64);
-  return llvm_ir_builder_->CreateShl(extended_width_val, kSmiShift);
+  llvm::Value* extended_width_val = __ CreateZExt(int32_val, Types::i64);
+  return __ CreateShl(extended_width_val, kSmiShift);
 }
 
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(llvm::Value* value) {
-  llvm::Value* extended_width_val = llvm_ir_builder_->CreateZExt(
-      value, Types::i64);
-  return llvm_ir_builder_->CreateShl(extended_width_val, kSmiShift);
+  llvm::Value* extended_width_val = __ CreateZExt(value, Types::i64);
+  return __ CreateShl(extended_width_val, kSmiShift);
 }
 
 
 llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
-  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
-      reinterpret_cast<uint64_t>(target));
+  llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
   bool is_var_arg = false;
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      llvm_ir_builder_->getVoidTy(), is_var_arg);
+  llvm::FunctionType* function_type = llvm::FunctionType::get(__ getVoidTy(),
+                                                              is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
-                                                         ptr_to_function);
-  return llvm_ir_builder_->CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
+  llvm::Value* casted = __ CreateIntToPtr(target_adderss, ptr_to_function);
+  return __ CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
 }
 
 llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
                                            llvm::CallingConv::ID calling_conv,
                                            std::vector<llvm::Value*>& params) {
-  llvm::Value* target_adderss = llvm_ir_builder_->getInt64(
-      reinterpret_cast<uint64_t>(target));
+  llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
   bool is_var_arg = false;
 
   // Tagged return type won't hurt even if in fact it's void
@@ -610,27 +605,24 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
       return_type, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
 
-  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_adderss,
-                                                         ptr_to_function);
-  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall(casted, params);
+  llvm::Value* casted = __ CreateIntToPtr(target_adderss, ptr_to_function);
+  llvm::CallInst* call_inst = __ CreateCall(casted, params);
   call_inst->setCallingConv(calling_conv);
 
   return call_inst;
 }
 
 llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
-  llvm::Value* offset_val = llvm_ir_builder_->getInt64(offset - kHeapObjectTag);
+  llvm::Value* offset_val = __ getInt64(offset - kHeapObjectTag);
   // I don't know why, but it works OK even if base was already an i8*
-  llvm::Value* base_casted = llvm_ir_builder_->CreateIntToPtr(
-      base, Types::ptr_i8);
-  return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
+  llvm::Value* base_casted = __ CreateIntToPtr(base, Types::ptr_i8);
+  return __ CreateGEP(base_casted, offset_val);
 }
 
 llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
-    llvm::Value* offset_val = llvm_ir_builder_->getInt64(offset);
-    llvm::Value* base_casted = llvm_ir_builder_->CreateIntToPtr(
-         base, Types::ptr_i8);
-    return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
+    llvm::Value* offset_val = __ getInt64(offset);
+    llvm::Value* base_casted = __ CreateIntToPtr(base, Types::ptr_i8);
+    return __ CreateGEP(base_casted, offset_val);
 }
 
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
@@ -668,23 +660,20 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
     // FIXME(llvm,gc): respect reloc info mode...
   }
 
-  llvm::Value* target_address = llvm_ir_builder_->getInt64(
+  llvm::Value* target_address = __ getInt64(
       reinterpret_cast<uint64_t>(code->instruction_start()));
   bool is_var_arg = false;
   llvm::Type* param_types[] = { Types::i64, Types::ptr_i8, Types::i64 };
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       Types::ptr_i8, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_address,
-                                                         ptr_to_function);
+  llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
 
-  auto llvm_nargs = llvm_ir_builder_->getInt64(arg_count);
-  auto target_temp = llvm_ir_builder_->getInt64(
-      reinterpret_cast<uint64_t>(rt_target));
-  auto llvm_rt_target = llvm_ir_builder_->CreateIntToPtr(
-      target_temp, Types::ptr_i8);
+  auto llvm_nargs = __ getInt64(arg_count);
+  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
   auto context = GetContext();
-  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall3(
+  llvm::CallInst* call_inst = __ CreateCall3(
       casted, llvm_nargs, llvm_rt_target, context);
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // return value has type i8*
@@ -713,7 +702,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
     // FIXME(llvm,gc): respect reloc info mode...
   }
 
-  llvm::Value* target_address = llvm_ir_builder_->getInt64(
+  llvm::Value* target_address = __ getInt64(
       reinterpret_cast<uint64_t>(code->instruction_start()));
   bool is_var_arg = false;
   std::vector<llvm::Type*> pTypes;
@@ -730,14 +719,11 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       Types::ptr_i8, pRef, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = llvm_ir_builder_->CreateIntToPtr(target_address,
-                                                         ptr_to_function);
+  llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
 
-  auto llvm_nargs = llvm_ir_builder_->getInt64(arg_count);
-  auto target_temp = llvm_ir_builder_->getInt64(
-      reinterpret_cast<uint64_t>(rt_target));
-  auto llvm_rt_target = llvm_ir_builder_->CreateIntToPtr(
-      target_temp, Types::ptr_i8);
+  auto llvm_nargs = __ getInt64(arg_count);
+  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
   std::vector<llvm::Value*> actualParams;
   actualParams.push_back(llvm_nargs);
   actualParams.push_back(llvm_rt_target);
@@ -745,8 +731,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   for (auto i = 0; i < params.size(); ++i)
      actualParams.push_back(params[i]);
   llvm::ArrayRef<llvm::Value*> args (actualParams);
-  llvm::CallInst* call_inst = llvm_ir_builder_->CreateCall(
-      casted, args );
+  llvm::CallInst* call_inst = __ CreateCall(casted, args );
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
   // It will also fix arguments offset mismatch problem in runtime functions
@@ -755,7 +740,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   std::string asm_string2 = ", %rsp";
   std::string final_strig = asm_string1 + argOffset+asm_string2;
   llvm::InlineAsm* ptr_121 = llvm::InlineAsm::get(FuncTy_3, final_strig, "~{dirflag},~{fpsr},~{flags}",true);
-  llvm::CallInst* void_111 = llvm_ir_builder_->CreateCall(ptr_121, "");
+  llvm::CallInst* void_111 = __ CreateCall(ptr_121, "");
   void_111->setCallingConv(llvm::CallingConv::C);
 
   // return value has type i8*
@@ -802,12 +787,12 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
   // TODO(llvm): create Deoptimizer::DeoptInfo & Deoptimizer::JumpTableEntry (?)
 
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-  llvm::BasicBlock* saved_insert_point = llvm_ir_builder_->GetInsertBlock();
+  llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
   llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
       "BlockContinue", function_);
   llvm::BasicBlock* deopt_block = llvm::BasicBlock::Create(
       LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
-  llvm_ir_builder_->SetInsertPoint(deopt_block);
+  __ SetInsertPoint(deopt_block);
 
   // TODO(llvm): refactor (use the CallStackMap method)
   // StackMap (id = #deopts, shadow_bytes=0, ...)
@@ -815,22 +800,22 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
       llvm::Intrinsic::experimental_stackmap);
   std::vector<llvm::Value*> mapped_values;
   int stackmap_id = deopt_data_->DeoptCount() - 1;
-  mapped_values.push_back(llvm_ir_builder_->getInt64(stackmap_id));
+  mapped_values.push_back(__ getInt64(stackmap_id));
   int shadow_bytes = 0;
-  mapped_values.push_back(llvm_ir_builder_->getInt32(shadow_bytes));
+  mapped_values.push_back(__ getInt32(shadow_bytes));
   for (auto val : *environment->values()) {
     mapped_values.push_back(val);
   }
-  llvm_ir_builder_->CreateCall(stackmap, mapped_values);
+  __ CreateCall(stackmap, mapped_values);
   CallVoid(entry);
-  llvm_ir_builder_->CreateUnreachable();
+  __ CreateUnreachable();
 
-  llvm_ir_builder_->SetInsertPoint(saved_insert_point);
+  __ SetInsertPoint(saved_insert_point);
   if (!negate)
-    llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
+    __ CreateCondBr(compare, deopt_block, next_block);
   else
-    llvm_ir_builder_->CreateCondBr(compare, next_block, deopt_block);
-  llvm_ir_builder_->SetInsertPoint(next_block);
+    __ CreateCondBr(compare, next_block, deopt_block);
+  __ SetInsertPoint(next_block);
   block->set_llvm_end_basic_block(next_block);
 }
 
@@ -905,7 +890,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   std::cerr << __FUNCTION__ << std::endl;
 #endif
   DCHECK(is_building());
-  llvm_ir_builder_->SetInsertPoint(Use(block));
+  __ SetInsertPoint(Use(block));
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
@@ -1056,8 +1041,7 @@ void LLVMChunkBuilder::DoPhi(HPhi* phi) {
       phi_type = nullptr;
   }
 
-  llvm::PHINode* llvm_phi = llvm_ir_builder_->CreatePHI(phi_type,
-                                                        phi->OperandCount());
+  llvm::PHINode* llvm_phi = __ CreatePHI(phi_type, phi->OperandCount());
   phi->set_llvm_value(llvm_phi);
 }
 
@@ -1120,7 +1104,7 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
   std::cerr << __FUNCTION__ << std::endl;
 #endif
 //  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-//  std::vector<llvm::Type*> types(1, llvm_ir_builder_->getInt64Ty());
+//  std::vector<llvm::Type*> types(1, __ getInt64Ty());
 //
 //  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
 //      llvm::Intrinsic::read_register, types);
@@ -1130,13 +1114,13 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 //  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
 //      llvm_context, metadata);
 //
-//  llvm::Value* rsp_value = llvm_ir_builder_->CreateCall(intrinsic, val);
+//  llvm::Value* rsp_value = __ CreateCall(intrinsic, val);
 //
-//  llvm::Value* rsp_ptr = llvm_ir_builder_->CreateIntToPtr(rsp_value,
-//      llvm_ir_builder_->getInt64Ty()->getPointerTo());
-//  llvm::Value* r13_value = llvm_ir_builder_->CreateLoad(rsp_ptr);
+//  llvm::Value* rsp_ptr = __ CreateIntToPtr(rsp_value,
+//      __ getInt64Ty()->getPointerTo());
+//  llvm::Value* r13_value = __ CreateLoad(rsp_ptr);
 //
-//  llvm::Value* compare = llvm_ir_builder_->CreateICmp(llvm::CmpInst::ICMP_ULT,
+//  llvm::Value* compare = __ CreateICmp(llvm::CmpInst::ICMP_ULT,
 //                                                      rsp_value,
 //                                                      r13_value);
 //
@@ -1161,11 +1145,11 @@ void LLVMChunkBuilder::CallStackMap(int stackmap_id,
   llvm::Function* stackmap = llvm::Intrinsic::getDeclaration(
       module_.get(), llvm::Intrinsic::experimental_stackmap);
   std::vector<llvm::Value*> mapped_values;
-  mapped_values.push_back(llvm_ir_builder_->getInt64(stackmap_id));
+  mapped_values.push_back(__ getInt64(stackmap_id));
   int shadow_bytes = 0;
-  mapped_values.push_back(llvm_ir_builder_->getInt32(shadow_bytes));
+  mapped_values.push_back(__ getInt32(shadow_bytes));
   mapped_values.insert(mapped_values.end(), values.begin(), values.end());
-  llvm_ir_builder_->CreateCall(stackmap, mapped_values);
+  __ CreateCall(stackmap, mapped_values);
 }
 
 llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
@@ -1176,7 +1160,7 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
     intptr_value = (intptr_value << 32) | kExtFillingValue;
     extended = true;
   }
-  llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+  llvm::Value* value = __ getInt64(intptr_value);
 
   // Here we use the intptr_value (data) only to identify the entry in the map
   RelocInfo rinfo(rmode, intptr_value);
@@ -1196,11 +1180,11 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     // TODO(llvm): use/write a function for that
     // FIXME(llvm): this block was not tested
     int64_t int32_value = instr->Integer32Value();
-    llvm::Value* value = llvm_ir_builder_->getInt64(int32_value << (kSmiShift));
+    llvm::Value* value = __ getInt64(int32_value << (kSmiShift));
     instr->set_llvm_value(value);
   } else if (r.IsInteger32()) {
     int64_t int32_value = instr->Integer32Value();
-    llvm::Value* value = llvm_ir_builder_->getInt32(int32_value);
+    llvm::Value* value = __ getInt32(int32_value);
     instr->set_llvm_value(value);
   } else if (r.IsDouble()) {
     llvm::Value* value = llvm::ConstantFP::get(Types::float64,
@@ -1210,7 +1194,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     Address external_address = instr->ExternalReferenceValue().address();
     // TODO(llvm): tagged type
     // TODO(llvm): RelocInfo::EXTERNAL_REFERENCE
-    llvm::Value* value = llvm_ir_builder_->getInt64(
+    llvm::Value* value = __ getInt64(
         reinterpret_cast<uint64_t>(external_address));
     instr->set_llvm_value(value);
   } else if (r.IsTagged()) {
@@ -1219,7 +1203,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
       // TODO(llvm): use/write a function for that
       Smi* smi = Smi::cast(*object);
       intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
-      llvm::Value* value = llvm_ir_builder_->getInt64(intptr_value);
+      llvm::Value* value = __ getInt64(intptr_value);
       instr->set_llvm_value(value);
     } else { // Heap object
       // MacroAssembler::MoveHeapObject
@@ -1236,9 +1220,8 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
         auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
         llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
 
-        llvm::Value* ptr = llvm_ir_builder_->CreateIntToPtr(value,
-                                                            Types::ptr_i64);
-        llvm::Value* deref = llvm_ir_builder_->CreateLoad(ptr);
+        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
+        llvm::Value* deref = __ CreateLoad(ptr);
         instr->set_llvm_value(deref);
       } else {
         uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
@@ -1265,7 +1248,7 @@ void LLVMChunkBuilder::DoReturn(HReturn* instr) {
   DCHECK(instr->parameter_count());
   if (instr->parameter_count()->IsConstant()) {
     llvm::Value* ret_val = Use(instr->value());
-    llvm_ir_builder_->CreateRet(ret_val);
+    __ CreateRet(ret_val);
   } else {
     UNIMPLEMENTED();
   }
@@ -1290,12 +1273,12 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     llvm::Value* llvm_right = Use(right);
     if (!can_overflow) {
       if (left->representation().IsInteger32()) {
-        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, Types::i64);
+        llvm_left = __ CreateSExt(llvm_left, Types::i64);
       }
       if (right->representation().IsInteger32()) {
-        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, Types::i64);
+        llvm_right = __ CreateSExt(llvm_right, Types::i64);
       }
-      llvm::Value* Add = llvm_ir_builder_->CreateAdd(llvm_left, llvm_right, "");
+      llvm::Value* Add = __ CreateAdd(llvm_left, llvm_right, "");
       instr->set_llvm_value(Add);
     } else {
       auto type = instr->representation().IsSmi() ? Types::i64 : Types::i32;
@@ -1303,10 +1286,10 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
           llvm::Intrinsic::sadd_with_overflow, type);
 
       llvm::Value* params[] = { llvm_left, llvm_right };
-      llvm::Value* call = llvm_ir_builder_->CreateCall(intrinsic, params);
+      llvm::Value* call = __ CreateCall(intrinsic, params);
 
-      llvm::Value* sum = llvm_ir_builder_->CreateExtractValue(call, 0);
-      llvm::Value* overflow = llvm_ir_builder_->CreateExtractValue(call, 1);
+      llvm::Value* sum = __ CreateExtractValue(call, 0);
+      llvm::Value* overflow = __ CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
       DeoptimizeIf(overflow, instr->block());
       }
@@ -1315,7 +1298,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       DCHECK(instr->right()->representation().IsDouble());
       HValue* left = instr->BetterLeftOperand();
       HValue* right = instr->BetterRightOperand();
-      llvm::Value* fadd = llvm_ir_builder_->CreateFAdd(Use(left), Use(right));
+      llvm::Value* fadd = __ CreateFAdd(Use(left), Use(right));
       instr->set_llvm_value(fadd);
   } else {
     UNIMPLEMENTED();
@@ -1340,13 +1323,13 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   } else {
     flags = AllocateTargetSpace::update(flags, NEW_SPACE);
   }
-  llvm::Value* value = llvm_ir_builder_->getInt32(flags);
+  llvm::Value* value = __ getInt32(flags);
   llvm::Value* arg2 = Integer32ToSmi(value);
   args.push_back(arg2);
   args.push_back(arg1);
   args.push_back(arg1);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
-  auto alloc_casted = llvm_ir_builder_->CreatePtrToInt(alloc, Types::i64);
+  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
   if (instr->MustPrefillWithFiller()) {
     UNIMPLEMENTED();
   }
@@ -1375,21 +1358,21 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
     right_operand = right->GetInteger32Constant();
   switch (instr->op()) {
     case Token::BIT_AND: {
-      llvm::Value* And = llvm_ir_builder_->CreateAnd(Use(left), Use(right),"");
+      llvm::Value* And = __ CreateAnd(Use(left), Use(right),"");
       instr->set_llvm_value(And);
       break;
     }
     case Token::BIT_OR: {
-      llvm::Value* Or = llvm_ir_builder_->CreateOr(Use(left), Use(right),"");
+      llvm::Value* Or = __ CreateOr(Use(left), Use(right),"");
       instr->set_llvm_value(Or);
       break;
     }
     case Token::BIT_XOR: {
       if(right->IsConstant() && right_operand == int32_t(~0)) {
-        llvm::Value* Not = llvm_ir_builder_->CreateNot(Use(left), "");
+        llvm::Value* Not = __ CreateNot(Use(left), "");
         instr->set_llvm_value(Not);
       } else {
-        llvm::Value* Xor = llvm_ir_builder_->CreateXor(Use(left), Use(right), "");
+        llvm::Value* Xor = __ CreateXor(Use(left), Use(right), "");
         instr->set_llvm_value(Xor);
       }
       break;
@@ -1407,12 +1390,12 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
   llvm::Value* left = Use(instr->length());
   llvm::Value* right = Use(instr->index());
   if (instr->index()->representation().IsInteger32()) {
-     right = llvm_ir_builder_->CreateSExt(right, Types::i64);
+     right = __ CreateSExt(right, Types::i64);
   }  
   if (instr->length()->representation().IsInteger32()) {
-     left = llvm_ir_builder_->CreateSExt(right, Types::i64);
+     left = __ CreateSExt(right, Types::i64);
   }
-  llvm::Value* compare = llvm_ir_builder_->CreateICmpEQ(left, right);
+  llvm::Value* compare = __ CreateICmpEQ(left, right);
   instr->set_llvm_value(compare);
   if (FLAG_debug_code && instr->skip_check()) {
     UNIMPLEMENTED();
@@ -1429,9 +1412,9 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   HValue* value = instr->value();
   Representation r = value->representation();
   if(r.IsInteger32()) {
-    llvm::Value* zero = llvm_ir_builder_->getInt32(0);
-    llvm::Value* compare = llvm_ir_builder_->CreateICmpNE(Use(value), zero);
-    llvm::BranchInst* branch = llvm_ir_builder_->CreateCondBr(compare,
+    llvm::Value* zero = __ getInt32(0);
+    llvm::Value* compare = __ CreateICmpNE(Use(value), zero);
+    llvm::BranchInst* branch = __ CreateCondBr(compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
     instr->set_llvm_value(branch);
 //    llvm::outs() << "Adding module " << *(module_.get());
@@ -1493,8 +1476,6 @@ void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
 }
 
 void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
-  std::cerr << __FUNCTION__ << std::endl;
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   // Don't know what this is yet.
   if (instr->pass_argument_count()) UNIMPLEMENTED();
   // Code that follows relies on this assumption
@@ -1511,39 +1492,37 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   Address target_entry_ptr =
       js_function_addr + JSFunction::kCodeEntryOffset - kHeapObjectTag;
 
-  llvm::Value* js_function_val = llvm_ir_builder_->getInt64(
+  llvm::Value* js_function_val = __ getInt64(
       reinterpret_cast<uint64_t>(js_function_addr));
-  llvm::Value* js_context_ptr_val = llvm_ir_builder_->getInt64(
+  llvm::Value* js_context_ptr_val = __ getInt64(
       reinterpret_cast<uint64_t>(js_context_ptr));
-  js_context_ptr_val = llvm_ir_builder_->CreateIntToPtr(
-      js_context_ptr_val,
-      llvm::Type::getInt64PtrTy(llvm_context));
+  js_context_ptr_val = __ CreateIntToPtr(js_context_ptr_val, Types::ptr_i64);
 
   auto argument_count = instr->argument_count() + 2; // rsi, rdi
 
   // Construct the function type (signature)
   std::vector<llvm::Type*> params(argument_count, nullptr);
   for (auto i = 0; i < argument_count; i++)
-    params[i] = llvm::Type::getInt64Ty(llvm_context);
+    params[i] = Types::i64;
   bool is_var_arg = false;
   llvm::FunctionType* function_type = llvm::FunctionType::get(
-      llvm::Type::getInt64Ty(llvm_context), params, is_var_arg);
+      Types::i64, params, is_var_arg);
 
   // Get the callee's address
   // TODO(llvm): it is a pointer, not an int64
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   llvm::PointerType* ptr_to_ptr_to_function = ptr_to_function->getPointerTo();
 
-  llvm::Value* target_entry_ptr_val = llvm_ir_builder_->CreateIntToPtr(
-     llvm_ir_builder_->getInt64(reinterpret_cast<int64_t>(target_entry_ptr)),
+  llvm::Value* target_entry_ptr_val = __ CreateIntToPtr(
+     __ getInt64(reinterpret_cast<int64_t>(target_entry_ptr)),
      ptr_to_ptr_to_function);
-  llvm::Value* target_entry_val =  llvm_ir_builder_->CreateAlignedLoad(
+  llvm::Value* target_entry_val =  __ CreateAlignedLoad(
       target_entry_ptr_val, 1);
 
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   // FIXME(llvm): pointers, not int64
-  args[0] = llvm_ir_builder_->CreateAlignedLoad(js_context_ptr_val, 1);
+  args[0] = __ CreateAlignedLoad(js_context_ptr_val, 1);
   args[1] = js_function_val;
 
   DCHECK(pending_pushed_args_.length() + 2 == argument_count);
@@ -1553,7 +1532,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   }
   pending_pushed_args_.Clear();
 
-  llvm::CallInst* call = llvm_ir_builder_->CreateCall(target_entry_val, args);
+  llvm::CallInst* call = __ CreateCall(target_entry_val, args);
   call->setCallingConv(llvm::CallingConv::X86_64_V8);
   instr->set_llvm_value(call);
 }
@@ -1590,15 +1569,14 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
 
   llvm::Value* new_heap_number = AllocateHeapNumber(); // i8*
   auto store_address = FieldOperand(new_heap_number, HeapNumber::kValueOffset);
-  llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(
-      store_address, Types::ptr_tagged);
-  llvm::Value* casted_val = llvm_ir_builder_->CreateBitCast(Use(val),
-                                                            Types::tagged);
+  llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                 Types::ptr_tagged);
+  llvm::Value* casted_val = __ CreateBitCast(Use(val), Types::tagged);
   // [(i8*)new_heap_number + offset] = val;
-  llvm_ir_builder_->CreateStore(casted_val, casted_adderss);
+  __ CreateStore(casted_val, casted_adderss);
 
-  auto new_heap_number_casted = llvm_ir_builder_->CreatePtrToInt(
-      new_heap_number, Types::tagged);
+  auto new_heap_number_casted = __ CreatePtrToInt(new_heap_number,
+                                                  Types::tagged);
   instr->set_llvm_value(new_heap_number_casted); // no offset
 
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
@@ -1607,33 +1585,28 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
 // TODO(llvm): shold have second parameter.
 // In our usage Heap::RootListIndex index == Heap::kHeapNumberMapRootIndex
 llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val) {
-  LLVMContext& context = LLVMGranularity::getInstance().context();
   ExternalReference roots_array_start =
         ExternalReference::roots_array_start(isolate());
   Address target_address = roots_array_start.address();
-  auto address_val = llvm_ir_builder_->getInt64(
-      reinterpret_cast<uint64_t>(target_address));
+  auto address_val = __ getInt64(reinterpret_cast<uint64_t>(target_address));
  
-  llvm::Value* int8_ptr_2 = llvm_ir_builder_->CreateIntToPtr(
-        address_val, llvm::Type::getInt64PtrTy(context)); 
+  llvm::Value* int8_ptr_2 = __ CreateIntToPtr(address_val, Types::ptr_i64);
  
-  llvm::Value* gep = llvm_ir_builder_->CreateLoad(int8_ptr_2);
-  auto value = llvm_ir_builder_->getInt64(kRootRegisterBias);
-  llvm::Value* r13_val = llvm_ir_builder_->CreateAdd(gep, value);
+  llvm::Value* gep = __ CreateLoad(int8_ptr_2);
+  auto value = __ getInt64(kRootRegisterBias);
+  llvm::Value* r13_val = __ CreateAdd(gep, value);
   
-  auto offset = llvm_ir_builder_->getInt64((Heap::kHeapNumberMapRootIndex
-        << kPointerSizeLog2) - kRootRegisterBias);
-  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
-        r13_val, Types::ptr_i8);
-  llvm::Value* gep_2 = llvm_ir_builder_->CreateGEP(int8_ptr, offset);
+  auto offset = __ getInt64((Heap::kHeapNumberMapRootIndex << kPointerSizeLog2)
+                            - kRootRegisterBias);
+  llvm::Value* int8_ptr = __ CreateIntToPtr(r13_val, Types::ptr_i8);
+  llvm::Value* gep_2 = __ CreateGEP(int8_ptr, offset);
  
-  llvm::Value* bitcast_1 = llvm_ir_builder_->CreateBitCast(gep_2, Types::ptr_i64);
-  llvm::Value* bitcast_2 = llvm_ir_builder_->CreateBitCast(val, Types::ptr_i64);
-  llvm::Value* load_first = llvm_ir_builder_->CreateLoad(bitcast_2);
-  llvm::Value* load_second = llvm_ir_builder_->CreateLoad(bitcast_1);
+  llvm::Value* bitcast_1 = __ CreateBitCast(gep_2, Types::ptr_i64);
+  llvm::Value* bitcast_2 = __ CreateBitCast(val, Types::ptr_i64);
+  llvm::Value* load_first = __ CreateLoad(bitcast_2);
+  llvm::Value* load_second = __ CreateLoad(bitcast_1);
  
-  llvm::Value* cmp_result = llvm_ir_builder_->CreateICmpSGT(load_first,
-                                                            load_second);
+  llvm::Value* cmp_result = __ CreateICmpSGT(load_first, load_second);
  
   return cmp_result;
 }
@@ -1656,16 +1629,15 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   llvm::LoadInst* load_d = nullptr;
   llvm::Value* cond = SmiCheck(val);
   if (!val->representation().IsSmi()) {
-    llvm_ir_builder_->CreateCondBr(cond, is_smi, is_any_tagged);
-    llvm_ir_builder_->SetInsertPoint(is_any_tagged);
+    __ CreateCondBr(cond, is_smi, is_any_tagged);
+    __ SetInsertPoint(is_any_tagged);
 
     llvm::Value* cmp_first = FieldOperand(Use(val), HeapObject::kMapOffset);
     cmp_val = CompareRoot(cmp_first);
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
 
-    llvm::Value* bitcast = llvm_ir_builder_->CreateBitCast(value_addr,
-                                                           Types::ptr_float64);
-    load_d = llvm_ir_builder_->CreateLoad(bitcast);
+    llvm::Value* bitcast = __ CreateBitCast(value_addr, Types::ptr_float64);
+    load_d = __ CreateLoad(bitcast);
     // TODO(llvm): deopt
     // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
 
@@ -1683,16 +1655,15 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
       UNIMPLEMENTED();
     }
     
-    llvm_ir_builder_->CreateBr(continue_block);
+    __ CreateBr(continue_block);
   }
   
-  llvm_ir_builder_->SetInsertPoint(is_smi);
+  __ SetInsertPoint(is_smi);
   llvm::Value* int32_val = SmiToInteger32(val);
-  llvm::Value* double_val = llvm_ir_builder_->CreateSIToFP(int32_val,
-                                                           Types::float64);
-  llvm_ir_builder_->CreateBr(continue_block);
-  llvm_ir_builder_->SetInsertPoint(continue_block);
-  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(Types::float64, 2);
+  llvm::Value* double_val = __ CreateSIToFP(int32_val, Types::float64);
+  __ CreateBr(continue_block);
+  __ SetInsertPoint(continue_block);
+  llvm::PHINode* phi = __ CreatePHI(Types::float64, 2);
   phi->addIncoming(load_d, is_any_tagged);
   phi->addIncoming(double_val, is_smi);
   instr->set_llvm_value(phi);
@@ -1710,13 +1681,13 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
       context, "merge and ret", function_);
   llvm::BasicBlock* not_smi_merge = nullptr;
 
-  llvm_ir_builder_->CreateCondBr(cond, is_smi, not_smi);
+  __ CreateCondBr(cond, is_smi, not_smi);
 
-  llvm_ir_builder_->SetInsertPoint(is_smi);
+  __ SetInsertPoint(is_smi);
   llvm::Value* relult_for_smi = SmiToInteger32(val);
-  llvm_ir_builder_->CreateBr(merge_and_ret);
+  __ CreateBr(merge_and_ret);
 
-  llvm_ir_builder_->SetInsertPoint(not_smi);
+  __ SetInsertPoint(not_smi);
   llvm::Value* relult_for_not_smi = nullptr;
   bool truncating = instr->CanTruncateToInt32();
 
@@ -1731,50 +1702,47 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     llvm::BasicBlock* merge_inner = llvm::BasicBlock::Create(
         context, "inner merge", function_);
 
-    llvm_ir_builder_->CreateCondBr(cmp, truncate_heap_number, no_heap_number);
+    __ CreateCondBr(cmp, truncate_heap_number, no_heap_number);
 
-    llvm_ir_builder_->SetInsertPoint(truncate_heap_number);
+    __ SetInsertPoint(truncate_heap_number);
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
     // cast to ptr to double, fetch the double and convert to i32
-    llvm::Value* double_addr = llvm_ir_builder_->CreateBitCast(
-        value_addr, Types::ptr_float64);
-    llvm::Value* double_val = llvm_ir_builder_->CreateLoad(double_addr);
-    llvm::Value* truncate_heap_number_result = llvm_ir_builder_->CreateFPToSI(
-        double_val, Types::i32);
+    llvm::Value* double_addr = __ CreateBitCast(value_addr, Types::ptr_float64);
+    llvm::Value* double_val = __ CreateLoad(double_addr);
+    llvm::Value* truncate_heap_number_result = __ CreateFPToSI(double_val,
+                                                               Types::i32);
 
     // FIXME(llvm): add NaN check
     // cmpq(result_reg, Immediate(1)); (MacroAssembler::TruncateHeapNumberToI)
     // And implement the slow case call (SlowTruncateToI)
 
-    llvm_ir_builder_->CreateBr(merge_inner);
+    __ CreateBr(merge_inner);
 
-    llvm_ir_builder_->SetInsertPoint(no_heap_number);
-    llvm_ir_builder_->CreateUnreachable();
+    __ SetInsertPoint(no_heap_number);
+    __ CreateUnreachable();
     // FIXME(llvm): deal with oddballs
-    llvm_ir_builder_->CreateBr(merge_inner);
+    __ CreateBr(merge_inner);
 
-    llvm_ir_builder_->SetInsertPoint(merge_inner);
-    llvm::PHINode* phi_inner = llvm_ir_builder_->CreatePHI(Types::i32, 2);
-    phi_inner->addIncoming(llvm_ir_builder_->getInt32(0x0badbeef), no_heap_number); // FIXME
+    __ SetInsertPoint(merge_inner);
+    llvm::PHINode* phi_inner = __ CreatePHI(Types::i32, 2);
+    phi_inner->addIncoming(__ getInt32(0x0badbeef), no_heap_number); // FIXME
     phi_inner->addIncoming(truncate_heap_number_result, truncate_heap_number);
     relult_for_not_smi = phi_inner;
-    llvm_ir_builder_->CreateBr(merge_and_ret);
+    __ CreateBr(merge_and_ret);
     not_smi_merge = merge_inner;
   } else {
     bool negate = true;
     DeoptimizeIf(cmp, instr->block(), negate); // Deoptimizer::kNotAHeapNumber
 
     auto address = FieldOperand(Use(val), HeapNumber::kValueOffset);
-    auto double_addr = llvm_ir_builder_->CreateBitCast(address,
-                                                       Types::ptr_float64);
-    auto double_val = llvm_ir_builder_->CreateLoad(double_addr);
+    auto double_addr = __ CreateBitCast(address, Types::ptr_float64);
+    auto double_val = __ CreateLoad(double_addr);
     // Convert the double to int32; convert it back do double and
     // see it the 2 doubles are equal and neither is a NaN.
     // If not, deopt (kLostPrecision or kNaN)
-    auto int32 = llvm_ir_builder_->CreateFPToSI(double_val, Types::i32);
-    auto double_2 = llvm_ir_builder_->CreateSIToFP(int32, Types::float64);
-    auto ordered_and_equal = llvm_ir_builder_->CreateFCmpOEQ(double_val,
-                                                             double_2);
+    auto int32 = __ CreateFPToSI(double_val, Types::i32);
+    auto double_2 = __ CreateSIToFP(int32, Types::float64);
+    auto ordered_and_equal = __ CreateFCmpOEQ(double_val, double_2);
     negate = true;
     DeoptimizeIf(ordered_and_equal, instr->block(), negate);
 
@@ -1782,10 +1750,10 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     relult_for_not_smi = int32;
     not_smi_merge =  instr->block()->llvm_end_basic_block();
   }
-  llvm_ir_builder_->CreateBr(merge_and_ret);
+  __ CreateBr(merge_and_ret);
 
-  llvm_ir_builder_->SetInsertPoint(merge_and_ret);
-  llvm::PHINode* phi = llvm_ir_builder_->CreatePHI(Types::i32, 2);
+  __ SetInsertPoint(merge_and_ret);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
   phi->addIncoming(relult_for_smi, is_smi);
   phi->addIncoming(relult_for_not_smi, not_smi_merge);
   instr->set_llvm_value(phi);
@@ -1826,8 +1794,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     }
   } else if (from.IsDouble()) {
       if (to.IsInteger32()) {
-        llvm::Value* casted_int =  llvm_ir_builder_->CreateFPToSI(Use(val),
-                                                                  Types::i32);
+        llvm::Value* casted_int =  __ CreateFPToSI(Use(val), Types::i32);
         instr->set_llvm_value(casted_int);
       } else if (to.IsTagged()) {
         ChangeDoubleToTagged(val, instr);
@@ -1925,14 +1892,13 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
     if (left->representation().IsInteger32()) {
-        llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, Types::i64);
+        llvm_left = __ CreateSExt(llvm_left, Types::i64);
     }
     if (right->representation().IsInteger32()) {
-        llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, Types::i64);
+        llvm_right = __ CreateSExt(llvm_right, Types::i64);
     }
-    llvm::Value* compare = llvm_ir_builder_->CreateICmp(pred, llvm_left,
-                                                        llvm_right);
-    llvm::Value* branch = llvm_ir_builder_->CreateCondBr(compare,
+    llvm::Value* compare = __ CreateICmp(pred, llvm_left, llvm_right);
+    llvm::Value* branch = __ CreateCondBr(compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
     instr->set_llvm_value(branch);
   } else {
@@ -1958,19 +1924,18 @@ void LLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* ins
 }
 
 void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
-   LLVMContext& context = LLVMGranularity::getInstance().context();
-   auto offset = llvm_ir_builder_->getInt64(HeapObject::kMapOffset - kHeapObjectTag);
+   auto offset = __ getInt64(HeapObject::kMapOffset - kHeapObjectTag);
    Handle<Object> handle_value = instr->map().handle();
    int64_t value = reinterpret_cast<int64_t>((handle_value.location()));
-   auto address_val = llvm_ir_builder_->getInt64(value);
-   //llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(
+   auto address_val = __ getInt64(value);
+   //llvm::Value* int8_ptr = __ CreateIntToPtr(
      //    address_val, llvm::Type::getInt64PtrTy(context));
-   llvm::Value* int8_ptr_1 = llvm_ir_builder_->CreateIntToPtr(
-         Use(instr->value()), llvm::Type::getInt64PtrTy(context));
-   llvm::Value* gep = llvm_ir_builder_->CreateGEP(int8_ptr_1, offset);
-   llvm::Value* load = llvm_ir_builder_->CreateLoad(gep); 
-   llvm::Value* compare = llvm_ir_builder_->CreateICmpNE(load, address_val);
-   llvm::BranchInst* branch = llvm_ir_builder_->CreateCondBr(compare,
+   llvm::Value* int8_ptr_1 = __ CreateIntToPtr(Use(instr->value()),
+                                               Types::ptr_i64);
+   llvm::Value* gep = __ CreateGEP(int8_ptr_1, offset);
+   llvm::Value* load = __ CreateLoad(gep);
+   llvm::Value* compare = __ CreateICmpNE(load, address_val);
+   llvm::BranchInst* branch = __ CreateCondBr(compare,
          Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
    instr->set_llvm_value(branch);
   //UNIMPLEMENTED();
@@ -2002,7 +1967,7 @@ void LLVMChunkBuilder::DoDiv(HDiv* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* dividend = instr->left();
     HValue* divisor = instr->right();
-    llvm::Value* Div = llvm_ir_builder_->CreateUDiv(Use(dividend), Use(divisor),"");
+    llvm::Value* Div = __ CreateUDiv(Use(dividend), Use(divisor),"");
     instr->set_llvm_value(Div);
   } else if (instr->representation().IsDouble()) {
     DCHECK(instr->representation().IsDouble());
@@ -2010,7 +1975,7 @@ void LLVMChunkBuilder::DoDiv(HDiv* instr) {
     DCHECK(instr->right()->representation().IsDouble());
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* fDiv =  llvm_ir_builder_->CreateFDiv(Use(left), Use(right), "");
+    llvm::Value* fDiv =  __ CreateFDiv(Use(left), Use(right), "");
     instr->set_llvm_value(fDiv);
    }
   else {
@@ -2118,11 +2083,10 @@ void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
   Handle<Object> handle_value = instr->cell().handle();
   int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
   // TODO(llvm): RelocInfo::CELL Shall we?
-  auto address_val = llvm_ir_builder_->getInt64(value);
+  auto address_val = __ getInt64(value);
   auto gep = FieldOperand(address_val, 8);
-  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep,
-                                                                Types::ptr_i64);
-  llvm::Value* load_cell = llvm_ir_builder_->CreateLoad(casted_address);
+  llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
+  llvm::Value* load_cell = __ CreateLoad(casted_address);
   instr->set_llvm_value(load_cell);
   if(instr->RequiresHoleCheck()){
     UNIMPLEMENTED();
@@ -2168,27 +2132,26 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   if (key->IsConstant()) {
     uint32_t const_val = (HConstant::cast(key))->Integer32Value();
     // TODO(llvm): Refactor to use  FieldOperand()
-    auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
-          inst_offset);
-    llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), Types::ptr_i8);
-    gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, offset);
+    auto offset = __ getInt64((const_val << shift_size) + inst_offset);
+    llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                             Types::ptr_i8);
+    gep_0 = __ CreateGEP(int_ptr, offset);
   } else {
      llvm::Value* lkey = Use(key);
      if (key->representation().IsInteger32()) {
-        lkey = llvm_ir_builder_->CreateSExt(lkey, Types::i64);
+        lkey = __ CreateSExt(lkey, Types::i64);
      }
      // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
-     llvm::Value* scale = llvm_ir_builder_->getInt64(8); //FIXME: //find a way to pass by ScaleFactor
-     llvm::Value* mul = llvm_ir_builder_->CreateMul(lkey, scale);
-     auto offset = llvm_ir_builder_->getInt64(inst_offset);
-     llvm::Value* add = llvm_ir_builder_->CreateAdd(mul, offset);
-     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), Types::ptr_i8);
-     gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, add);
+     llvm::Value* scale = __ getInt64(8); //FIXME: //find a way to pass by ScaleFactor
+     llvm::Value* mul = __ CreateMul(lkey, scale);
+     auto offset = __ getInt64(inst_offset);
+     llvm::Value* add = __ CreateAdd(mul, offset);
+     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                              Types::ptr_i8);
+     gep_0 = __ CreateGEP(int_ptr, add);
    
   }
-  llvm::Value* load = llvm_ir_builder_->CreateLoad(gep_0);
+  llvm::Value* load = __ CreateLoad(gep_0);
   if (requires_hole_check) {
     if (IsFastSmiElementsKind(instr->elements_kind())) {
       UNIMPLEMENTED();
@@ -2231,11 +2194,11 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     representation = Representation::Integer32();
   }
  
-  auto offset_1 = llvm_ir_builder_->getInt64(offset);
-  llvm::Value* int8_ptr = llvm_ir_builder_->CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
-  llvm::Value* obj = llvm_ir_builder_->CreateGEP(int8_ptr, offset_1);
-  llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(obj, Types::ptr_i64);
-  llvm::Value* res = llvm_ir_builder_->CreateLoad(casted_address);
+  auto offset_1 = __ getInt64(offset);
+  llvm::Value* int8_ptr = __ CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
+  llvm::Value* obj = __ CreateGEP(int8_ptr, offset_1);
+  llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i64);
+  llvm::Value* res = __ CreateLoad(casted_address);
   instr->set_llvm_value(res);
 }
 
@@ -2275,17 +2238,17 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
       // FIXME (llvm):
       // 1) overflow check?
       // 2) see if we can refactor using SmiToInteger32() or the like
-      llvm::Value* shift = llvm_ir_builder_->CreateAShr(llvm_left, 32);
-      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(shift, llvm_right, "");
+      llvm::Value* shift = __ CreateAShr(llvm_left, 32);
+      llvm::Value* Mul = __ CreateNSWMul(shift, llvm_right, "");
       instr->set_llvm_value(Mul);
     } else {
       if (left->representation().IsInteger32()) {
-         llvm_left = llvm_ir_builder_->CreateSExt(llvm_left, Types::i64);
+         llvm_left = __ CreateSExt(llvm_left, Types::i64);
       }
       if (right->representation().IsInteger32()) {
-         llvm_right = llvm_ir_builder_->CreateSExt(llvm_right, Types::i64);
+         llvm_right = __ CreateSExt(llvm_right, Types::i64);
       }  
-      llvm::Value* Mul = llvm_ir_builder_->CreateNSWMul(llvm_left, llvm_right, "");
+      llvm::Value* Mul = __ CreateNSWMul(llvm_left, llvm_right, "");
       instr->set_llvm_value(Mul);
     }
   } else if (instr->representation().IsDouble()) {
@@ -2294,7 +2257,7 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     DCHECK(instr->right()->representation().IsDouble());
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* fMul =  llvm_ir_builder_->CreateFMul(Use(left), Use(right), "");
+    llvm::Value* fMul =  __ CreateFMul(Use(left), Use(right), "");
     instr->set_llvm_value(fMul);
    }
   else {
@@ -2324,7 +2287,7 @@ void LLVMChunkBuilder::DoSar(HSar* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* AShr = llvm_ir_builder_->CreateAShr(Use(left), Use(right),"");
+    llvm::Value* AShr = __ CreateAShr(Use(left), Use(right),"");
     instr->set_llvm_value(AShr);
   }
   else {
@@ -2346,7 +2309,7 @@ void LLVMChunkBuilder::DoShl(HShl* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* Shl = llvm_ir_builder_->CreateShl(Use(left), Use(right),"");
+    llvm::Value* Shl = __ CreateShl(Use(left), Use(right),"");
     instr->set_llvm_value(Shl);
   }
   else {
@@ -2360,7 +2323,7 @@ void LLVMChunkBuilder::DoShr(HShr* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* LShr = llvm_ir_builder_->CreateLShr(Use(left), Use(right),"");
+    llvm::Value* LShr = __ CreateLShr(Use(left), Use(right),"");
     instr->set_llvm_value(LShr);
   }
   else {
@@ -2386,10 +2349,10 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
   } else {
     Handle<Object> handle_value = instr->cell().handle();
     int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
-    auto address_val = llvm_ir_builder_->getInt64(value);
+    auto address_val = __ getInt64(value);
     auto gep = FieldOperand(address_val, 8);
-    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep, Types::ptr_i64);
-    llvm::Value* store_cell = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address);
+    llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
+    llvm::Value* store_cell = __ CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(store_cell);
   }
 }
@@ -2427,41 +2390,38 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   }
   if (key->IsConstant()) {
     uint32_t const_val = (HConstant::cast(key))->Integer32Value();
-    auto offset = llvm_ir_builder_->getInt64((const_val << shift_size) +
-          inst_offset);
-    llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), Types::ptr_i8);
-    gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, offset); 
+    auto offset = __ getInt64((const_val << shift_size) + inst_offset);
+    llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                             Types::ptr_i8);
+    gep_0 = __ CreateGEP(int_ptr, offset);
   } else {
      llvm::Value* lkey = Use(key);
      if (key->representation().IsInteger32()) {
-        lkey = llvm_ir_builder_->CreateSExt(lkey, Types::i64);
+        lkey = __ CreateSExt(lkey, Types::i64);
      }
      // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
-     llvm::Value* scale = llvm_ir_builder_->getInt64(8); //FIXME: //find a way to pass by ScaleFactor
-     llvm::Value* mul = llvm_ir_builder_->CreateMul(lkey, scale);
-     auto offset = llvm_ir_builder_->getInt64(inst_offset);
-     llvm::Value* add = llvm_ir_builder_->CreateAdd(mul, offset);
-     llvm::Value* int_ptr = llvm_ir_builder_->CreateIntToPtr(
-          Use(instr->elements()), Types::ptr_i8);
-     gep_0 = llvm_ir_builder_->CreateGEP(int_ptr, add);
+     llvm::Value* scale = __ getInt64(8); //FIXME: //find a way to pass by ScaleFactor
+     llvm::Value* mul = __ CreateMul(lkey, scale);
+     auto offset = __ getInt64(inst_offset);
+     llvm::Value* add = __ CreateAdd(mul, offset);
+     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                              Types::ptr_i8);
+     gep_0 = __ CreateGEP(int_ptr, add);
   }
  
   if(!instr->value()->IsConstant()){
-    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(gep_0,
-                                                                  Types::ptr_i64);
-    llvm::Value* Store = llvm_ir_builder_->CreateStore(Use(instr->value()), casted_address); 
+    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+    llvm::Value* Store = __ CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(Store);
   } else {
     HConstant* constant = HConstant::cast(instr->value());
-    //llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+    //llvm::Type* type = __ getInt64Ty();
     //llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
     Handle<Object> handle_value = constant->handle(isolate());
     int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
-    auto llvm_val = llvm_ir_builder_->getInt64(value);
-    llvm::Value* casted_address = llvm_ir_builder_->CreateBitCast(
-        gep_0, Types::ptr_i64);
-    llvm::Value* Store = llvm_ir_builder_->CreateStore(llvm_val, casted_address);
+    auto llvm_val = __ getInt64(value);
+    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+    llvm::Value* Store = __ CreateStore(llvm_val, casted_address);
     instr->set_llvm_value(Store);
   }
  
@@ -2514,28 +2474,27 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     HValue* hValue = instr->value();
     if (hValue->representation().IsInteger32()) {
       llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
-      llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
-                                                                    Types::ptr_i32);
-      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(hValue),
-                                                                  Types::i32);
-      llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
+      llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                     Types::ptr_i32);
+      llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i32);
+      __ CreateStore(casted_value, casted_adderss);
     } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
       llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
-      llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
-                                                                    Types::ptr_i64);
-      llvm::Value* casted_value = llvm_ir_builder_->CreateBitCast(Use(hValue),
-                                                                  Types::i64);
-      llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
+      llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                     Types::ptr_i64);
+      llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i64);
+      __ CreateStore(casted_value, casted_adderss);
     } else {
       DCHECK(hValue->IsConstant());
       HConstant* constant = HConstant::cast(instr->value());
       Handle<Object> handle_value = constant->handle(isolate()); 
       int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
-      llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
-      llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
-                                                                    Types::ptr_i64);
-      auto llvm_val = llvm_ir_builder_->getInt64(value);
-      llvm_ir_builder_->CreateStore(llvm_val, casted_adderss);
+      llvm::Value* store_address = ConstructAddress(Use(instr->object()),
+                                                    offset);
+      llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                     Types::ptr_i64);
+      auto llvm_val = __ getInt64(value);
+      __ CreateStore(llvm_val, casted_adderss);
 
     }
   }
@@ -2550,7 +2509,7 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
-//  llvm::Value* context = llvm_ir_builder_->CreateLoad(instr->context()->llvm_value(), "RSI");
+//  llvm::Value* context = __ CreateLoad(instr->context()->llvm_value(), "RSI");
   // see GetContext()!
   StringAddStub stub(isolate(),
                      instr->flags(),
@@ -2579,7 +2538,7 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* Sub = llvm_ir_builder_->CreateSub(Use(left), Use(right), "");
+    llvm::Value* Sub = __ CreateSub(Use(left), Use(right), "");
     instr->set_llvm_value(Sub);
   } else if (instr->representation().IsDouble()) {
     DCHECK(instr->representation().IsDouble());
@@ -2587,7 +2546,7 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     DCHECK(instr->right()->representation().IsDouble());
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* fSub =  llvm_ir_builder_->CreateFSub(Use(left), Use(right), "");
+    llvm::Value* fSub =  __ CreateFSub(Use(left), Use(right), "");
     instr->set_llvm_value(fSub);  
    }
   else {
@@ -2639,5 +2598,6 @@ void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
   UNIMPLEMENTED();
 }
 
-}  // namespace internal
-}  // namespace v8
+#undef __
+
+} }  // namespace v8::internal
