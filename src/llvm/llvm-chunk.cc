@@ -616,6 +616,13 @@ llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
   return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
 }
 
+llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
+    llvm::Value* offset_val = llvm_ir_builder_->getInt64(offset);
+    llvm::Value* base_casted = llvm_ir_builder_->CreateIntToPtr(
+         base, llvm_ir_builder_->getInt8PtrTy());
+    return llvm_ir_builder_->CreateGEP(base_casted, offset_val);
+}
+
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
   // FIXME(llvm): if FLAG_inline_new is set (which is the default)
   // fast inline allocation should be used
@@ -1340,10 +1347,12 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   args.push_back(arg1);
   args.push_back(arg1);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
+  llvm::Type* type = llvm_ir_builder_->getInt64Ty();
+  auto alloc_casted = llvm_ir_builder_->CreatePtrToInt(alloc, type);
   if (instr->MustPrefillWithFiller()) {
     UNIMPLEMENTED();
   }
-  instr->set_llvm_value(alloc);
+  instr->set_llvm_value(alloc_casted);
 }
 
 void LLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
@@ -2534,9 +2543,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   } else {
     HValue* hValue = instr->value();
     if (hValue->representation().IsInteger32()) {
-      auto llvm_offset = llvm_ir_builder_->getInt64(offset);
-      llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
-                                                              llvm_offset);
+      llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
       llvm::Type* type = llvm_ir_builder_->getInt32Ty();
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
@@ -2545,9 +2552,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
                                                                   type);
       llvm_ir_builder_->CreateStore(casted_value, casted_adderss);
     } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
-      auto llvm_offset = llvm_ir_builder_->getInt64(offset);
-      llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
-                                                              llvm_offset);
+      llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
       llvm::Type* type = llvm_ir_builder_->getInt64Ty();
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
@@ -2562,9 +2567,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
       Handle<Object> handle_value = constant->handle(isolate()); 
       int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
-      auto llvm_offset = llvm_ir_builder_->getInt64(offset);
-      llvm::Value* store_address = llvm_ir_builder_->CreateGEP(Use(instr->object()),
-                                                           llvm_offset);
+      llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
       llvm::Value* casted_adderss = llvm_ir_builder_->CreateBitCast(store_address,
                                                                 ptr_to_type);
       auto llvm_val = llvm_ir_builder_->getInt64(value);
@@ -2574,7 +2577,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   }
 
   if (instr->NeedsWriteBarrier()) {
-    UNIMPLEMENTED();
+    // UNIMPLEMENTED(); FIXME temporary for testing store_key
   }
 }
 

@@ -473,6 +473,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
+  llvm::Value* ConstructAddress(llvm::Value* base, int offset);
   // Allocate a heap number in new space with undefined value. Returns
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment
