@@ -437,7 +437,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
       HEnvironment* hydrogen_env, int* argument_index_accumulator,
       ZoneList<HValue*>* objects_to_materialize);
 
-  void DeoptimizeIf(llvm::Value* compare, HBasicBlock* block);
+  void DeoptimizeIf(llvm::Value* compare, HBasicBlock* block, bool negate = false);
 
   // Declare methods that deal with the individual node types.
 #define DECLARE_DO(type) void Do##type(H##type* node);

@@ -747,7 +747,8 @@ LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
       hydrogen_env, &argument_index_accumulator, &objects_to_materialize);
 }
 
-void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block) {
+void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
+                                    bool negate) {
   LLVMEnvironment* environment = AssignEnvironment();
   deopt_data_->Add(environment);
 
@@ -796,7 +797,10 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block) {
   llvm_ir_builder_->CreateUnreachable();
 
   llvm_ir_builder_->SetInsertPoint(saved_insert_point);
-  llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
+  if (!negate)
+    llvm_ir_builder_->CreateCondBr(compare, deopt_block, next_block);
+  else
+    llvm_ir_builder_->CreateCondBr(compare, next_block, deopt_block);
   llvm_ir_builder_->SetInsertPoint(next_block);
   block->set_llvm_end_basic_block(next_block);
 }
@@ -1584,6 +1588,8 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
+// TODO(llvm): shold have second parameter.
+// In our usage Heap::RootListIndex index == Heap::kHeapNumberMapRootIndex
 llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val) {
   LLVMContext& context = LLVMGranularity::getInstance().context();
   ExternalReference roots_array_start =
@@ -1682,7 +1688,10 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
 }
 
 void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
+  // TODO(llvm): create shortcuts for frequently used types
   llvm::Type* int32_type = llvm_ir_builder_->getInt32Ty();
+  llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
+  llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
   llvm::Value* cond = SmiCheck(val);
 
   LLVMContext& context = LLVMGranularity::getInstance().context();
@@ -1703,15 +1712,15 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   llvm_ir_builder_->SetInsertPoint(not_smi);
   llvm::Value* relult_for_not_smi = nullptr;
   bool truncating = instr->CanTruncateToInt32();
-  if (truncating) {
-    llvm::Value* vals_map = FieldOperand(Use(val), HeapObject::kMapOffset);
-    llvm::Value* cmp = CompareRoot(vals_map);
 
+  llvm::Value* vals_map = FieldOperand(Use(val), HeapObject::kMapOffset);
+  llvm::Value* cmp = CompareRoot(vals_map);
+
+  if (truncating) {
     llvm::BasicBlock* truncate_heap_number = llvm::BasicBlock::Create(
         context, "TruncateHeapNumberToI", function_);
     llvm::BasicBlock* no_heap_number = llvm::BasicBlock::Create(
         context, "Not a heap number", function_);
-    // TODO(llvm): probably redundant
     llvm::BasicBlock* merge_inner = llvm::BasicBlock::Create(
         context, "inner merge", function_);
 
@@ -1720,8 +1729,6 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     llvm_ir_builder_->SetInsertPoint(truncate_heap_number);
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
     // cast to ptr to double, fetch the double and convert to i32
-    llvm::Type* double_type = llvm_ir_builder_->getDoubleTy();
-    llvm::PointerType* ptr_to_double = llvm::PointerType::get(double_type, 0);
     llvm::Value* double_addr = llvm_ir_builder_->CreateBitCast(value_addr,
                                                                ptr_to_double);
     llvm::Value* double_val = llvm_ir_builder_->CreateLoad(double_addr);
@@ -1747,7 +1754,25 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     llvm_ir_builder_->CreateBr(merge_and_ret);
     not_smi_merge = merge_inner;
   } else {
-    UNIMPLEMENTED();
+    bool negate = true;
+    DeoptimizeIf(cmp, instr->block(), negate); // Deoptimizer::kNotAHeapNumber
+
+    auto address = FieldOperand(Use(val), HeapNumber::kValueOffset);
+    auto double_addr = llvm_ir_builder_->CreateBitCast(address, ptr_to_double);
+    auto double_val = llvm_ir_builder_->CreateLoad(double_addr);
+    // Convert the double to int32; convert it back do double and
+    // see it the 2 doubles are equal and neither is a NaN.
+    // If not, deopt (kLostPrecision or kNaN)
+    auto int32 = llvm_ir_builder_->CreateFPToSI(double_val, int32_type);
+    auto double_2 = llvm_ir_builder_->CreateSIToFP(int32, double_type);
+    auto ordered_and_equal = llvm_ir_builder_->CreateFCmpOEQ(double_val,
+                                                             double_2);
+    negate = true;
+    DeoptimizeIf(ordered_and_equal, instr->block(), negate);
+
+    if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) UNIMPLEMENTED();
+    relult_for_not_smi = int32;
+    not_smi_merge =  instr->block()->llvm_end_basic_block();
   }
   llvm_ir_builder_->CreateBr(merge_and_ret);
 
