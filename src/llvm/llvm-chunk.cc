@@ -1558,7 +1558,8 @@ void LLVMChunkBuilder::DoCallStub(HCallStub* instr) {
 }
 
 void LLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
-  UNIMPLEMENTED();
+  instr->ReplayEnvironment(current_block_->last_environment());
+  // There are no real uses of a captured object.
 }
 
 void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
