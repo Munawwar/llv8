@@ -68,11 +68,12 @@ bool NormalizePhisPass::runOnFunction(llvm::Function& function) {
 
   // for each BB in the function
   for (auto bb = function.begin(); bb != function.end(); ++bb) {
+    std::cerr << "Grabbed a new BB\n";
     llvm::PHINode* phi;
     // for all phi nodes in the block
     for (auto it = bb->begin(); (phi = llvm::dyn_cast<llvm::PHINode>(it));
         ++it) {
-
+      std::cerr << "Grabbed a new Phi\n";
       // FIXME(llvm): v8 doesn't like STL much
       std::set<llvm::BasicBlock*> preds(llvm::pred_begin(bb),
                                         llvm::pred_end(bb));
