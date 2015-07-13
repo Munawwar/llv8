@@ -2131,16 +2131,9 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   if (key->IsConstant()) {
     uint32_t const_val = (HConstant::cast(key))->Integer32Value();
     // TODO(llvm): Refactor to use  FieldOperand()
-    auto offset = __ getInt64((const_val << shift_size) + inst_offset);
-    llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
-                                             Types::ptr_i8);
-    gep_0 = __ CreateGEP(int_ptr, offset);
+    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset); 
   } else {
      llvm::Value* lkey = Use(key);
-     if (key->representation().IsInteger32()) {
-        lkey = __ CreateSExt(lkey, Types::i64);
-     }
-     // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
      llvm::Value* scale = __ getInt64(8); //FIXME: //find a way to pass by ScaleFactor
      llvm::Value* mul = __ CreateMul(lkey, scale);
      auto offset = __ getInt64(inst_offset);
@@ -2150,7 +2143,13 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
      gep_0 = __ CreateGEP(int_ptr, add);
    
   }
-  llvm::Value* load = __ CreateLoad(gep_0);
+  llvm::Value* casted_address = nullptr;
+  if (instr->representation().IsInteger32()) {
+    casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
+  } else {
+    casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+  }
+  llvm::Value* load = __ CreateLoad(casted_address);
   if (requires_hole_check) {
     if (IsFastSmiElementsKind(instr->elements_kind())) {
       UNIMPLEMENTED();
