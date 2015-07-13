@@ -683,7 +683,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
 llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
     llvm::Value* context, std::vector<llvm::Value*> params) {
   const Runtime::Function* function = Runtime::FunctionForId(id);
-  auto arg_count = function->nargs + 1;
+  auto arg_count = function->nargs;
 
   Address rt_target = ExternalReference(function, isolate()).address();
   // TODO(llvm): we shouldn't always save FP regs
@@ -720,7 +720,15 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
       Types::ptr_i8, pRef, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
-
+  // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
+  // It will also fix arguments offset mismatch problem in runtime functions
+  std::string argOffset = std::to_string(arg_count * 8);
+  std::string asm_string1 = "sub $$";
+  std::string asm_string2 = ", %rsp";
+  std::string final_strig = asm_string1 + argOffset+asm_string2;
+  llvm::InlineAsm* ptr_121 = llvm::InlineAsm::get(FuncTy_3, final_strig, "~{dirflag},~{fpsr},~{flags}",true);
+  llvm::CallInst* void_111 = __ CreateCall(ptr_121, "");
+  void_111->setCallingConv(llvm::CallingConv::C);
   auto llvm_nargs = __ getInt64(arg_count);
   auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
   auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
@@ -735,14 +743,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
   // It will also fix arguments offset mismatch problem in runtime functions
-  std::string argOffset = std::to_string(arg_count * 8);
-  std::string asm_string1 = "sub $$";
-  std::string asm_string2 = ", %rsp";
-  std::string final_strig = asm_string1 + argOffset+asm_string2;
-  llvm::InlineAsm* ptr_121 = llvm::InlineAsm::get(FuncTy_3, final_strig, "~{dirflag},~{fpsr},~{flags}",true);
-  llvm::CallInst* void_111 = __ CreateCall(ptr_121, "");
-  void_111->setCallingConv(llvm::CallingConv::C);
-
   // return value has type i8*
   return call_inst;
 
@@ -1320,7 +1320,6 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   llvm::Value* value = __ getInt32(flags);
   llvm::Value* arg2 = Integer32ToSmi(value);
   args.push_back(arg2);
-  args.push_back(arg1);
   args.push_back(arg1);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
   auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
