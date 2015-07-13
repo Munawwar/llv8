@@ -2198,7 +2198,8 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
   auto offset_1 = __ getInt64(offset);
   llvm::Value* int8_ptr = __ CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
   llvm::Value* obj = __ CreateGEP(int8_ptr, offset_1);
-  llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i64);
+  CHECK(instr->representation().IsInteger32());
+  llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i32);
   llvm::Value* res = __ CreateLoad(casted_address);
   instr->set_llvm_value(res);
 }
