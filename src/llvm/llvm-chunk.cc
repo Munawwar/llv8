@@ -1377,24 +1377,36 @@ void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
 }
 
 void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
+  DCHECK(instr->HasNoUses()); // if it fails, see what llvm_value is appropriate
   Representation representation = instr->length()->representation();
   DCHECK(representation.Equals(instr->index()->representation()));
   DCHECK(representation.IsSmiOrInteger32());
-  llvm::Value* left = Use(instr->length());
-  llvm::Value* right = Use(instr->index());
-  if (instr->index()->representation().IsInteger32()) {
-     right = __ CreateSExt(right, Types::i64);
-  }  
-  if (instr->length()->representation().IsInteger32()) {
-     left = __ CreateSExt(right, Types::i64);
+
+  if (instr->length()->IsConstant() && instr->index()->IsConstant()) {
+    auto length = instr->length()->GetInteger32Constant();
+    auto index = instr->index()->GetInteger32Constant();
+    // Avoid stackmap creation (happens upon DeoptimizeIf call).
+    if (index < length || (instr->allow_equality() && index == length)) {
+      instr->set_llvm_value(nullptr); // TODO(llvm): incorrect if instr has uses
+      return;
+    }
   }
-  llvm::Value* compare = __ CreateICmpEQ(left, right);
-  instr->set_llvm_value(compare);
+
+  llvm::Value* length = Use(instr->length());
+  llvm::Value* index = Use(instr->index());
+
+  // FIXME(llvm): signed comparison makes sense. Or does it?
+  auto cc = instr->allow_equality()
+      ? llvm::CmpInst::ICMP_SLE : llvm::CmpInst::ICMP_SLT;
+
+  llvm::Value* compare = __ CreateICmp(cc, index, length);
   if (FLAG_debug_code && instr->skip_check()) {
     UNIMPLEMENTED();
   } else {
-    DeoptimizeIf(Use(instr), instr->block());
+    bool negate = true;
+    DeoptimizeIf(compare, instr->block(), negate); // kOutOfBounds
   }
+  instr->set_llvm_value(compare);
 }
 
 void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexInformation* instr) {
@@ -1410,7 +1422,6 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
     llvm::BranchInst* branch = __ CreateCondBr(compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
     instr->set_llvm_value(branch);
-//    llvm::outs() << "Adding module " << *(module_.get());
   } else {
     UNIMPLEMENTED();
   }
