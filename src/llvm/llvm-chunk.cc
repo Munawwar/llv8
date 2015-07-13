@@ -1272,12 +1272,6 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
     if (!can_overflow) {
-      if (left->representation().IsInteger32()) {
-        llvm_left = __ CreateSExt(llvm_left, Types::i64);
-      }
-      if (right->representation().IsInteger32()) {
-        llvm_right = __ CreateSExt(llvm_right, Types::i64);
-      }
       llvm::Value* Add = __ CreateAdd(llvm_left, llvm_right, "");
       instr->set_llvm_value(Add);
     } else {
@@ -1892,12 +1886,6 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
   } else if (r.IsInteger32()) {
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
-    if (left->representation().IsInteger32()) {
-        llvm_left = __ CreateSExt(llvm_left, Types::i64);
-    }
-    if (right->representation().IsInteger32()) {
-        llvm_right = __ CreateSExt(llvm_right, Types::i64);
-    }
     llvm::Value* compare = __ CreateICmp(pred, llvm_left, llvm_right);
     llvm::Value* branch = __ CreateCondBr(compare,
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
@@ -2198,10 +2186,16 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
   auto offset_1 = __ getInt64(offset);
   llvm::Value* int8_ptr = __ CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
   llvm::Value* obj = __ CreateGEP(int8_ptr, offset_1);
-  CHECK(instr->representation().IsInteger32());
-  llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i32);
-  llvm::Value* res = __ CreateLoad(casted_address);
-  instr->set_llvm_value(res);
+  if (instr->representation().IsInteger32()) {
+    llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i32);
+    llvm::Value* res = __ CreateLoad(casted_address);
+    instr->set_llvm_value(res);
+  } else {
+    llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i64);
+    llvm::Value* res = __ CreateLoad(casted_address);
+    instr->set_llvm_value(res);
+
+  }
 }
 
 void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
@@ -2244,12 +2238,6 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
       llvm::Value* Mul = __ CreateNSWMul(shift, llvm_right, "");
       instr->set_llvm_value(Mul);
     } else {
-      if (left->representation().IsInteger32()) {
-         llvm_left = __ CreateSExt(llvm_left, Types::i64);
-      }
-      if (right->representation().IsInteger32()) {
-         llvm_right = __ CreateSExt(llvm_right, Types::i64);
-      }  
       llvm::Value* Mul = __ CreateNSWMul(llvm_left, llvm_right, "");
       instr->set_llvm_value(Mul);
     }
