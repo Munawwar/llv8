@@ -146,7 +146,7 @@ bool StackMaps::Record::parse(StackMaps::ParseContext& context) {
 
   unsigned length = context.view->read<uint16_t>(true);
   while (length--)
-    locations.push_back(std::move(readObject<Location>(context)));
+    locations.push_back(readObject<Location>(context));
 
   if (context.version >= 1)
     context.view->read<uint16_t>(true); // padding
