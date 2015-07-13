@@ -4537,6 +4537,11 @@ bool HGraph::Optimize(BailoutReason* bailout_reason) {
   if (FLAG_dead_code_elimination) Run<HDeadCodeEliminationPhase>();
   if (FLAG_use_escape_analysis) Run<HEscapeAnalysisPhase>();
 
+  // The stages above might have produced redundant phis
+  // which we do not tolerate in llv8.
+  Run<HRedundantPhiEliminationPhase>();
+
+
   if (FLAG_load_elimination) Run<HLoadEliminationPhase>();
 
   CollectPhis();
