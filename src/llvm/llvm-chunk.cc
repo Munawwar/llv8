@@ -2068,7 +2068,16 @@ void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* ins
 }
 
 void LLVMChunkBuilder::DoInnerAllocatedObject(HInnerAllocatedObject* instr) {
-  UNIMPLEMENTED();
+  if(instr->offset()->IsConstant()) {
+    uint32_t offset = (HConstant::cast(instr->offset()))->Integer32Value();
+    llvm::Value* gep = ConstructAddress(Use(instr->base_object()), offset);
+    auto result = __ CreatePtrToInt(gep, Types::i64);
+    instr->set_llvm_value(result);
+    //UNIMPLEMENTED();
+  } else {
+    UNIMPLEMENTED();
+  }
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoInstanceOf(HInstanceOf* instr) {
@@ -2143,10 +2152,52 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
     UNIMPLEMENTED();
   } else if (instr->representation().IsDouble()) {
     //DoLoadKeyedFixedDoubleArray(instr);
-    UNIMPLEMENTED();
+    DoLoadKeyedFixedDoubleArray(instr);
   } else {
     DoLoadKeyedFixedArray(instr);
   }
+}
+
+void LLVMChunkBuilder::DoLoadKeyedFixedDoubleArray(HLoadKeyed* instr) {
+  HValue* key = instr->key();
+  int shift_size = ElementsKindToShiftSize(FAST_DOUBLE_ELEMENTS);
+  uint32_t inst_offset = instr->base_offset();
+  llvm::Value* gep_0 = nullptr;
+  llvm::Value* casted_address = nullptr;
+  if (kPointerSize == kInt32Size && !key->IsConstant() &&
+      instr->IsDehoisted()) {
+    UNIMPLEMENTED();
+  }
+  if (instr->RequiresHoleCheck()) {
+    UNIMPLEMENTED();
+  }
+  if (key->IsConstant()) {
+    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
+  } else {
+     llvm::Value* lkey = Use(key);
+     llvm::Value* scale = nullptr;
+     llvm::Value* offset = nullptr;
+     if (key->representation().IsInteger32()) {
+       scale = __ getInt32(8);
+       offset = __ getInt32(inst_offset);
+     } else {
+       scale = __ getInt64(8);
+       offset = __ getInt64(inst_offset);
+     }
+     llvm::Value* mul = __ CreateMul(lkey, scale);
+     llvm::Value* add = __ CreateAdd(mul, offset);
+     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                              Types::ptr_i8);
+     gep_0 = __ CreateGEP(int_ptr, add);
+  }
+  if (instr->representation().IsInteger32()) {
+    casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
+  } else {
+    casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+  }
+  llvm::Value* load = __ CreateLoad(casted_address);
+  instr->set_llvm_value(load);
 }
 
 void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
@@ -2409,10 +2460,59 @@ void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
     //DoStoreKeyedExternalArray(instr);
     UNIMPLEMENTED();
   } else if (instr->value()->representation().IsDouble()) {
-    //DoStoreKeyedFixedDoubleArray(instr);
-    UNIMPLEMENTED();
+    DoStoreKeyedFixedDoubleArray(instr);
+    //UNIMPLEMENTED();
   } else {
     DoStoreKeyedFixedArray(instr);
+  }
+}
+
+void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
+  HValue* key = instr->key();
+  int shift_size = ElementsKindToShiftSize(FAST_DOUBLE_ELEMENTS);
+  uint32_t inst_offset = instr->base_offset();
+  llvm::Value* gep_0 = nullptr;
+  if (kPointerSize == kInt32Size && !key->IsConstant()
+      && instr->IsDehoisted()) {
+    UNIMPLEMENTED();
+  }
+  if (instr->NeedsCanonicalization()) {
+    UNIMPLEMENTED();
+  }
+  if (key->IsConstant()) {
+    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+    auto offset = __ getInt64((const_val << shift_size) + inst_offset);
+    llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                             Types::ptr_i8);
+    gep_0 = __ CreateGEP(int_ptr, offset);
+  } else {
+     llvm::Value* lkey = Use(key);
+     if (key->representation().IsInteger32()) {
+        lkey = __ CreateSExt(lkey, Types::i64);
+     }
+     // ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
+     llvm::Value* scale = __ getInt64(8); //FIXME: //find a way to pass by ScaleFactor
+     llvm::Value* mul = __ CreateMul(lkey, scale);
+     auto offset = __ getInt64(inst_offset);
+     llvm::Value* add = __ CreateAdd(mul, offset);
+     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                              Types::ptr_i8);
+     gep_0 = __ CreateGEP(int_ptr, add);
+  }
+  if(!instr->value()->IsConstant()){
+    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+    llvm::Value* Store = __ CreateStore(Use(instr->value()), casted_address);
+    instr->set_llvm_value(Store);
+  } else {
+    HConstant* constant = HConstant::cast(instr->value());
+    //llvm::Type* type = __ getInt64Ty();
+    //llvm::PointerType* ptr_to_type = llvm::PointerType::get(type, 0);
+    Handle<Object> handle_value = constant->handle(isolate());
+    int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
+    auto llvm_val = __ getInt64(value);
+    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+    llvm::Value* Store = __ CreateStore(llvm_val, casted_address);
+    instr->set_llvm_value(Store);
   }
 }
 
