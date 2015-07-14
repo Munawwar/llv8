@@ -2439,9 +2439,9 @@ LInstruction* LChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   } else {
     val = UseRegister(instr->value());
   }
-
   // We only need a scratch register if we have a write barrier or we
   // have a store into the properties array (not in-object-property).
+
   LOperand* temp = (!is_in_object || needs_write_barrier ||
       needs_write_barrier_for_map) ? TempRegister() : NULL;
 

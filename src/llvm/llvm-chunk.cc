@@ -2691,16 +2691,28 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     } else {
       DCHECK(hValue->IsConstant());
       HConstant* constant = HConstant::cast(instr->value());
-      Handle<Object> handle_value = constant->handle(isolate()); 
-      int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
+      Handle<Object> handle_value = constant->handle(isolate());
       llvm::Value* store_address = ConstructAddress(Use(instr->object()),
                                                     offset);
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
                                                      Types::ptr_i64);
-      auto llvm_val = __ getInt64(value);
-      auto intptr_value = reinterpret_cast<uint64_t>(handle_value.location());
-      RecordRelocInfo(intptr_value, RelocInfo::EMBEDDED_OBJECT);
-      __ CreateStore(llvm_val, casted_adderss);
+      AllowDeferredHandleDereference using_raw_address;
+      AllowHeapAllocation allow_allocation;
+      AllowHandleAllocation allow_handles;
+      uint64_t value = reinterpret_cast<uint64_t>((handle_value.location()));
+      if (isolate()->heap()->InNewSpace(*handle_value)) {
+        Handle<Cell> new_cell = isolate()->factory()->NewCell(handle_value);
+        DCHECK(new_cell->IsHeapObject());
+        DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
+        auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
+        llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
+        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
+        llvm::Value* deref = __ CreateLoad(ptr);
+        __ CreateStore(deref, casted_adderss); 
+      } else {
+        auto llvm_val =  RecordRelocInfo(value, RelocInfo::EMBEDDED_OBJECT);
+        __ CreateStore(llvm_val, casted_adderss);
+      }
 
     }
   }
