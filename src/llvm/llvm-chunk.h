@@ -511,7 +511,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment
   llvm::Value* AllocateHeapNumber();
-  llvm::Value* CallRuntime(Runtime::FunctionId id);
+  llvm::Value* CallRuntime(const Runtime::Function*);
+  llvm::Value* CallRuntimeViaId(Runtime::FunctionId id);
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
   llvm::Value* CompareRoot(llvm::Value* val);

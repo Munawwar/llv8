@@ -456,6 +456,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   chunk()->set_deopt_data(std::move(deopt_data_));
   chunk()->set_reloc_data(reloc_data_);
   status_ = DONE;
+  CHECK(pending_pushed_args_.is_empty());
   return *this;
 }
 
@@ -633,13 +634,16 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
   CHECK(!FLAG_inline_new);
 
   // return an i8*
-  llvm::Value* allocated = CallRuntime(Runtime::kAllocateHeapNumber);
+  llvm::Value* allocated = CallRuntimeViaId(Runtime::kAllocateHeapNumber);
   // RecordSafepointWithRegisters...
   return allocated;
 }
 
-llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
-  const Runtime::Function* function = Runtime::FunctionForId(id);
+llvm::Value* LLVMChunkBuilder::CallRuntimeViaId(Runtime::FunctionId id) {
+  return CallRuntime(Runtime::FunctionForId(id));
+}
+
+llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   auto arg_count = function->nargs;
   // if (arg_count != 0) UNIMPLEMENTED();
 
@@ -662,19 +666,46 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(Runtime::FunctionId id) {
 
   llvm::Value* target_address = __ getInt64(
       reinterpret_cast<uint64_t>(code->instruction_start()));
+
+  std::vector<llvm::Type*> param_types(arg_count + 3, nullptr);
+  // First 3 types are Types::i64, Types::ptr_i8, Types::i64. The rest is tagged
+  for (auto i = 0; i < arg_count + 3; i++)
+    param_types[i] = Types::i64;
+  param_types[1] = Types::ptr_i8; // Do not change order.
   bool is_var_arg = false;
-  llvm::Type* param_types[] = { Types::i64, Types::ptr_i8, Types::i64 };
+
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       Types::ptr_i8, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
 
+  // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
+  // It will also fix arguments offset mismatch problem in runtime functions
+  std::string arg_offset = std::to_string(4 * kPointerSize);
+  std::string asm_string1 = "sub $$";
+  std::string asm_string2 = ", %rsp";
+  std::string final_strig = asm_string1 + arg_offset + asm_string2;
+  llvm::FunctionType* inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(),
+                                                               false);
+  llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
+      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
+  __ CreateCall(inline_asm, "");
+
   auto llvm_nargs = __ getInt64(arg_count);
   auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
   auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
   auto context = GetContext();
-  llvm::CallInst* call_inst = __ CreateCall3(
-      casted, llvm_nargs, llvm_rt_target, context);
+  std::vector<llvm::Value*> args(arg_count + 3, nullptr);
+  args[0] = llvm_nargs;
+  args[1] = llvm_rt_target;
+  args[2] = context;
+
+  for (int i = 0; i < pending_pushed_args_.length(); i++) {
+    args[arg_count + 3 - 1 - i] = pending_pushed_args_[i];
+  }
+  pending_pushed_args_.Clear();
+
+  llvm::CallInst* call_inst = __ CreateCall(casted, args);
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
   // return value has type i8*
   return call_inst;
@@ -874,8 +905,8 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
-//  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
-//  LLVMGranularity::getInstance().OptimizeModule(module_.get());
+  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
+  LLVMGranularity::getInstance().OptimizeModule(module_.get());
 #ifdef DEBUG
   std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
   llvm::errs() << *(module_.get());
@@ -1198,6 +1229,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
         reinterpret_cast<uint64_t>(external_address));
     instr->set_llvm_value(value);
   } else if (r.IsTagged()) {
+    AllowHandleAllocation allow_handle_allocation;
     Handle<Object> object = instr->handle(isolate());
     if (object->IsSmi()) {
       // TODO(llvm): use/write a function for that
@@ -1554,7 +1586,12 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
 }
 
 void LLVMChunkBuilder::DoCallRuntime(HCallRuntime* instr) {
-  UNIMPLEMENTED();
+  // FIXME(llvm): use instr->save_doubles()
+  llvm::Value* val = CallRuntime(instr->function());
+  llvm::Value* tagged_val = __ CreateBitOrPointerCast(val, Types::tagged);
+  instr->set_llvm_value(tagged_val);
+  // MarkAsCall
+  // RecordSafepointWithLazyDeopt
 }
 
 void LLVMChunkBuilder::DoCallStub(HCallStub* instr) {
