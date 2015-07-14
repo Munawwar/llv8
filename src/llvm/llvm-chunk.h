@@ -474,7 +474,10 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
       HEnvironment* hydrogen_env, int* argument_index_accumulator,
       ZoneList<HValue*>* objects_to_materialize);
 
-  void DeoptimizeIf(llvm::Value* compare, HBasicBlock* block, bool negate = false);
+  void DeoptimizeIf(llvm::Value* compare,
+                    HBasicBlock* block,
+                    bool negate = false,
+                    llvm::BasicBlock* next_block = nullptr);
 
   // Declare methods that deal with the individual node types.
 #define DECLARE_DO(type) void Do##type(H##type* node);
@@ -507,6 +510,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
                            std::vector<llvm::Value*>& params);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
+  llvm::Value* Compare(llvm::Value* lhs, Handle<Object> rhs);
+  llvm::Value* CompareMap(llvm::Value* object, Handle<Map> map);
   // Allocate a heap number in new space with undefined value. Returns
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment

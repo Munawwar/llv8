@@ -626,6 +626,23 @@ llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
     return __ CreateGEP(base_casted, offset_val);
 }
 
+llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
+  AllowDeferredHandleDereference smi_check;
+  if (rhs->IsSmi()) {
+    UNIMPLEMENTED();
+//    Cmp(dst, Smi::cast(*rhs));
+  } else {
+    UNIMPLEMENTED();
+//    MoveHeapObject(kScratchRegister, source);
+//    cmpp(dst, kScratchRegister);
+  }
+  return nullptr;
+}
+
+llvm::Value* LLVMChunkBuilder::CompareMap(llvm::Value* object, Handle<Map> map) {
+  return Compare(FieldOperand(object, HeapObject::kMapOffset), map);
+}
+
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
   // FIXME(llvm): if FLAG_inline_new is set (which is the default)
   // fast inline allocation should be used
@@ -793,7 +810,7 @@ LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
 }
 
 void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
-                                    bool negate) {
+                                    bool negate, llvm::BasicBlock* next_block) {
   LLVMEnvironment* environment = AssignEnvironment();
   deopt_data_->Add(environment);
 
@@ -819,8 +836,8 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
 
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
-  llvm::BasicBlock* next_block = llvm::BasicBlock::Create(llvm_context,
-      "BlockContinue", function_);
+  if (!next_block)
+    next_block = llvm::BasicBlock::Create(llvm_context, "BlockCont", function_);
   llvm::BasicBlock* deopt_block = llvm::BasicBlock::Create(
       LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
   __ SetInsertPoint(deopt_block);
@@ -1245,6 +1262,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
       AllowHandleAllocation allow_handles;
       DCHECK(object->IsHeapObject());
       if (isolate()->heap()->InNewSpace(*object)) {
+        // TODO(llvm): refactor (Move / MoveHeapObject)
         Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
         DCHECK(new_cell->IsHeapObject());
         DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
@@ -1898,7 +1916,37 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
     }
     return;
   }
-  UNIMPLEMENTED();
+  DCHECK(instr->HasNoUses());
+  llvm::Value* val = Use(instr->value());
+  LLVMContext& context = LLVMGranularity::getInstance().context();
+  llvm::BasicBlock* success = llvm::BasicBlock::Create(
+      context, "CheckMaps success", function_);
+  std::vector<llvm::BasicBlock*> check_blocks;
+  const UniqueSet<Map>* maps = instr->maps();
+  for (int i = 0; i < maps->size(); i++) {
+    check_blocks.push_back(
+        llvm::BasicBlock::Create(context, "CheckMap", function_));
+  }
+  for (int i = 0; i < maps->size() - 1; i++) {
+    Handle<Map> map = maps->at(i).handle();
+    __ SetInsertPoint(check_blocks[i]);
+    llvm::Value* compare = CompareMap(val, map);
+    __ CreateCondBr(compare, success, check_blocks[i + 1]);
+  }
+  if (instr->HasMigrationTarget()) {
+    // Call deferred.
+    UNIMPLEMENTED();
+  } else {
+    llvm::Value* compare = CompareMap(val, maps->at(maps->size() - 1).handle());
+    bool deopt_on_not_equal = true;
+    // kWrongMap
+    DeoptimizeIf(compare, instr->block(), deopt_on_not_equal, success);
+  }
+  if (instr->HasMigrationTarget()) {
+    //    info()->MarkAsDeferredCalling();
+    //    result = AssignPointerMap(result);
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoCheckMapValue(HCheckMapValue* instr) {
