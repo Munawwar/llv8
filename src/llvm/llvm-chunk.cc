@@ -1644,7 +1644,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
 
 // TODO(llvm): shold have second parameter.
 // In our usage Heap::RootListIndex index == Heap::kHeapNumberMapRootIndex
-llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val) {
+llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, Heap::RootListIndex index) {
   ExternalReference roots_array_start =
         ExternalReference::roots_array_start(isolate());
   Address target_address = roots_array_start.address();
@@ -1656,7 +1656,7 @@ llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val) {
   auto value = __ getInt64(kRootRegisterBias);
   llvm::Value* r13_val = __ CreateAdd(gep, value);
   
-  auto offset = __ getInt64((Heap::kHeapNumberMapRootIndex << kPointerSizeLog2)
+  auto offset = __ getInt64((index << kPointerSizeLog2)
                             - kRootRegisterBias);
   llvm::Value* int8_ptr = __ CreateIntToPtr(r13_val, Types::ptr_i8);
   llvm::Value* gep_2 = __ CreateGEP(int8_ptr, offset);
@@ -1693,7 +1693,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     __ SetInsertPoint(is_any_tagged);
 
     llvm::Value* cmp_first = FieldOperand(Use(val), HeapObject::kMapOffset);
-    cmp_val = CompareRoot(cmp_first);
+    cmp_val = CompareRoot(cmp_first, Heap::kHeapNumberMapRootIndex);
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
 
     llvm::Value* bitcast = __ CreateBitCast(value_addr, Types::ptr_float64);
@@ -1752,7 +1752,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   bool truncating = instr->CanTruncateToInt32();
 
   llvm::Value* vals_map = FieldOperand(Use(val), HeapObject::kMapOffset);
-  llvm::Value* cmp = CompareRoot(vals_map);
+  llvm::Value* cmp = CompareRoot(vals_map, Heap::kHeapNumberMapRootIndex);
 
   if (truncating) {
     llvm::BasicBlock* truncate_heap_number = llvm::BasicBlock::Create(
@@ -2491,7 +2491,16 @@ void LLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
 
 void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
   if (instr->RequiresHoleCheck()) {
-    UNIMPLEMENTED();
+    Handle<Cell> instr_cell = instr->cell().handle();
+    auto ptr_value = reinterpret_cast<uint64_t>(*(instr_cell.location()));
+    auto address_val = __ getInt64(ptr_value);
+    auto gep = FieldOperand(address_val, 8);
+    llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
+    llvm::Value* deopt_val = CompareRoot(casted_address, Heap::kTheHoleValueRootIndex);
+    DeoptimizeIf(deopt_val, instr->block(), true);
+    llvm::Value* store_cell = __ CreateStore(Use(instr->value()), casted_address);
+    instr->set_llvm_value(store_cell);    
+    //UNIMPLEMENTED();
   } else {
     Handle<Object> handle_value = instr->cell().handle();
     int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
