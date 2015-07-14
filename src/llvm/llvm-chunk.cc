@@ -874,8 +874,8 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
-  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
-  LLVMGranularity::getInstance().OptimizeModule(module_.get());
+//  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
+//  LLVMGranularity::getInstance().OptimizeModule(module_.get());
 #ifdef DEBUG
   std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
   llvm::errs() << *(module_.get());
@@ -2130,17 +2130,24 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   }
   if (key->IsConstant()) {
     uint32_t const_val = (HConstant::cast(key))->Integer32Value();
-    // TODO(llvm): Refactor to use  FieldOperand()
     gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset); 
   } else {
      llvm::Value* lkey = Use(key);
-     llvm::Value* scale = __ getInt64(8); //FIXME: //find a way to pass by ScaleFactor
+     llvm::Value* scale = nullptr;
+     llvm::Value* offset = nullptr;
+     if (key->representation().IsInteger32()) {
+       scale = __ getInt32(8);
+       offset = __ getInt32(inst_offset);
+     } else {
+       scale = __ getInt64(8);
+       offset = __ getInt64(inst_offset);
+     }
      llvm::Value* mul = __ CreateMul(lkey, scale);
-     auto offset = __ getInt64(inst_offset);
      llvm::Value* add = __ CreateAdd(mul, offset);
      llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
                                               Types::ptr_i8);
-     gep_0 = __ CreateGEP(int_ptr, add);
+     gep_0 = __ CreateGEP(int_ptr, add); 
+     
    
   }
   llvm::Value* casted_address = nullptr;
@@ -2493,6 +2500,8 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
                                                      Types::ptr_i64);
       auto llvm_val = __ getInt64(value);
+      auto intptr_value = reinterpret_cast<uint64_t>(handle_value.location());
+      RecordRelocInfo(intptr_value, RelocInfo::EMBEDDED_OBJECT);
       __ CreateStore(llvm_val, casted_adderss);
 
     }
