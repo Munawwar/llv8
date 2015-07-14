@@ -698,7 +698,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
 
   // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
   // It will also fix arguments offset mismatch problem in runtime functions
-  std::string arg_offset = std::to_string(4 * kPointerSize);
+  std::string arg_offset = std::to_string(arg_count * kPointerSize);
   std::string asm_string1 = "sub $$";
   std::string asm_string2 = ", %rsp";
   std::string final_strig = asm_string1 + arg_offset + asm_string2;
