@@ -626,6 +626,41 @@ llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
     return __ CreateGEP(base_casted, offset_val);
 }
 
+llvm::Value* LLVMChunkBuilder::MoveConstHandle(Handle<Object> object) {
+    if (object->IsSmi()) {
+      // TODO(llvm): use/write a function for that
+      Smi* smi = Smi::cast(*object);
+      intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
+      llvm::Value* value = __ getInt64(intptr_value);
+      return value;
+    } else { // Heap object
+      // MacroAssembler::MoveHeapObject
+      // TODO(llvm): is allowing all these things for a block here OK?
+      AllowDeferredHandleDereference using_raw_address;
+      AllowHeapAllocation allow_allocation;
+      AllowHandleAllocation allow_handles;
+      DCHECK(object->IsHeapObject());
+      if (isolate()->heap()->InNewSpace(*object)) {
+        // TODO(llvm): refactor (Move / MoveHeapObject)
+        Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
+        DCHECK(new_cell->IsHeapObject());
+        DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
+
+        auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
+        llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
+
+        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
+        return  __ CreateLoad(ptr);
+      } else {
+        uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
+        llvm::Value* value = RecordRelocInfo(intptr_value,
+                                             RelocInfo::EMBEDDED_OBJECT);
+        return value;
+      }
+    }
+
+}
+
 llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
   AllowDeferredHandleDereference smi_check;
   if (rhs->IsSmi()) {
@@ -1248,38 +1283,8 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
   } else if (r.IsTagged()) {
     AllowHandleAllocation allow_handle_allocation;
     Handle<Object> object = instr->handle(isolate());
-    if (object->IsSmi()) {
-      // TODO(llvm): use/write a function for that
-      Smi* smi = Smi::cast(*object);
-      intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
-      llvm::Value* value = __ getInt64(intptr_value);
-      instr->set_llvm_value(value);
-    } else { // Heap object
-      // MacroAssembler::MoveHeapObject
-      // TODO(llvm): is allowing all these things for a block here OK?
-      AllowDeferredHandleDereference using_raw_address;
-      AllowHeapAllocation allow_allocation;
-      AllowHandleAllocation allow_handles;
-      DCHECK(object->IsHeapObject());
-      if (isolate()->heap()->InNewSpace(*object)) {
-        // TODO(llvm): refactor (Move / MoveHeapObject)
-        Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
-        DCHECK(new_cell->IsHeapObject());
-        DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
-
-        auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
-        llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
-
-        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
-        llvm::Value* deref = __ CreateLoad(ptr);
-        instr->set_llvm_value(deref);
-      } else {
-        uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
-        llvm::Value* value = RecordRelocInfo(intptr_value,
-                                             RelocInfo::EMBEDDED_OBJECT);
-        instr->set_llvm_value(value);
-      }
-    }
+    auto value = MoveConstHandle(object);
+    instr->set_llvm_value(value);
   } else {
     UNREACHABLE();
   }
@@ -2696,23 +2701,8 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
                                                     offset);
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
                                                      Types::ptr_i64);
-      AllowDeferredHandleDereference using_raw_address;
-      AllowHeapAllocation allow_allocation;
-      AllowHandleAllocation allow_handles;
-      uint64_t value = reinterpret_cast<uint64_t>((handle_value.location()));
-      if (isolate()->heap()->InNewSpace(*handle_value)) {
-        Handle<Cell> new_cell = isolate()->factory()->NewCell(handle_value);
-        DCHECK(new_cell->IsHeapObject());
-        DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
-        auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
-        llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
-        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
-        llvm::Value* deref = __ CreateLoad(ptr);
-        __ CreateStore(deref, casted_adderss); 
-      } else {
-        auto llvm_val =  RecordRelocInfo(value, RelocInfo::EMBEDDED_OBJECT);
-        __ CreateStore(llvm_val, casted_adderss);
-      }
+      auto llvm_val = MoveConstHandle(handle_value);
+      __ CreateStore(llvm_val, casted_adderss);
 
     }
   }
