@@ -1462,19 +1462,134 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
   instr->set_llvm_value(compare);
 }
 
-void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(HBoundsCheckBaseIndexInformation* instr) {
+void LLVMChunkBuilder::DoBoundsCheckBaseIndexInformation(
+    HBoundsCheckBaseIndexInformation* instr) {
   UNIMPLEMENTED();
+}
+
+void LLVMChunkBuilder::BranchTagged(HBranch* instr,
+                                    ToBooleanStub::Types expected,
+                                    llvm::BasicBlock* true_target,
+                                    llvm::BasicBlock* false_target) {
+  llvm::Value* value = Use(instr->value());
+  LLVMContext& context = LLVMGranularity::getInstance().context();
+  llvm::BasicBlock* merge_block = llvm::BasicBlock::Create(
+      context, "merge block", function_);
+
+  if (expected.IsEmpty()) expected = ToBooleanStub::Types::Generic();
+
+  if (expected.Contains(ToBooleanStub::UNDEFINED)) {
+    // undefined -> false.
+    auto is_undefined = CompareRoot(value, Heap::kUndefinedValueRootIndex);
+    __ CreateCondBr(is_undefined, false_target, merge_block);
+  }
+  if (expected.Contains(ToBooleanStub::BOOLEAN)) {
+    // true -> true.
+    auto is_true = CompareRoot(value, Heap::kTrueValueRootIndex);
+    __ CreateCondBr(is_true, true_target, merge_block);
+    // false -> false.
+    auto is_false = CompareRoot(value, Heap::kFalseValueRootIndex);
+    __ CreateCondBr(is_false, false_target, merge_block);
+  }
+  if (expected.Contains(ToBooleanStub::NULL_TYPE)) {
+    // 'null' -> false.
+    auto is_null = CompareRoot(value, Heap::kNullValueRootIndex);
+    __ CreateCondBr(is_null, false_target, merge_block);
+  }
+  if (expected.Contains(ToBooleanStub::SMI)) {
+    UNIMPLEMENTED();
+    // Smis: 0 -> false, all other -> true.
+//    __ Cmp(reg, Smi::FromInt(0));
+//    __ j(equal, instr->FalseLabel(chunk()));
+//    __ JumpIfSmi(reg, instr->TrueLabel(chunk()));
+  } else if (expected.NeedsMap()) {
+    UNIMPLEMENTED();
+    // If we need a map later and have a Smi -> deopt.
+//    __ testb(reg, Immediate(kSmiTagMask));
+//    DeoptimizeIf(zero, instr, Deoptimizer::kSmi);
+  }
+
+  if (expected.NeedsMap()) {
+    UNIMPLEMENTED();
+//    __ movp(map, FieldOperand(reg, HeapObject::kMapOffset));
+//
+//    if (expected.CanBeUndetectable()) {
+//      // Undetectable -> false.
+//      __ testb(FieldOperand(map, Map::kBitFieldOffset),
+//               Immediate(1 << Map::kIsUndetectable));
+//      __ j(not_zero, instr->FalseLabel(chunk()));
+//    }
+  }
+
+  if (expected.Contains(ToBooleanStub::SPEC_OBJECT)) {
+    UNIMPLEMENTED();
+//    // spec object -> true.
+//    __ CmpInstanceType(map, FIRST_SPEC_OBJECT_TYPE);
+//    __ j(above_equal, instr->TrueLabel(chunk()));
+  }
+
+  if (expected.Contains(ToBooleanStub::STRING)) {
+    UNIMPLEMENTED();
+    // String value -> false iff empty.
+//    Label not_string;
+//    __ CmpInstanceType(map, FIRST_NONSTRING_TYPE);
+//    __ j(above_equal, &not_string, Label::kNear);
+//    __ cmpp(FieldOperand(reg, String::kLengthOffset), Immediate(0));
+//    __ j(not_zero, instr->TrueLabel(chunk()));
+//    __ jmp(instr->FalseLabel(chunk()));
+//    __ bind(&not_string);
+  }
+
+  if (expected.Contains(ToBooleanStub::SYMBOL)) {
+    UNIMPLEMENTED();
+//    // Symbol value -> true.
+//    __ CmpInstanceType(map, SYMBOL_TYPE);
+//    __ j(equal, instr->TrueLabel(chunk()));
+  }
+
+  if (expected.Contains(ToBooleanStub::HEAP_NUMBER)) {
+    UNIMPLEMENTED();
+//    // heap number -> false iff +0, -0, or NaN.
+//    Label not_heap_number;
+//    __ CompareRoot(map, Heap::kHeapNumberMapRootIndex);
+//    __ j(not_equal, &not_heap_number, Label::kNear);
+//    XMMRegister xmm_scratch = double_scratch0();
+//    __ xorps(xmm_scratch, xmm_scratch);
+//    __ ucomisd(xmm_scratch, FieldOperand(reg, HeapNumber::kValueOffset));
+//    __ j(zero, instr->FalseLabel(chunk()));
+//    __ jmp(instr->TrueLabel(chunk()));
+//    __ bind(&not_heap_number);
+  }
+
+  __ SetInsertPoint(merge_block) ; // TODO(llvm): not sure
+  if (!expected.IsGeneric()) {
+    // We've seen something for the first time -> deopt.
+    // This can only happen if we are not generic already.
+    auto no_condition = __ getTrue();
+    DeoptimizeIf(no_condition, instr->block()); // kUnexpectedObject
+  }
 }
 
 void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   HValue* value = instr->value();
+  llvm::BasicBlock* true_target = Use(instr->SuccessorAt(0));
+  llvm::BasicBlock* false_target = Use(instr->SuccessorAt(1));
   Representation r = value->representation();
-  if(r.IsInteger32()) {
+  HType type = value->type();
+  USE(type);
+  if (r.IsInteger32()) {
     llvm::Value* zero = __ getInt32(0);
     llvm::Value* compare = __ CreateICmpNE(Use(value), zero);
     llvm::BranchInst* branch = __ CreateCondBr(compare,
-        Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+                                               true_target, false_target);
     instr->set_llvm_value(branch);
+  } else if (r.IsTagged()) {
+    if (type.IsBoolean() || type.IsSmi() || type.IsJSArray()
+        || type.IsHeapNumber() || type.IsString()) UNIMPLEMENTED();
+    else {
+      ToBooleanStub::Types expected = instr->expected_input_types();
+      BranchTagged(instr, expected, true_target, false_target);
+    }
   } else {
     UNIMPLEMENTED();
   }
@@ -1933,11 +2048,12 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
     llvm::Value* compare = CompareMap(val, map);
     __ CreateCondBr(compare, success, check_blocks[i + 1]);
   }
+  __ SetInsertPoint(check_blocks[maps->size() - 1]);
+  llvm::Value* compare = CompareMap(val, maps->at(maps->size() - 1).handle());
   if (instr->HasMigrationTarget()) {
     // Call deferred.
     UNIMPLEMENTED();
   } else {
-    llvm::Value* compare = CompareMap(val, maps->at(maps->size() - 1).handle());
     bool deopt_on_not_equal = true;
     // kWrongMap
     DeoptimizeIf(compare, instr->block(), deopt_on_not_equal, success);

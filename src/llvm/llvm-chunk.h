@@ -526,6 +526,10 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
   void ChangeTaggedToISlow(HValue* val, HChange* instr);
+  void BranchTagged(HBranch* instr,
+                    ToBooleanStub::Types expected,
+                    llvm::BasicBlock* true_target,
+                    llvm::BasicBlock* false_target);
 
   void DoStoreKeyedFixedArray(HStoreKeyed* value);
   void DoLoadKeyedFixedArray(HLoadKeyed* value);
