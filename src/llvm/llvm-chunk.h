@@ -510,7 +510,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
                            std::vector<llvm::Value*>& params);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
-  llvm::Value* MoveConstHandle(Handle<Object> obj);
+  llvm::Value* MoveHeapObject(Handle<Object> obj);
   llvm::Value* Compare(llvm::Value* lhs, Handle<Object> rhs);
   llvm::Value* CompareMap(llvm::Value* object, Handle<Map> map);
   // Allocate a heap number in new space with undefined value. Returns

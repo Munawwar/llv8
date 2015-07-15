@@ -626,7 +626,7 @@ llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
     return __ CreateGEP(base_casted, offset_val);
 }
 
-llvm::Value* LLVMChunkBuilder::MoveConstHandle(Handle<Object> object) {
+llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
     if (object->IsSmi()) {
       // TODO(llvm): use/write a function for that
       Smi* smi = Smi::cast(*object);
@@ -641,7 +641,6 @@ llvm::Value* LLVMChunkBuilder::MoveConstHandle(Handle<Object> object) {
       AllowHandleAllocation allow_handles;
       DCHECK(object->IsHeapObject());
       if (isolate()->heap()->InNewSpace(*object)) {
-        // TODO(llvm): refactor (Move / MoveHeapObject)
         Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
         DCHECK(new_cell->IsHeapObject());
         DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
@@ -658,20 +657,18 @@ llvm::Value* LLVMChunkBuilder::MoveConstHandle(Handle<Object> object) {
         return value;
       }
     }
-
 }
 
 llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
   AllowDeferredHandleDereference smi_check;
   if (rhs->IsSmi()) {
     UNIMPLEMENTED();
-//    Cmp(dst, Smi::cast(*rhs));
+    //    Cmp(dst, Smi::cast(*rhs));
+    return nullptr;
   } else {
-    UNIMPLEMENTED();
-//    MoveHeapObject(kScratchRegister, source);
-//    cmpp(dst, kScratchRegister);
+    llvm::Value* llvm_rhs = MoveHeapObject(rhs);
+    return __ CreateICmpEQ(lhs, llvm_rhs);
   }
-  return nullptr;
 }
 
 llvm::Value* LLVMChunkBuilder::CompareMap(llvm::Value* object, Handle<Map> map) {
@@ -1283,7 +1280,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
   } else if (r.IsTagged()) {
     AllowHandleAllocation allow_handle_allocation;
     Handle<Object> object = instr->handle(isolate());
-    auto value = MoveConstHandle(object);
+    auto value = MoveHeapObject(object);
     instr->set_llvm_value(value);
   } else {
     UNREACHABLE();
@@ -2701,7 +2698,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
                                                     offset);
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
                                                      Types::ptr_i64);
-      auto llvm_val = MoveConstHandle(handle_value);
+      auto llvm_val = MoveHeapObject(handle_value);
       __ CreateStore(llvm_val, casted_adderss);
 
     }
