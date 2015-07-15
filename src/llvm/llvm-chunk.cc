@@ -875,19 +875,11 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
       LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
   __ SetInsertPoint(deopt_block);
 
-  // TODO(llvm): refactor (use the CallStackMap method)
-  // StackMap (id = #deopts, shadow_bytes=0, ...)
-  llvm::Function* stackmap = llvm::Intrinsic::getDeclaration(module_.get(),
-      llvm::Intrinsic::experimental_stackmap);
   std::vector<llvm::Value*> mapped_values;
-  int stackmap_id = deopt_data_->DeoptCount() - 1;
-  mapped_values.push_back(__ getInt64(stackmap_id));
-  int shadow_bytes = 0;
-  mapped_values.push_back(__ getInt32(shadow_bytes));
-  for (auto val : *environment->values()) {
+  for (auto val : *environment->values())
     mapped_values.push_back(val);
-  }
-  __ CreateCall(stackmap, mapped_values);
+  CallStackMap(deopt_data_->DeoptCount() - 1, mapped_values);
+
   CallVoid(entry);
   __ CreateUnreachable();
 
