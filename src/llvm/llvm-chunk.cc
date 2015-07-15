@@ -2239,11 +2239,7 @@ void LLVMChunkBuilder::DoLoadKeyedFixedDoubleArray(HLoadKeyed* instr) {
                                               Types::ptr_i8);
      gep_0 = __ CreateGEP(int_ptr, add);
   }
-  if (instr->representation().IsInteger32()) {
-    casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
-  } else {
-    casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
-  }
+  casted_address = __ CreateBitCast(gep_0, Types::ptr_float64);
   llvm::Value* load = __ CreateLoad(casted_address);
   instr->set_llvm_value(load);
 }
@@ -2557,7 +2553,7 @@ void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
      gep_0 = __ CreateGEP(int_ptr, add);
   }
   if(!instr->value()->IsConstant()){
-    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_float64);
     llvm::Value* Store = __ CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(Store);
   } else {
@@ -2567,7 +2563,7 @@ void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
     Handle<Object> handle_value = constant->handle(isolate());
     int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
     auto llvm_val = __ getInt64(value);
-    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
+    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_float64);
     llvm::Value* Store = __ CreateStore(llvm_val, casted_address);
     instr->set_llvm_value(Store);
   }
