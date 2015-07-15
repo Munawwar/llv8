@@ -1645,8 +1645,6 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
-// TODO(llvm): shold have second parameter.
-// In our usage Heap::RootListIndex index == Heap::kHeapNumberMapRootIndex
 llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, Heap::RootListIndex index) {
   ExternalReference roots_array_start =
         ExternalReference::roots_array_start(isolate());
@@ -1659,17 +1657,16 @@ llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, Heap::RootListIndex
   auto value = __ getInt64(kRootRegisterBias);
   llvm::Value* r13_val = __ CreateAdd(gep, value);
   
-  auto offset = __ getInt64((index << kPointerSizeLog2)
-                            - kRootRegisterBias);
+  auto offset = __ getInt64((index << kPointerSizeLog2) - kRootRegisterBias);
   llvm::Value* int8_ptr = __ CreateIntToPtr(r13_val, Types::ptr_i8);
   llvm::Value* gep_2 = __ CreateGEP(int8_ptr, offset);
  
   llvm::Value* bitcast_1 = __ CreateBitCast(gep_2, Types::ptr_i64);
-  llvm::Value* bitcast_2 = __ CreateBitCast(val, Types::ptr_i64);
+  llvm::Value* bitcast_2 = __ CreateBitOrPointerCast(val, Types::ptr_i64);
   llvm::Value* load_first = __ CreateLoad(bitcast_2);
   llvm::Value* load_second = __ CreateLoad(bitcast_1);
  
-  llvm::Value* cmp_result = __ CreateICmpSGT(load_first, load_second);
+  llvm::Value* cmp_result = __ CreateICmpEQ(load_first, load_second);
  
   return cmp_result;
 }
@@ -2290,8 +2287,6 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
      llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
                                               Types::ptr_i8);
      gep_0 = __ CreateGEP(int_ptr, add); 
-     
-   
   }
   llvm::Value* casted_address = nullptr;
   if (instr->representation().IsInteger32()) {
@@ -2304,7 +2299,9 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
     if (IsFastSmiElementsKind(instr->elements_kind())) {
       UNIMPLEMENTED();
     } else {
-      UNIMPLEMENTED();
+      // FIXME(access-nsieve): not tested
+      llvm::Value* cmp = CompareRoot(load, Heap::kTheHoleValueRootIndex);
+      DeoptimizeIf(cmp, instr->block()); // kHole
     }
   }
   instr->set_llvm_value(load);
