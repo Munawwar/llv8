@@ -666,7 +666,8 @@ llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
     //    Cmp(dst, Smi::cast(*rhs));
     return nullptr;
   } else {
-    llvm::Value* llvm_rhs = MoveHeapObject(rhs);
+    llvm::Value* llvm_rhs = __ CreateBitOrPointerCast(
+        MoveHeapObject(rhs), Types::ptr_i8);
     return __ CreateICmpEQ(lhs, llvm_rhs);
   }
 }
