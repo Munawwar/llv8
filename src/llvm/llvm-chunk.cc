@@ -564,10 +564,34 @@ llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
   return res;
 }
 
-llvm::Value* LLVMChunkBuilder::SmiCheck(HValue* value, bool negate) {
-  llvm::Value* res = __ CreateAnd(Use(value), __ getInt64(1));
+llvm::Value* LLVMChunkBuilder::SmiCheck(llvm::Value* value, bool negate) {
+  llvm::Value* res = __ CreateAnd(value, __ getInt64(1));
   return __ CreateICmp(negate ? llvm::CmpInst::ICMP_NE : llvm::CmpInst::ICMP_EQ,
       res, __ getInt64(0));
+}
+
+void LLVMChunkBuilder::AssertSmi(llvm::Value* value, bool assert_not_smi) {
+  if (!emit_degug_code()) return;
+
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  auto cont = llvm::BasicBlock::Create(
+      llvm_context, "After smi assertion", function_);
+  auto fail = llvm::BasicBlock::Create(
+        llvm_context, "Fail smi assertion", function_);
+  auto check = SmiCheck(value, assert_not_smi);
+  __ CreateCondBr(check, fail, cont);
+
+  __ SetInsertPoint(fail);
+  llvm::Function* debug_trap = llvm::Intrinsic::getDeclaration(
+      module_.get(), llvm::Intrinsic::debugtrap);
+  __ CreateCall(debug_trap);
+
+  __ SetInsertPoint(cont);
+}
+
+void LLVMChunkBuilder::AssertNotSmi(llvm::Value* value) {
+  bool assert_not_smi = true;
+  return AssertSmi(value, assert_not_smi);
 }
 
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
@@ -635,28 +659,29 @@ llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
       return value;
     } else { // Heap object
       // MacroAssembler::MoveHeapObject
-      // TODO(llvm): is allowing all these things for a block here OK?
-      AllowDeferredHandleDereference using_raw_address;
       AllowHeapAllocation allow_allocation;
       AllowHandleAllocation allow_handles;
       DCHECK(object->IsHeapObject());
       if (isolate()->heap()->InNewSpace(*object)) {
         Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
-        DCHECK(new_cell->IsHeapObject());
-        DCHECK(!isolate()->heap()->InNewSpace(*new_cell));
-
-        auto intptr_value = reinterpret_cast<uint64_t>(new_cell.location());
-        llvm::Value* value = RecordRelocInfo(intptr_value, RelocInfo::CELL);
-
+        llvm::Value* value = Move(new_cell, RelocInfo::CELL);
         llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
         return  __ CreateLoad(ptr);
       } else {
-        uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
-        llvm::Value* value = RecordRelocInfo(intptr_value,
-                                             RelocInfo::EMBEDDED_OBJECT);
-        return value;
+        return Move(object, RelocInfo::EMBEDDED_OBJECT);
       }
     }
+}
+
+llvm::Value* LLVMChunkBuilder::Move(Handle<Object> object,
+                                    RelocInfo::Mode rmode) {
+  AllowDeferredHandleDereference using_raw_address;
+  DCHECK(!RelocInfo::IsNone(rmode));
+  DCHECK(object->IsHeapObject());
+  DCHECK(!isolate()->heap()->InNewSpace(*object));
+
+  uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
+  return RecordRelocInfo(intptr_value, rmode);
 }
 
 llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
@@ -1821,7 +1846,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
 
   llvm::Value* cmp_val = nullptr;
   llvm::LoadInst* load_d = nullptr;
-  llvm::Value* cond = SmiCheck(val);
+  llvm::Value* cond = SmiCheck(Use(val));
   if (!val->representation().IsSmi()) {
     __ CreateCondBr(cond, is_smi, is_any_tagged);
     __ SetInsertPoint(is_any_tagged);
@@ -1864,7 +1889,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
 }
 
 void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
-  llvm::Value* cond = SmiCheck(val);
+  llvm::Value* cond = SmiCheck(Use(val));
 
   LLVMContext& context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* is_smi = llvm::BasicBlock::Create(
@@ -1970,7 +1995,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     } else if (to.IsSmi()) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
-        llvm::Value* cond = SmiCheck(val, not_smi);
+        llvm::Value* cond = SmiCheck(Use(val), not_smi);
         DeoptimizeIf(cond, instr->block());
       }
       instr->set_llvm_value(Use(val));
@@ -2007,7 +2032,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
           instr->value()->CheckFlag(HValue::kUint32)) {
         UNIMPLEMENTED();
       }
-      instr->set_llvm_value(Integer32ToSmi(val));  
+      instr->set_llvm_value(Integer32ToSmi(val));
       if (instr->CheckFlag(HValue::kCanOverflow) &&
           !instr->value()->CheckFlag(HValue::kUint32)) { 
         UNIMPLEMENTED();
@@ -2022,7 +2047,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
 void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
   if (!instr->value()->type().IsHeapObject()) {
     bool not_smi_check = true;
-    llvm::Value* not_smi = SmiCheck(instr->value(), not_smi_check);
+    llvm::Value* not_smi = SmiCheck(Use(instr->value()), not_smi_check);
     DeoptimizeIf(not_smi, instr->block());
   }
 }
@@ -2465,6 +2490,9 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     instr->representation().IsInteger32()) {
     if(FLAG_debug_code) {
       UNIMPLEMENTED();
+      // TODO(llvm):
+      // Load(scratch, FieldOperand(object, offset), representation);
+      // AssertSmi(scratch);
     }
     STATIC_ASSERT(kSmiTag == 0);
     DCHECK(kSmiTagSize + kSmiShiftSize == 32);
@@ -2781,8 +2809,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     UNIMPLEMENTED();
   }
 
-  // Register object = ToRegister(instr->object());
-  // __ AssertNotSmi(object);
+  AssertNotSmi(Use(instr->object()));
 
   if (!FLAG_unbox_double_fields && representation.IsDouble()) {
     UNIMPLEMENTED();
@@ -2902,7 +2929,42 @@ void LLVMChunkBuilder::DoToFastProperties(HToFastProperties* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoTransitionElementsKind(HTransitionElementsKind* instr) {
+void LLVMChunkBuilder::DoTransitionElementsKind(
+    HTransitionElementsKind* instr) {
+  DCHECK(instr->HasNoUses());
+  auto object = Use(instr->object());
+  Handle<Map> from_map = instr->original_map().handle();
+  Handle<Map> to_map = instr->transitioned_map().handle();
+  ElementsKind from_kind = instr->from_kind();
+  ElementsKind to_kind = instr->to_kind();
+
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  llvm::BasicBlock* end = llvm::BasicBlock::Create(
+      llvm_context, "TransitionElementsKind end", function_);
+  llvm::BasicBlock* cont = llvm::BasicBlock::Create(
+      llvm_context, "TransitionElementsKind meat", function_);
+
+  auto comp = Compare(FieldOperand(object, HeapObject::kMapOffset), from_map);
+  __ CreateCondBr(comp, cont, end);
+  __ SetInsertPoint(cont);
+
+  if (IsSimpleMapChangeTransition(from_kind, to_kind)) {
+    auto new_map = Move(to_map, RelocInfo::EMBEDDED_OBJECT);
+    auto store_addr = FieldOperand(object, HeapObject::kMapOffset);
+    auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_i64);
+    __ CreateStore(new_map, casted_store_addr);
+    // Write barrier
+    RecordWriteForMap(object, new_map);
+  } else {
+    UNIMPLEMENTED();
+  }
+  __ SetInsertPoint(end);
+}
+
+void LLVMChunkBuilder::RecordWriteForMap(llvm::Value* object,
+                                         llvm::Value* map) {
+  AssertNotSmi(object);
+
   UNIMPLEMENTED();
 }
 

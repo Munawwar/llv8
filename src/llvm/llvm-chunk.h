@@ -454,12 +454,15 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         llvm_ir_builder_(nullptr),
         deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())),
         reloc_data_(nullptr),
-        pending_pushed_args_(4, info->zone()) {
+        pending_pushed_args_(4, info->zone()),
+        emit_degug_code_(FLAG_debug_code) {
     reloc_data_ = new(zone()) LLVMRelocationData();
   }
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
+  void set_emit_degug_code(bool v) { emit_degug_code_ = v; }
+  bool emit_degug_code() { return emit_degug_code_; }
   LLVMChunkBuilder& Build();
   // LLVM requires that each phi input's label be a basic block
   // immediately preceding the given BB.
@@ -503,7 +506,9 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* Integer32ToSmi(HValue* value);
   llvm::Value* Integer32ToSmi(llvm::Value* value);
   // Is the value (not) a smi?
-  llvm::Value* SmiCheck(HValue* value, bool negate = false);
+  llvm::Value* SmiCheck(llvm::Value* value, bool negate = false);
+  void AssertSmi(llvm::Value* value, bool assert_not_smi = false);
+  void AssertNotSmi(llvm::Value* value);
   llvm::Value* CallVoid(Address target);
   // This is intended to be a highly reusable method for calling stuff.
   llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
@@ -511,6 +516,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
   llvm::Value* MoveHeapObject(Handle<Object> obj);
+  llvm::Value* Move(Handle<Object> object, RelocInfo::Mode rmode);
   llvm::Value* Compare(llvm::Value* lhs, Handle<Object> rhs);
   llvm::Value* CompareMap(llvm::Value* object, Handle<Map> map);
   // Allocate a heap number in new space with undefined value. Returns
@@ -523,6 +529,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* GetContext();
   llvm::Value* CompareRoot(llvm::Value* val, Heap::RootListIndex index);
   llvm::Value* RecordRelocInfo(uint64_t intptr_value, RelocInfo::Mode rmode);
+  void RecordWriteForMap(llvm::Value* object, llvm::Value* map);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
   void ChangeTaggedToISlow(HValue* val, HChange* instr);
@@ -554,6 +561,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   std::unique_ptr<LLVMDeoptData> deopt_data_;
   LLVMRelocationData* reloc_data_;
   ZoneList<llvm::Value*> pending_pushed_args_;
+  bool emit_degug_code_;
   enum ScaleFactor {
     times_1 = 0,
     times_2 = 1,
