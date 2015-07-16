@@ -1465,28 +1465,51 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
                                     llvm::BasicBlock* false_target) {
   llvm::Value* value = Use(instr->value());
   LLVMContext& context = LLVMGranularity::getInstance().context();
-  llvm::BasicBlock* merge_block = llvm::BasicBlock::Create(
-      context, "merge block", function_);
 
   if (expected.IsEmpty()) expected = ToBooleanStub::Types::Generic();
 
+  std::vector<llvm::BasicBlock*> check_blocks;
+  for (auto i = ToBooleanStub::UNDEFINED;
+      i < ToBooleanStub::NUMBER_OF_TYPES;
+      i = static_cast<ToBooleanStub::Type>(i + 1)) {
+    if (expected.Contains(i)) {
+      check_blocks.push_back(llvm::BasicBlock::Create(
+          context, "BranchTagged Check Block", function_));
+    }
+  }
+  llvm::BasicBlock* merge_block = llvm::BasicBlock::Create(
+      context, "BranchTagged Merge Block", function_);
+  check_blocks.push_back(merge_block);
+
+  DCHECK(check_blocks.size() > 1);
+  unsigned cur_block = 0;
+  __ CreateBr(check_blocks[cur_block]);
+
   if (expected.Contains(ToBooleanStub::UNDEFINED)) {
+    __ SetInsertPoint(check_blocks[cur_block]);
     // undefined -> false.
     auto is_undefined = CompareRoot(value, Heap::kUndefinedValueRootIndex);
-    __ CreateCondBr(is_undefined, false_target, merge_block);
+    __ CreateCondBr(is_undefined, false_target, check_blocks[++cur_block]);
   }
+
   if (expected.Contains(ToBooleanStub::BOOLEAN)) {
+    __ SetInsertPoint(check_blocks[cur_block]);
     // true -> true.
     auto is_true = CompareRoot(value, Heap::kTrueValueRootIndex);
-    __ CreateCondBr(is_true, true_target, merge_block);
+    llvm::BasicBlock* bool_second = llvm::BasicBlock::Create(
+        context, "BranchTagged Boolean Second Check", function_);
+    __ CreateCondBr(is_true, true_target, bool_second);
     // false -> false.
+    __ SetInsertPoint(bool_second);
     auto is_false = CompareRoot(value, Heap::kFalseValueRootIndex);
-    __ CreateCondBr(is_false, false_target, merge_block);
+    __ CreateCondBr(is_false, false_target, check_blocks[++cur_block]);
   }
+
   if (expected.Contains(ToBooleanStub::NULL_TYPE)) {
+    __ SetInsertPoint(check_blocks[cur_block]);
     // 'null' -> false.
     auto is_null = CompareRoot(value, Heap::kNullValueRootIndex);
-    __ CreateCondBr(is_null, false_target, merge_block);
+    __ CreateCondBr(is_null, false_target, check_blocks[++cur_block]);
   }
   if (expected.Contains(ToBooleanStub::SMI)) {
     UNIMPLEMENTED();
@@ -1554,11 +1577,15 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
   }
 
   __ SetInsertPoint(merge_block) ; // TODO(llvm): not sure
+
   if (!expected.IsGeneric()) {
     // We've seen something for the first time -> deopt.
     // This can only happen if we are not generic already.
     auto no_condition = __ getTrue();
     DeoptimizeIf(no_condition, instr->block()); // kUnexpectedObject
+
+    // Since we deoptimize on True the continue block is never reached.
+    __ CreateUnreachable();
   }
 }
 
@@ -2034,6 +2061,8 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
     check_blocks.push_back(
         llvm::BasicBlock::Create(context, "CheckMap", function_));
   }
+  DCHECK(maps->size() > 0);
+  __ CreateBr(check_blocks[0]);
   for (int i = 0; i < maps->size() - 1; i++) {
     Handle<Map> map = maps->at(i).handle();
     __ SetInsertPoint(check_blocks[i]);
