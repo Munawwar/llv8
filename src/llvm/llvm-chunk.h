@@ -455,14 +455,14 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())),
         reloc_data_(nullptr),
         pending_pushed_args_(4, info->zone()),
-        emit_degug_code_(FLAG_debug_code) {
+        emit_debug_code_(FLAG_debug_code) {
     reloc_data_ = new(zone()) LLVMRelocationData();
   }
   ~LLVMChunkBuilder() {}
 
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
-  void set_emit_degug_code(bool v) { emit_degug_code_ = v; }
-  bool emit_degug_code() { return emit_degug_code_; }
+  void set_emit_degug_code(bool v) { emit_debug_code_ = v; }
+  bool emit_debug_code() { return emit_debug_code_; }
   LLVMChunkBuilder& Build();
   // LLVM requires that each phi input's label be a basic block
   // immediately preceding the given BB.
@@ -510,6 +510,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* SmiCheck(llvm::Value* value, bool negate = false);
   void AssertSmi(llvm::Value* value, bool assert_not_smi = false);
   void AssertNotSmi(llvm::Value* value);
+  void Assert(llvm::Value* condition);
+  void IncrementCounter(StatsCounter* counter, int value);
   llvm::Value* CallVoid(Address target);
   // This is intended to be a highly reusable method for calling stuff.
   llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
@@ -518,6 +520,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
   llvm::Value* MoveHeapObject(Handle<Object> obj);
   llvm::Value* Move(Handle<Object> object, RelocInfo::Mode rmode);
+  llvm::Value* Compare(llvm::Value* lhs, llvm::Value* rhs);
   llvm::Value* Compare(llvm::Value* lhs, Handle<Object> rhs);
   llvm::Value* CompareMap(llvm::Value* object, Handle<Map> map);
   // Allocate a heap number in new space with undefined value. Returns
@@ -562,7 +565,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   std::unique_ptr<LLVMDeoptData> deopt_data_;
   LLVMRelocationData* reloc_data_;
   ZoneList<llvm::Value*> pending_pushed_args_;
-  bool emit_degug_code_;
+  bool emit_debug_code_;
   enum ScaleFactor {
     times_1 = 0,
     times_2 = 1,

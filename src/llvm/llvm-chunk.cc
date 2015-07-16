@@ -573,20 +573,34 @@ llvm::Value* LLVMChunkBuilder::SmiCheck(llvm::Value* value, bool negate) {
       res, __ getInt64(0));
 }
 
-void LLVMChunkBuilder::AssertSmi(llvm::Value* value, bool assert_not_smi) {
-  if (!emit_degug_code()) return;
-
+void LLVMChunkBuilder::Assert(llvm::Value* condition) {
   auto cont = NewBlock("After smi assertion");
   auto fail = NewBlock("Fail smi assertion");
-  auto check = SmiCheck(value, assert_not_smi);
-  __ CreateCondBr(check, fail, cont);
-
+  __ CreateCondBr(condition, cont, fail);
   __ SetInsertPoint(fail);
   llvm::Function* debug_trap = llvm::Intrinsic::getDeclaration(
       module_.get(), llvm::Intrinsic::debugtrap);
   __ CreateCall(debug_trap);
-
   __ SetInsertPoint(cont);
+}
+
+void LLVMChunkBuilder::IncrementCounter(StatsCounter* counter, int value) {
+  DCHECK(value != 0);
+  if (!FLAG_native_code_counters || !counter->Enabled()) return;
+  Address conter_addr = ExternalReference(counter).address();
+  auto llvm_counter_addr = __ getInt64(reinterpret_cast<uint64_t>(conter_addr));
+  auto casted_address = __ CreateIntToPtr(llvm_counter_addr, Types::ptr_i32);
+  auto llvm_conunter = __ CreateLoad(casted_address);
+  auto llvm_value = __ getInt32(value);
+  auto updated_value = __ CreateAdd(llvm_conunter, llvm_value);
+  __ CreateStore(updated_value, casted_address);
+}
+
+void LLVMChunkBuilder::AssertSmi(llvm::Value* value, bool assert_not_smi) {
+  if (!emit_debug_code()) return;
+
+  auto check = SmiCheck(value, assert_not_smi);
+  Assert(check);
 }
 
 void LLVMChunkBuilder::AssertNotSmi(llvm::Value* value) {
@@ -682,6 +696,12 @@ llvm::Value* LLVMChunkBuilder::Move(Handle<Object> object,
 
   uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
   return RecordRelocInfo(intptr_value, rmode);
+}
+
+llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, llvm::Value* rhs) {
+  llvm::Value* casted_lhs = __ CreateBitOrPointerCast(lhs, Types::ptr_i8);
+  llvm::Value* casted_rhs = __ CreateBitOrPointerCast(rhs, Types::ptr_i8);
+  return __ CreateICmpEQ(casted_lhs, casted_rhs);
 }
 
 llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
@@ -2940,7 +2960,28 @@ void LLVMChunkBuilder::RecordWriteForMap(llvm::Value* object,
                                          llvm::Value* map) {
   AssertNotSmi(object);
 
+  if (emit_debug_code()) {
+    auto maps_equal = CompareMap(map, isolate()->factory()->meta_map());
+    Assert(maps_equal);
+  }
+
+  if (!FLAG_incremental_marking) {
+    return;
+  }
+
+  if (emit_debug_code()) {
+    // FIXME(llvm): maybe we should dereference the FieldOperand
+    Assert(Compare(map, FieldOperand(object, HeapObject::kMapOffset)));
+  }
+
+  auto map_address = FieldOperand(object, HeapObject::kMapOffset);
+
+  USE(map_address);
   UNIMPLEMENTED();
+
+  // Count number of write barriers in generated code.
+  isolate()->counters()->write_barriers_static()->Increment();
+  IncrementCounter(isolate()->counters()->write_barriers_dynamic(), 1);
 }
 
 void LLVMChunkBuilder::DoTrapAllocationMemento(HTrapAllocationMemento* instr) {
