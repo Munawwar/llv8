@@ -499,6 +499,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void DoPhi(HPhi* phi);
   void ResolvePhis();
   void ResolvePhis(HBasicBlock* block);
+  llvm::BasicBlock* NewBlock(const char* name);
   // if the llvm counterpart of the block does not exist, create it
   llvm::BasicBlock* Use(HBasicBlock* block);
   llvm::Value* Use(HValue* value);

@@ -531,11 +531,14 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
   current_instruction_ = old_current;
 }
 
+llvm::BasicBlock* LLVMChunkBuilder::NewBlock(const char* name) {
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  return llvm::BasicBlock::Create(llvm_context, name, function_);
+}
+
 llvm::BasicBlock* LLVMChunkBuilder::Use(HBasicBlock* block) {
   if (!block->llvm_start_basic_block()) {
-    llvm::BasicBlock* llvm_block = llvm::BasicBlock::Create(
-        LLVMGranularity::getInstance().context(),
-        "BlockEntry", function_);
+    llvm::BasicBlock* llvm_block = NewBlock("BlockEntry");
     block->set_llvm_start_basic_block(llvm_block);
   }
   DCHECK(block->llvm_start_basic_block());
@@ -573,11 +576,8 @@ llvm::Value* LLVMChunkBuilder::SmiCheck(llvm::Value* value, bool negate) {
 void LLVMChunkBuilder::AssertSmi(llvm::Value* value, bool assert_not_smi) {
   if (!emit_degug_code()) return;
 
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-  auto cont = llvm::BasicBlock::Create(
-      llvm_context, "After smi assertion", function_);
-  auto fail = llvm::BasicBlock::Create(
-        llvm_context, "Fail smi assertion", function_);
+  auto cont = NewBlock("After smi assertion");
+  auto fail = NewBlock("Fail smi assertion");
   auto check = SmiCheck(value, assert_not_smi);
   __ CreateCondBr(check, fail, cont);
 
@@ -892,12 +892,10 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
 
   // TODO(llvm): create Deoptimizer::DeoptInfo & Deoptimizer::JumpTableEntry (?)
 
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
   if (!next_block)
-    next_block = llvm::BasicBlock::Create(llvm_context, "BlockCont", function_);
-  llvm::BasicBlock* deopt_block = llvm::BasicBlock::Create(
-      LLVMGranularity::getInstance().context(), "DeoptBlock", function_);
+    next_block = NewBlock("BlockCont");
+  llvm::BasicBlock* deopt_block = NewBlock("DeoptBlock");
   __ SetInsertPoint(deopt_block);
 
   std::vector<llvm::Value*> mapped_values;
@@ -1489,7 +1487,6 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
                                     llvm::BasicBlock* true_target,
                                     llvm::BasicBlock* false_target) {
   llvm::Value* value = Use(instr->value());
-  LLVMContext& context = LLVMGranularity::getInstance().context();
 
   if (expected.IsEmpty()) expected = ToBooleanStub::Types::Generic();
 
@@ -1497,13 +1494,10 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
   for (auto i = ToBooleanStub::UNDEFINED;
       i < ToBooleanStub::NUMBER_OF_TYPES;
       i = static_cast<ToBooleanStub::Type>(i + 1)) {
-    if (expected.Contains(i)) {
-      check_blocks.push_back(llvm::BasicBlock::Create(
-          context, "BranchTagged Check Block", function_));
-    }
+    if (expected.Contains(i))
+      check_blocks.push_back(NewBlock("BranchTagged Check Block"));
   }
-  llvm::BasicBlock* merge_block = llvm::BasicBlock::Create(
-      context, "BranchTagged Merge Block", function_);
+  llvm::BasicBlock* merge_block = NewBlock("BranchTagged Merge Block");
   check_blocks.push_back(merge_block);
 
   DCHECK(check_blocks.size() > 1);
@@ -1521,8 +1515,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ SetInsertPoint(check_blocks[cur_block]);
     // true -> true.
     auto is_true = CompareRoot(value, Heap::kTrueValueRootIndex);
-    llvm::BasicBlock* bool_second = llvm::BasicBlock::Create(
-        context, "BranchTagged Boolean Second Check", function_);
+    llvm::BasicBlock* bool_second = NewBlock("BranchTagged Boolean Second Check");
     __ CreateCondBr(is_true, true_target, bool_second);
     // false -> false.
     __ SetInsertPoint(bool_second);
@@ -1831,18 +1824,14 @@ llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, Heap::RootListIndex
 }
 
 void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
-  LLVMContext& context = LLVMGranularity::getInstance().context();
   bool can_convert_undefined_to_nan =
       instr->can_convert_undefined_to_nan();
   
   bool deoptimize_on_minus_zero = instr->deoptimize_on_minus_zero();
   
-  llvm::BasicBlock* is_smi = llvm::BasicBlock::Create(
-      context, "NUMBER_CANDIDATE_IS_SMI", function_);
-  llvm::BasicBlock* is_any_tagged = llvm::BasicBlock::Create(
-      context, "NUMBER_CANDIDATE_IS_ANY_TAGGED", function_);
-  llvm::BasicBlock* continue_block = llvm::BasicBlock::Create(
-      context, "Continue Block", function_);
+  llvm::BasicBlock* is_smi = NewBlock("NUMBER_CANDIDATE_IS_SMI");
+  llvm::BasicBlock* is_any_tagged = NewBlock("NUMBER_CANDIDATE_IS_ANY_TAGGED");
+  llvm::BasicBlock* continue_block = NewBlock("Continue Block");
 
   llvm::Value* cmp_val = nullptr;
   llvm::LoadInst* load_d = nullptr;
@@ -1891,13 +1880,9 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
 void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   llvm::Value* cond = SmiCheck(Use(val));
 
-  LLVMContext& context = LLVMGranularity::getInstance().context();
-  llvm::BasicBlock* is_smi = llvm::BasicBlock::Create(
-      context, "is Smi fast case", function_);
-  llvm::BasicBlock* not_smi = llvm::BasicBlock::Create(
-      context, "'deferred' case", function_);
-  llvm::BasicBlock* merge_and_ret = llvm::BasicBlock::Create(
-      context, "merge and ret", function_);
+  llvm::BasicBlock* is_smi = NewBlock("is Smi fast case");
+  llvm::BasicBlock* not_smi = NewBlock("'deferred' case");
+  llvm::BasicBlock* merge_and_ret = NewBlock("merge and ret");
   llvm::BasicBlock* not_smi_merge = nullptr;
 
   __ CreateCondBr(cond, is_smi, not_smi);
@@ -1914,12 +1899,9 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   llvm::Value* cmp = CompareRoot(vals_map, Heap::kHeapNumberMapRootIndex);
 
   if (truncating) {
-    llvm::BasicBlock* truncate_heap_number = llvm::BasicBlock::Create(
-        context, "TruncateHeapNumberToI", function_);
-    llvm::BasicBlock* no_heap_number = llvm::BasicBlock::Create(
-        context, "Not a heap number", function_);
-    llvm::BasicBlock* merge_inner = llvm::BasicBlock::Create(
-        context, "inner merge", function_);
+    llvm::BasicBlock* truncate_heap_number = NewBlock("TruncateHeapNumberToI");
+    llvm::BasicBlock* no_heap_number = NewBlock("Not a heap number");
+    llvm::BasicBlock* merge_inner = NewBlock("inner merge");
 
     __ CreateCondBr(cmp, truncate_heap_number, no_heap_number);
 
@@ -2077,15 +2059,11 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
   }
   DCHECK(instr->HasNoUses());
   llvm::Value* val = Use(instr->value());
-  LLVMContext& context = LLVMGranularity::getInstance().context();
-  llvm::BasicBlock* success = llvm::BasicBlock::Create(
-      context, "CheckMaps success", function_);
+  llvm::BasicBlock* success = NewBlock("CheckMaps success");
   std::vector<llvm::BasicBlock*> check_blocks;
   const UniqueSet<Map>* maps = instr->maps();
-  for (int i = 0; i < maps->size(); i++) {
-    check_blocks.push_back(
-        llvm::BasicBlock::Create(context, "CheckMap", function_));
-  }
+  for (int i = 0; i < maps->size(); i++)
+    check_blocks.push_back(NewBlock("CheckMap"));
   DCHECK(maps->size() > 0);
   __ CreateBr(check_blocks[0]);
   for (int i = 0; i < maps->size() - 1; i++) {
@@ -2938,11 +2916,8 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
   ElementsKind from_kind = instr->from_kind();
   ElementsKind to_kind = instr->to_kind();
 
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-  llvm::BasicBlock* end = llvm::BasicBlock::Create(
-      llvm_context, "TransitionElementsKind end", function_);
-  llvm::BasicBlock* cont = llvm::BasicBlock::Create(
-      llvm_context, "TransitionElementsKind meat", function_);
+  llvm::BasicBlock* end = NewBlock("TransitionElementsKind end");
+  llvm::BasicBlock* cont = NewBlock("TransitionElementsKind meat");
 
   auto comp = Compare(FieldOperand(object, HeapObject::kMapOffset), from_map);
   __ CreateCondBr(comp, cont, end);
