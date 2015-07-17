@@ -1389,7 +1389,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* overflow = __ CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
       DeoptimizeIf(overflow, instr->block());
-      }
+    }
   } else if (instr->representation().IsDouble()) {
       DCHECK(instr->left()->representation().IsDouble());
       DCHECK(instr->right()->representation().IsDouble());
