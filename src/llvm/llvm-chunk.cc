@@ -268,7 +268,6 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   DataView view(stackmap_list[0]);
   stackmaps.parse(&view);
   stackmaps.dumpMultiline(std::cerr, "  ");
-  auto length = deopt_data_->DeoptCount();
 
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
@@ -281,28 +280,31 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   DCHECK(it->size / kStackSlotSize - kPhonySpillCount >= 0);
   code->set_stack_slots(it->size / kStackSlotSize - kPhonySpillCount);
 
+  auto true_deopt_count = stackmaps.records.size();
   Handle<DeoptimizationInputData> data =
-      DeoptimizationInputData::New(isolate(), length, TENURED);
+      DeoptimizationInputData::New(isolate(), true_deopt_count, TENURED);
 
-  // FIXME(llvm): separate deopt data's stackmaps from reloc data's
-  // Also, it's a sum.
-  DCHECK(length == stackmaps.records.size());
-  if (!length) return;
+  if (true_deopt_count == 0) return;
 
-  for (auto id = 0; id < length; id++) {
-    StackMaps::Record stackmap_record = stackmaps.computeRecordMap()[id];
-    // Time to make a Translation from Stackmaps and Environments.
-    LLVMEnvironment* env = deopt_data_->deoptimizations()[id];
+  int deopt_entry_number = 0;
 
-    int translation_index = WriteTranslationFor(env, stackmap_record, stackmaps);
-
-    data->SetAstId(id, env->ast_id());
-    data->SetTranslationIndex(id, Smi::FromInt(translation_index));
-    data->SetArgumentsStackHeight(id,
+  for (auto i = 0; i < true_deopt_count; i++) {
+    auto stackmap_record = stackmaps.records[i];
+    auto stackmap_id = stackmap_record.patchpointID;
+    // The corresponding Environment is stored in the array by index = id.
+    LLVMEnvironment* env = deopt_data_->deoptimizations()[stackmap_id];
+    int translation_index = WriteTranslationFor(env,
+                                                stackmap_record,
+                                                stackmaps);
+    data->SetAstId(deopt_entry_number, env->ast_id());
+    data->SetTranslationIndex(deopt_entry_number,
+                              Smi::FromInt(translation_index));
+    data->SetArgumentsStackHeight(deopt_entry_number,
                                   Smi::FromInt(env->arguments_stack_height()));
     // pc offset can be obtained from the stackmap TODO(llvm):
     // but we do not support lazy deopt yet (and for eager it should be -1)
-    data->SetPc(id, Smi::FromInt(-1));
+    data->SetPc(deopt_entry_number, Smi::FromInt(-1));
+    deopt_entry_number++;
   }
 
   auto literals_len = deopt_data_->deoptimization_literals().length();
