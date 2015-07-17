@@ -523,6 +523,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* Compare(llvm::Value* lhs, llvm::Value* rhs);
   llvm::Value* Compare(llvm::Value* lhs, Handle<Object> rhs);
   llvm::Value* CompareMap(llvm::Value* object, Handle<Map> map);
+  llvm::Value* CheckPageFlag(llvm::Value* object, int mask);
   // Allocate a heap number in new space with undefined value. Returns
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment

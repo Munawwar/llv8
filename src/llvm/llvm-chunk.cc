@@ -574,13 +574,14 @@ llvm::Value* LLVMChunkBuilder::SmiCheck(llvm::Value* value, bool negate) {
 }
 
 void LLVMChunkBuilder::Assert(llvm::Value* condition) {
-  auto cont = NewBlock("After smi assertion");
-  auto fail = NewBlock("Fail smi assertion");
+  auto cont = NewBlock("After assertion");
+  auto fail = NewBlock("Fail assertion");
   __ CreateCondBr(condition, cont, fail);
   __ SetInsertPoint(fail);
   llvm::Function* debug_trap = llvm::Intrinsic::getDeclaration(
       module_.get(), llvm::Intrinsic::debugtrap);
   __ CreateCall(debug_trap);
+  __ CreateUnreachable();
   __ SetInsertPoint(cont);
 }
 
@@ -717,8 +718,22 @@ llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
   }
 }
 
-llvm::Value* LLVMChunkBuilder::CompareMap(llvm::Value* object, Handle<Map> map) {
+llvm::Value* LLVMChunkBuilder::CompareMap(llvm::Value* object,
+                                          Handle<Map> map) {
   return Compare(FieldOperand(object, HeapObject::kMapOffset), map);
+}
+
+llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
+  auto page_align_mask = __ getInt64(~Page::kPageAlignmentMask);
+  // TODO(llvm): do the types match?
+  auto masked_object = __ CreateAnd(object, page_align_mask);
+  auto flags_address = ConstructAddress(masked_object,
+                                        MemoryChunk::kFlagsOffset);
+  auto i32_ptr_flags_address = __ CreateBitCast(flags_address, Types::ptr_i32);
+  auto flags = __ CreateLoad(i32_ptr_flags_address);
+  auto llvm_mask = __ getInt32(mask);
+  auto and_result = __ CreateAnd(flags, llvm_mask);
+  return __ CreateICmpEQ(and_result, __ getInt32(0));
 }
 
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
@@ -2944,12 +2959,14 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
   __ SetInsertPoint(cont);
 
   if (IsSimpleMapChangeTransition(from_kind, to_kind)) {
+    // map is an i64.
     auto new_map = Move(to_map, RelocInfo::EMBEDDED_OBJECT);
     auto store_addr = FieldOperand(object, HeapObject::kMapOffset);
     auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_i64);
     __ CreateStore(new_map, casted_store_addr);
     // Write barrier
     RecordWriteForMap(object, new_map);
+    __ CreateBr(end);
   } else {
     UNIMPLEMENTED();
   }
@@ -2975,9 +2992,11 @@ void LLVMChunkBuilder::RecordWriteForMap(llvm::Value* object,
   }
 
   auto map_address = FieldOperand(object, HeapObject::kMapOffset);
-
   USE(map_address);
-  UNIMPLEMENTED();
+
+  auto equal = CheckPageFlag(map,
+                             MemoryChunk::kPointersToHereAreInterestingMask);
+  Assert(equal); // UNIMPLEMENTED : here should go RecordWriteStub
 
   // Count number of write barriers in generated code.
   isolate()->counters()->write_barriers_static()->Increment();
