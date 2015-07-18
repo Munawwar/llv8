@@ -2888,7 +2888,13 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
 }
 
 void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
-  UNIMPLEMENTED();
+  //TODO:Fast case implementation
+  std::vector<llvm::Value*> args;
+  llvm::Value* arg1 = Integer32ToSmi(instr->value());
+  args.push_back(arg1);
+  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kCharFromCode, Use(instr->context()), args);
+  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
+  instr->set_llvm_value(alloc_casted);
 }
 
 void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
