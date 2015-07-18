@@ -2884,7 +2884,20 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
 }
 
 void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
-  UNIMPLEMENTED();
+  std::vector<llvm::Value*> args;
+  llvm::Value* str = Integer32ToSmi(instr->string());
+  args.push_back(str);
+  //TODO : implement non constant case
+  if(instr->index()->IsConstant()) {
+    llvm::Value* const_index = Integer32ToSmi(instr->index());
+    args.push_back(const_index);
+  } else {
+    UNIMPLEMENTED(); 
+  }
+  llvm::Value* alloc = CallRuntimeFromDeferred(
+      Runtime::kStringCharCodeAtRT, Use(instr->context()), args);
+  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
+  instr->set_llvm_value(alloc_casted);
 }
 
 void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
