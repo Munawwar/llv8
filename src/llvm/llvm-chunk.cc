@@ -267,7 +267,9 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   StackMaps stackmaps;
   DataView view(stackmap_list[0]);
   stackmaps.parse(&view);
+#ifdef DEBUG
   stackmaps.dumpMultiline(std::cerr, "  ");
+#endif
 
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
@@ -407,7 +409,6 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   chunk_ = new(zone()) LLVMChunk(info(), graph());
   module_ = LLVMGranularity::getInstance().CreateModule();
   module_->setTargetTriple(LLVMGranularity::x64_target_triple);
-  std::cerr << module_->getTargetTriple() << std::endl;
   llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
       LLVMGranularity::getInstance().context());
   Types::Init(llvm_ir_builder_.get());
@@ -1287,7 +1288,6 @@ void LLVMChunkBuilder::CallStackMap(int stackmap_id,
 
 llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
                                                RelocInfo::Mode rmode) {
-  std::cerr << __FUNCTION__ << std::endl;
   bool extended = false;
   if (is_uint32(intptr_value)) {
     intptr_value = (intptr_value << 32) | kExtFillingValue;
@@ -1301,12 +1301,10 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
   meta_info.cell_extended = extended;
   reloc_data_->Add(rinfo, meta_info);
 
-  std::cerr << "END " << __FUNCTION__ << " " << intptr_value << std::endl;
   return value;
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
-  std::cerr << __FUNCTION__ << std::endl;
   // Note: constants might have EmitAtUses() == true
   Representation r = instr->representation();
   if (r.IsSmi()) {
@@ -1486,6 +1484,7 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
   Representation representation = instr->length()->representation();
   DCHECK(representation.Equals(instr->index()->representation()));
   DCHECK(representation.IsSmiOrInteger32());
+  USE(representation);
 
   if (instr->length()->IsConstant() && instr->index()->IsConstant()) {
     auto length = instr->length()->GetInteger32Constant();

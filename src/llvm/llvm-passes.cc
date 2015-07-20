@@ -59,21 +59,23 @@ NormalizePhisPass::NormalizePhisPass()
 }
 
 bool NormalizePhisPass::runOnFunction(llvm::Function& function) {
+  auto debug = false;
+#ifdef DEBUG
+  debug = true;
+#endif
   auto changed = false;
   llvm::DominatorTree& dom_tree = getAnalysis<llvm::DominatorTreeWrapperPass>()
       .getDomTree();
-#ifdef DEBUG
-  dom_tree.verifyDomTree();
-#endif
+  if (debug) dom_tree.verifyDomTree();
 
   // for each BB in the function
   for (auto bb = function.begin(); bb != function.end(); ++bb) {
-    std::cerr << "Grabbed a new BB\n";
+    if (debug) std::cerr << "Grabbed a new BB\n";
     llvm::PHINode* phi;
     // for all phi nodes in the block
     for (auto it = bb->begin(); (phi = llvm::dyn_cast<llvm::PHINode>(it));
         ++it) {
-      std::cerr << "Grabbed a new Phi\n";
+      if (debug) std::cerr << "Grabbed a new Phi\n";
       // FIXME(llvm): v8 doesn't like STL much
       std::set<llvm::BasicBlock*> preds(llvm::pred_begin(bb),
                                         llvm::pred_end(bb));
@@ -93,9 +95,9 @@ bool NormalizePhisPass::runOnFunction(llvm::Function& function) {
         // FIXME(llvm):
         // 1) if a loop is gonna run endlessly, fail
         // 2) case if there is no block with dominated == 1
-#ifdef DEBUG
-        std::cerr << "SIZE BEFORE " << wrongs.size() - rights.size() << std::endl;
-#endif
+        if (debug)
+          std::cerr << "SIZE BEFORE " << wrongs.size() - rights.size() << "\n";
+
         for (auto wrong_pair : wrongs) {
           if (rights.count(wrong_pair.first)) continue;
           auto wrong_node = dom_tree.getNode(wrong_pair.first);
@@ -120,9 +122,8 @@ bool NormalizePhisPass::runOnFunction(llvm::Function& function) {
             changed = true;
           }
         }
-#ifdef DEBUG
-        std::cerr << "SIZE AFTER " << wrongs.size() - rights.size() << std::endl;
-#endif
+        if (debug)
+          std::cerr << "SIZE AFTER " << wrongs.size() - rights.size() << "\n";
       } // while there are wrong blocks left
     } // for all phi nodes in the block
   } // for each BB in the function
