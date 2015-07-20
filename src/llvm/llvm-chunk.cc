@@ -2587,7 +2587,7 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
 }
 
 void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoPower(HPower* instr) {
@@ -3026,7 +3026,28 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
 }
 
 void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
-  UNIMPLEMENTED();
+  // UNIMPLEMENTED();
+  int env_index = instr->index();
+  //if (env_index == 0) return;
+  int index = 0;
+  if (instr->environment()->is_parameter_index(env_index)) {
+    index =  env_index - info()->num_parameters() - 1; //chunk()->GetParameterStackSlot(env_index);
+    int num_parameters = info()->num_parameters() + 3;
+    llvm::Function::arg_iterator it = function_->arg_begin();
+    //index = -index;
+    while (--index + num_parameters > 0) ++it;
+    instr->set_llvm_value(it);
+
+  } else {
+    //UNIMPLEMENTED();
+    index = env_index - instr->environment()->first_local_index();
+    if (index > LUnallocated::kMaxFixedSlotIndex) {
+      UNIMPLEMENTED();
+     // Retry(kTooManySpillSlotsNeededForOSR);
+     // spill_index = 0;
+    }
+  }
+
 }
 
 void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {
