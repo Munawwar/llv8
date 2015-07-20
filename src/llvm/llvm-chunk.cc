@@ -1170,6 +1170,9 @@ void LLVMChunkBuilder::DoPhi(HPhi* phi) {
     case Representation::Kind::kSmi:
       phi_type = Types::i64;
       break;
+    case Representation::Kind::kDouble:
+      phi_type = Types::float64;
+      break;
     default:
       UNIMPLEMENTED();
       phi_type = nullptr;
@@ -2057,7 +2060,9 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       }
     } else {
       DCHECK(to.IsDouble());
-      UNIMPLEMENTED();
+      llvm::Value* double_val = __ CreateSIToFP(Use(val), Types::float64);
+      instr->set_llvm_value(double_val);
+      //UNIMPLEMENTED();
     }
   }
 }
@@ -2591,7 +2596,21 @@ void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
 }
 
 void LLVMChunkBuilder::DoPower(HPower* instr) {
-  UNIMPLEMENTED();
+  MathPowStub stub(isolate(), MathPowStub::INTEGER);
+  CodeStub* c_stub = &stub;
+  //Handle<Code> code = Handle<Code>::cast(c_stub->GetCode()); 
+  Address code_ = reinterpret_cast<Address>(c_stub->GetCode());
+  std::vector<llvm::Value*> params;
+  for (int i = 1; i < instr->OperandCount(); i++)
+    params.push_back(Use(instr->OperandAt(i)));
+
+  for (int i = pending_pushed_args_.length() - 1; i >= 0; i--)
+    params.push_back(pending_pushed_args_[i]);
+  pending_pushed_args_.Clear();
+  llvm::Value* call = CallAddress(code_,//code->instruction_start(),
+                                  llvm::CallingConv::X86_64_V8_S1, params);
+  instr->set_llvm_value(call);
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
