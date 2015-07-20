@@ -954,27 +954,51 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
-                                                            bool is_unsigned) {
+                                                            bool is_unsigned, Representation r) {
   llvm::CmpInst::Predicate pred = llvm::CmpInst::BAD_FCMP_PREDICATE;
   switch (op) {
     case Token::EQ:
     case Token::EQ_STRICT:
+      if (r.IsDouble()) {
+        pred = llvm::CmpInst::FCMP_OEQ;
+        break;
+      }
       pred = llvm::CmpInst::ICMP_EQ;
       break;
     case Token::NE:
     case Token::NE_STRICT:
+      if (r.IsDouble()) {
+        pred = llvm::CmpInst::FCMP_ONE;
+        break;
+      }
       pred = llvm::CmpInst::ICMP_NE;
       break;
     case Token::LT:
-      pred = is_unsigned ? llvm::CmpInst::ICMP_ULT : llvm::CmpInst::ICMP_SLT;
+      if (r.IsDouble()) {
+        pred = llvm::CmpInst::FCMP_OLT;
+        break;
+      }
+       pred = is_unsigned ? llvm::CmpInst::ICMP_ULT : llvm::CmpInst::ICMP_SLT;
       break;
     case Token::GT:
+      if (r.IsDouble()) {
+        pred =  llvm::CmpInst::FCMP_OGT;
+        break;
+      }
       pred = is_unsigned ? llvm::CmpInst::ICMP_UGT : llvm::CmpInst::ICMP_SGT;
       break;
     case Token::LTE:
+      if (r.IsDouble()) {
+        pred = llvm::CmpInst::FCMP_OLE;
+        break;
+      }
       pred = is_unsigned ? llvm::CmpInst::ICMP_ULE : llvm::CmpInst::ICMP_SLE;
       break;
     case Token::GTE:
+      if (r.IsDouble()) {
+        pred = llvm::CmpInst::FCMP_OGE;
+        break;
+      }
       pred = is_unsigned ? llvm::CmpInst::ICMP_UGE : llvm::CmpInst::ICMP_SGE;
       break;
     case Token::IN:
@@ -1895,7 +1919,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
       // and our tests don't need this conversion.
       // UNIMPLEMENTED();
     } else {
-      UNIMPLEMENTED();
+      DeoptimizeIf(cmp_val, instr->block(), true);
     }
 
     if (deoptimize_on_minus_zero) {
@@ -2159,7 +2183,7 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
   bool is_unsigned = r.IsDouble()
       || left->CheckFlag(HInstruction::kUint32)
       || right->CheckFlag(HInstruction::kUint32);
-  llvm::CmpInst::Predicate pred = TokenToPredicate(instr->token(), is_unsigned);
+  llvm::CmpInst::Predicate pred = TokenToPredicate(instr->token(), is_unsigned, instr->representation());
 
   if (r.IsSmi()) {
     UNIMPLEMENTED();
@@ -2172,7 +2196,14 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
     instr->set_llvm_value(branch);
   } else {
     DCHECK(r.IsDouble());
-    UNIMPLEMENTED();
+    llvm::Value* llvm_left = Use(left);
+    llvm::Value* llvm_right = Use(right);
+    llvm::Value* compare = __ CreateFCmp(pred, llvm_left, llvm_right);
+    llvm::Value* branch = __ CreateCondBr(compare,
+        Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    instr->set_llvm_value(branch);
+    //FIXME: Hanlde Nan case, parity_even case
+    //UNIMPLEMENTED();
   }
 }
 

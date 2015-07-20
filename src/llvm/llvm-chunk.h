@@ -492,7 +492,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
 
   static llvm::CmpInst::Predicate TokenToPredicate(Token::Value op,
-                                                   bool is_unsigned);
+                                                   bool is_unsigned, Representation r);
 
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
