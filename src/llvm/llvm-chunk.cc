@@ -2627,20 +2627,21 @@ void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
 }
 
 void LLVMChunkBuilder::DoPower(HPower* instr) {
-  /*MathPowStub stub(isolate(), MathPowStub::INTEGER);
-  CodeStub* c_stub = &stub;
-  //Handle<Code> code = Handle<Code>::cast(c_stub->GetCode()); 
-  Address code_ = reinterpret_cast<Address>(c_stub->GetCode());
+  MathPowStub stub(isolate(), MathPowStub::INTEGER);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap;
+    code = stub.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
   std::vector<llvm::Value*> params;
-  for (int i = 1; i < instr->OperandCount(); i++)
-    params.push_back(Use(instr->OperandAt(i)));
-
-  for (int i = pending_pushed_args_.length() - 1; i >= 0; i--)
-    params.push_back(pending_pushed_args_[i]);
-  pending_pushed_args_.Clear();
-  llvm::Value* call = CallAddress(code_,//code->instruction_start(),
-                                  llvm::CallingConv::X86_64_V8_S1, params);
-  instr->set_llvm_value(call);*/
+  //FIXME: figure out calling conversion
+  llvm::Value* call = CallAddress(code->instruction_start(),
+                                  llvm::CallingConv::X86_64_V8_CES, params);
+  auto int_ = __ CreatePtrToInt(call, Types::i64); //TODO:Fix this
+  auto res = __ CreateBitCast(int_, Types::float64);
+  instr->set_llvm_value(res);
   //UNIMPLEMENTED();
 }
 
