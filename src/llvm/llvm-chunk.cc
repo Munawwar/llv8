@@ -3026,7 +3026,7 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
 }
 
 void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
-  // UNIMPLEMENTED();
+  UNIMPLEMENTED();
   int env_index = instr->index();
   //if (env_index == 0) return;
   int index = 0;

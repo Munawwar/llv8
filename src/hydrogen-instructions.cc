@@ -2508,16 +2508,6 @@ bool HPhi::HasRealUses() {
 
 
 HValue* HPhi::GetRedundantReplacement() {
-  if (!block()->graph()->info()->closure().is_null() && block()->graph()->info()->closure()->PassesFilter(FLAG_llvm_filter)) {
-    if (OperandCount() == 2 &&
-        OperandAt(0)->IsParameter() &&  OperandAt(1)->IsUnknownOSRValue()) {
-       return OperandAt(0);
-    }
-    if (OperandCount() == 2 &&
-       OperandAt(0)->IsContext() &&  OperandAt(1)->IsContext()) {
-      return OperandAt(0);
-    }
-  }
   HValue* candidate = NULL;
   int count = OperandCount();
   int position = 0;
