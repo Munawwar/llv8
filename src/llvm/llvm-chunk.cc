@@ -2596,7 +2596,7 @@ void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
 }
 
 void LLVMChunkBuilder::DoPower(HPower* instr) {
-  MathPowStub stub(isolate(), MathPowStub::INTEGER);
+  /*MathPowStub stub(isolate(), MathPowStub::INTEGER);
   CodeStub* c_stub = &stub;
   //Handle<Code> code = Handle<Code>::cast(c_stub->GetCode()); 
   Address code_ = reinterpret_cast<Address>(c_stub->GetCode());
@@ -2609,7 +2609,7 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
   pending_pushed_args_.Clear();
   llvm::Value* call = CallAddress(code_,//code->instruction_start(),
                                   llvm::CallingConv::X86_64_V8_S1, params);
-  instr->set_llvm_value(call);
+  instr->set_llvm_value(call);*/
   //UNIMPLEMENTED();
 }
 
