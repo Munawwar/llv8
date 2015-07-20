@@ -101,14 +101,19 @@ bool NormalizePhisPass::runOnFunction(llvm::Function& function) {
           auto wrong_node = dom_tree.getNode(wrong_pair.first);
           llvm::BasicBlock* unique_dominated = nullptr;
           int dominated = 0;
-          for (auto b : preds) {
-            if (dom_tree.dominates(wrong_node, dom_tree.getNode(b))) {
-              dominated++;
-              unique_dominated = b;
+          bool no_choice = (preds.size() == 1);
+          if (no_choice) {
+            unique_dominated = *preds.begin(); // here it might not be dominated
+          } else {
+            for (auto b : preds) {
+              if (dom_tree.dominates(wrong_node, dom_tree.getNode(b))) {
+                dominated++;
+                unique_dominated = b;
+              }
+              if (dominated > 1) break;
             }
-            if (dominated > 1) break;
           }
-          if (dominated == 1) {
+          if (dominated == 1 || no_choice) {
             phi->setIncomingBlock(wrong_pair.second, unique_dominated);
             rights.insert(wrong_pair.first); // effectively remove from wrongs
             preds.erase(unique_dominated); // remove from preds
