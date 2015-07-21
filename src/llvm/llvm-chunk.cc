@@ -635,6 +635,28 @@ llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   return __ CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
 }
 
+llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
+                                           llvm::CallingConv::ID calling_conv,
+                                           std::vector<llvm::Value*>& params) {
+  llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
+  bool is_var_arg = false;
+
+  // Tagged return type won't hurt even if in fact it's void
+  auto return_type = Types::float64;
+  std::vector<llvm::Type*> param_types;
+  param_types.push_back(params[0]->getType());
+  param_types.push_back(params[1]->getType());
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      return_type, param_types, is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+
+  llvm::Value* casted = __ CreateIntToPtr(target_adderss, ptr_to_function);
+  llvm::CallInst* call_inst = __ CreateCall(casted, params);
+  call_inst->setCallingConv(calling_conv);
+
+  return call_inst;
+}
+
 llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
                                            llvm::CallingConv::ID calling_conv,
                                            std::vector<llvm::Value*>& params) {
@@ -2658,22 +2680,30 @@ void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
 }
 
 void LLVMChunkBuilder::DoPower(HPower* instr) {
-  MathPowStub stub(isolate(), MathPowStub::INTEGER);
-  Handle<Code> code = Handle<Code>::null();
-  {
-    AllowHandleAllocation allow_handles;
-    AllowHeapAllocation allow_heap;
-    code = stub.GetCode();
-    // FIXME(llvm,gc): respect reloc info mode...
+  Representation exponent_type = instr->right()->representation();
+  
+  if (exponent_type.IsSmi()) {
+    UNIMPLEMENTED();
+  } else if (exponent_type.IsTagged()) {
+    UNIMPLEMENTED();
+  } else if (exponent_type.IsInteger32()) {
+    MathPowStub stub(isolate(), MathPowStub::INTEGER);
+    Handle<Code> code = Handle<Code>::null();
+    {
+      AllowHandleAllocation allow_handles;
+      AllowHeapAllocation allow_heap;
+      code = stub.GetCode();
+      // FIXME(llvm,gc): respect reloc info mode...
+    }
+    std::vector<llvm::Value*> params;
+    for (int i = 0; i < instr->OperandCount(); i++)
+      params.push_back(Use(instr->OperandAt(i))); 
+    llvm::Value* call = CallAddressForMathPow(code->instruction_start(),
+                                    llvm::CallingConv::X86_64_V8_S2, params);
+    instr->set_llvm_value(call);
+  } else {
+    UNIMPLEMENTED();
   }
-  std::vector<llvm::Value*> params;
-  //FIXME: figure out calling conversion
-  llvm::Value* call = CallAddress(code->instruction_start(),
-                                  llvm::CallingConv::X86_64_V8_CES, params);
-  auto int_ = __ CreatePtrToInt(call, Types::i64); //TODO:Fix this
-  auto res = __ CreateBitCast(int_, Types::float64);
-  instr->set_llvm_value(res);
-  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {

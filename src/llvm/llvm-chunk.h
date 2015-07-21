@@ -514,6 +514,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void Assert(llvm::Value* condition);
   void IncrementCounter(StatsCounter* counter, int value);
   llvm::Value* CallVoid(Address target);
+  llvm::Value* CallAddressForMathPow(Address target, llvm::CallingConv::ID calling_conv,
+                           std::vector<llvm::Value*>& params);
   // This is intended to be a highly reusable method for calling stuff.
   llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params);
