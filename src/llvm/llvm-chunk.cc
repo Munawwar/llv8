@@ -2859,7 +2859,7 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
      gep_0 = __ CreateGEP(int_ptr, add);
   }
  
-  if(!instr->value()->IsConstant()){
+  /*if(!instr->value()->IsConstant()){
     llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
     llvm::Value* Store = __ CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(Store);
@@ -2871,8 +2871,33 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
     llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
     llvm::Value* Store = __ CreateStore(llvm_val, casted_address);
     instr->set_llvm_value(Store);
-  }
- 
+  }*/
+  HValue* hValue = instr->value();
+  llvm::Value* store = nullptr;
+  if (hValue->representation().IsInteger32()) {
+    llvm::Value* store_address = ConstructAddress(Use(instr->elements()), inst_offset);
+    llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                   Types::ptr_i32);
+    llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i32);
+    store = __ CreateStore(casted_value, casted_adderss);
+  } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
+    llvm::Value* store_address = ConstructAddress(Use(instr->elements()), inst_offset);
+    llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                   Types::ptr_i64);
+    llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i64);
+    store = __ CreateStore(casted_value, casted_adderss);
+  } else {
+    DCHECK(hValue->IsConstant());
+    HConstant* constant = HConstant::cast(instr->value());
+    Handle<Object> handle_value = constant->handle(isolate());
+    llvm::Value* store_address = ConstructAddress(Use(instr->elements()),
+                                                  inst_offset);
+    llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                  Types::ptr_i64);
+    auto llvm_val = MoveHeapObject(handle_value);
+    store = __ CreateStore(llvm_val, casted_adderss);
+  } 
+  instr->set_llvm_value(store);
   if (instr->NeedsWriteBarrier()) {
     UNIMPLEMENTED();
   }
