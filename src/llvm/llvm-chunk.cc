@@ -2089,9 +2089,8 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
 
 void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
   if (!instr->value()->type().IsHeapObject()) {
-    bool not_smi_check = true;
-    llvm::Value* not_smi = SmiCheck(Use(instr->value()), not_smi_check);
-    DeoptimizeIf(not_smi, instr->block());
+    llvm::Value* is_smi = SmiCheck(Use(instr->value()));
+    DeoptimizeIf(is_smi, instr->block());
   }
 }
 
