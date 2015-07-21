@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <cstdio>
+#include "src/code-factory.h"
 #include "src/disassembler.h"
 #include "llvm-chunk.h"
 #include "llvm-passes.h"
@@ -641,7 +642,7 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
   bool is_var_arg = false;
 
   // Tagged return type won't hurt even if in fact it's void
-  auto return_type = Types::ptr_i8;
+  auto return_type = Types::ptr_i8; // TODO(llvm): set tagged, check tests
   auto param_type = Types::tagged;
   std::vector<llvm::Type*> param_types(params.size(), param_type);
   llvm::FunctionType* function_type = llvm::FunctionType::get(
@@ -954,52 +955,47 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
-                                                            bool is_unsigned, Representation r) {
+                                                            bool is_unsigned,
+                                                            bool is_double) {
   llvm::CmpInst::Predicate pred = llvm::CmpInst::BAD_FCMP_PREDICATE;
   switch (op) {
     case Token::EQ:
     case Token::EQ_STRICT:
-      if (r.IsDouble()) {
+      if (is_double)
         pred = llvm::CmpInst::FCMP_OEQ;
-        break;
-      }
-      pred = llvm::CmpInst::ICMP_EQ;
+      else
+        pred = llvm::CmpInst::ICMP_EQ;
       break;
     case Token::NE:
     case Token::NE_STRICT:
-      if (r.IsDouble()) {
+      if (is_double)
         pred = llvm::CmpInst::FCMP_ONE;
-        break;
-      }
-      pred = llvm::CmpInst::ICMP_NE;
+      else
+        pred = llvm::CmpInst::ICMP_NE;
       break;
     case Token::LT:
-      if (r.IsDouble()) {
+      if (is_double)
         pred = llvm::CmpInst::FCMP_OLT;
-        break;
-      }
-       pred = is_unsigned ? llvm::CmpInst::ICMP_ULT : llvm::CmpInst::ICMP_SLT;
+      else
+        pred = is_unsigned ? llvm::CmpInst::ICMP_ULT : llvm::CmpInst::ICMP_SLT;
       break;
     case Token::GT:
-      if (r.IsDouble()) {
+      if (is_double)
         pred =  llvm::CmpInst::FCMP_OGT;
-        break;
-      }
-      pred = is_unsigned ? llvm::CmpInst::ICMP_UGT : llvm::CmpInst::ICMP_SGT;
+      else
+        pred = is_unsigned ? llvm::CmpInst::ICMP_UGT : llvm::CmpInst::ICMP_SGT;
       break;
     case Token::LTE:
-      if (r.IsDouble()) {
+      if (is_double)
         pred = llvm::CmpInst::FCMP_OLE;
-        break;
-      }
-      pred = is_unsigned ? llvm::CmpInst::ICMP_ULE : llvm::CmpInst::ICMP_SLE;
+      else
+        pred = is_unsigned ? llvm::CmpInst::ICMP_ULE : llvm::CmpInst::ICMP_SLE;
       break;
     case Token::GTE:
-      if (r.IsDouble()) {
+      if (is_double)
         pred = llvm::CmpInst::FCMP_OGE;
-        break;
-      }
-      pred = is_unsigned ? llvm::CmpInst::ICMP_UGE : llvm::CmpInst::ICMP_SGE;
+      else
+        pred = is_unsigned ? llvm::CmpInst::ICMP_UGE : llvm::CmpInst::ICMP_SGE;
       break;
     case Token::IN:
     case Token::INSTANCEOF:
@@ -1860,29 +1856,29 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
 
-llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* val, Heap::RootListIndex index) {
-  ExternalReference roots_array_start =
-        ExternalReference::roots_array_start(isolate());
-  Address target_address = roots_array_start.address();
-  auto address_val = __ getInt64(reinterpret_cast<uint64_t>(target_address));
- 
-  llvm::Value* int8_ptr_2 = __ CreateIntToPtr(address_val, Types::ptr_i64);
- 
-  llvm::Value* gep = __ CreateLoad(int8_ptr_2);
-  auto value = __ getInt64(kRootRegisterBias);
-  llvm::Value* r13_val = __ CreateAdd(gep, value);
-  
-  auto offset = __ getInt64((index << kPointerSizeLog2) - kRootRegisterBias);
-  llvm::Value* int8_ptr = __ CreateIntToPtr(r13_val, Types::ptr_i8);
-  llvm::Value* gep_2 = __ CreateGEP(int8_ptr, offset);
- 
-  llvm::Value* bitcast_1 = __ CreateBitCast(gep_2, Types::ptr_i64);
-  llvm::Value* bitcast_2 = __ CreateBitOrPointerCast(val, Types::ptr_i64);
-  llvm::Value* load_first = __ CreateLoad(bitcast_2);
-  llvm::Value* load_second = __ CreateLoad(bitcast_1);
- 
-  llvm::Value* cmp_result = __ CreateICmpEQ(load_first, load_second);
- 
+llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
+  Address root_array_start_address =
+      ExternalReference::roots_array_start(isolate()).address();
+  auto int64_address =
+      __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
+  auto int64_ptr_address = __ CreateIntToPtr(int64_address, Types::ptr_i64);
+  auto loaded_root = __ CreateLoad(int64_ptr_address);
+//  auto bias_value = __ getInt64(kRootRegisterBias);
+//  auto r13_val = __ CreateAdd(loaded_root, bias_value);
+  int offset = (index << kPointerSizeLog2) - kRootRegisterBias;
+//  auto load_address = ConstructAddress(r13_val, offset);
+  auto load_address = ConstructAddress(loaded_root, offset);
+  auto casted_load_address = __ CreateBitCast(load_address, Types::ptr_i64);
+  return __ CreateLoad(casted_load_address);
+}
+
+llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* operand_address,
+                                           Heap::RootListIndex index) {
+  llvm::Value* root_value_by_index = LoadRoot(index);
+  llvm::Value* operand_addr_casted = __ CreateBitOrPointerCast(operand_address,
+                                                               Types::ptr_i64);
+  llvm::Value* operand = __ CreateLoad(operand_addr_casted);
+  llvm::Value* cmp_result = __ CreateICmpEQ(operand, root_value_by_index);
   return cmp_result;
 }
 
@@ -2174,7 +2170,8 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr) {
+void LLVMChunkBuilder::DoCompareNumericAndBranch(
+    HCompareNumericAndBranch* instr) {
   Representation r = instr->representation();
   HValue* left = instr->left();
   HValue* right = instr->right();
@@ -2183,8 +2180,11 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(HCompareNumericAndBranch* instr
   bool is_unsigned = r.IsDouble()
       || left->CheckFlag(HInstruction::kUint32)
       || right->CheckFlag(HInstruction::kUint32);
-  llvm::CmpInst::Predicate pred = TokenToPredicate(instr->token(), is_unsigned, instr->representation());
 
+  bool is_double = instr->representation().IsDouble();
+  llvm::CmpInst::Predicate pred = TokenToPredicate(instr->token(),
+                                                   is_unsigned,
+                                                   is_double);
   if (r.IsSmi()) {
     UNIMPLEMENTED();
   } else if (r.IsInteger32()) {
@@ -2212,7 +2212,39 @@ void LLVMChunkBuilder::DoCompareHoleAndBranch(HCompareHoleAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
-  UNIMPLEMENTED();
+  Token::Value op = instr->token();
+  Handle<Code> ic = CodeFactory::CompareIC(isolate(), op).code();
+
+  auto context = Use(instr->context());
+  auto left = Use(instr->left());
+  auto right = Use(instr->right());
+  std::vector<llvm::Value*> params = { context, left, right };
+  auto result = CallAddress(ic->instruction_start(),
+                            llvm::CallingConv::C,
+                            params);
+  // Lithium comparison is a little strange, I think mine is all right.
+  auto compare_result = __ CreateICmpNE(result, __ getInt64(0));
+  auto compare_true = NewBlock("generic comparison true");
+  auto compare_false = NewBlock("generic comparison false");
+  llvm::Value* true_value = nullptr;
+  llvm::Value* false_value = nullptr;
+  auto merge = NewBlock("generic comparison merge");
+  __ CreateCondBr(compare_result, compare_true, compare_false);
+
+  __ SetInsertPoint(compare_true);
+  true_value = LoadRoot(Heap::kTrueValueRootIndex);
+  __ CreateBr(merge);
+
+  __ SetInsertPoint(compare_false);
+  false_value = LoadRoot(Heap::kFalseValueRootIndex);
+  __ CreateBr(merge);
+
+  __ SetInsertPoint(merge);
+  auto phi = __ CreatePHI(Types::tagged, 2);
+  phi->addIncoming(true_value, compare_true);
+  phi->addIncoming(false_value, compare_false);
+  instr->set_llvm_value(phi);
+  UNIMPLEMENTED(); // calling convention should be v8_ic
 }
 
 void LLVMChunkBuilder::DoCompareMinusZeroAndBranch(HCompareMinusZeroAndBranch* instr) {
@@ -2848,6 +2880,20 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
 
 void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
   UNIMPLEMENTED();
+  DCHECK(instr->object()->representation().IsTagged());
+  DCHECK(instr->key()->representation().IsTagged());
+  DCHECK(instr->value()->representation().IsTagged());
+
+  Handle<Code> ic = CodeFactory::KeyedStoreICInOptimizedCode(
+                        isolate(), instr->language_mode(),
+                        instr->initialization_state()).code();
+
+  // TODO(llvm): RecordSafepointWithLazyDeopt (and reloc info) + MarkAsCall
+
+  std::vector<llvm::Value*> no_params;
+  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::C,
+                            no_params);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {

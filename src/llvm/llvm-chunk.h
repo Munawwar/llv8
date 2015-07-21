@@ -492,7 +492,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
 
   static llvm::CmpInst::Predicate TokenToPredicate(Token::Value op,
-                                                   bool is_unsigned, Representation r);
+                                                   bool is_unsigned,
+                                                   bool is_double = false);
 
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
@@ -532,7 +533,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* CallRuntimeViaId(Runtime::FunctionId id);
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
-  llvm::Value* CompareRoot(llvm::Value* val, Heap::RootListIndex index);
+  llvm::Value* LoadRoot(Heap::RootListIndex index);
+  llvm::Value* CompareRoot(llvm::Value* val_address, Heap::RootListIndex index);
   llvm::Value* RecordRelocInfo(uint64_t intptr_value, RelocInfo::Mode rmode);
   void RecordWriteForMap(llvm::Value* object, llvm::Value* map);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
