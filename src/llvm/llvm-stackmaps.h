@@ -30,7 +30,7 @@
 #include "llvm-headers.h"
 //#include "src/list-inl.h"
 #include "src/x64/assembler-x64-inl.h" // For now
-
+#include "src/llvm/reg.h"
 #include <map>
 #include <vector>
 
@@ -75,7 +75,7 @@ class DWARFRegister {
 
   int16_t dwarf_reg_num() const { return dwarf_reg_num_; }
 
-  Register reg() const;
+  StackMapReg reg() const;
 
   // TODO(llvm): method names should start with a capital (style)
   void dump(std::ostream&) const;

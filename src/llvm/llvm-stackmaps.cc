@@ -38,14 +38,15 @@ T readObject(StackMaps::ParseContext& context) {
   return result;
 }
 
-Register DWARFRegister::reg() const {
-  if (dwarf_reg_num_ < 0 ||
+StackMapReg DWARFRegister::reg() const {
+  /*if (dwarf_reg_num_ < 0 ||
       dwarf_reg_num_ >= Register::kNumRegisters) {
     UNIMPLEMENTED();
     //return Register::from_code(15);
   }
   int const map[] = { 0, 2, 1, 3, 6, 7, 5, 4, 8, 9, 10, 11, 12, 13, 14, 15 };
-  return Register::from_code(map[dwarf_reg_num_]);
+  return Register::from_code(map[dwarf_reg_num_]);*/
+  return StackMapReg::FromIndex(dwarf_reg_num_);
 }
 
 void DWARFRegister::dump(std::ostream& os) const {

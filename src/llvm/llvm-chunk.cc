@@ -179,7 +179,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
   if (location.kind == StackMaps::Location::kDirect) {
     UNIMPLEMENTED();
   } else if (location.kind == StackMaps::Location::kIndirect) {
-    Register reg = location.dwarf_reg.reg();
+    Register reg = location.dwarf_reg.reg().IntReg();
     if (!reg.is(rbp)) UNIMPLEMENTED();
     auto offset = location.offset;
     DCHECK(offset % kPointerSize == 0);
@@ -199,7 +199,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
       translation->StoreInt32StackSlot(index);
     }
   } else if (location.kind == StackMaps::Location::kRegister) {
-    Register reg = location.dwarf_reg.reg();
+    Register reg = location.dwarf_reg.reg().IntReg();
     if (is_tagged) {
       translation->StoreRegister(reg);
     } else if (is_uint32) {
