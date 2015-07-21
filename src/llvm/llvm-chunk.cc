@@ -2850,7 +2850,7 @@ void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
 
 void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   HValue* key = instr->key();
-  Representation representation = instr->representation();
+  Representation representation = instr->value()->representation();
   int shift_size = ElementsKindToShiftSize(FAST_ELEMENTS);
   uint32_t inst_offset = instr->base_offset();
   llvm::Value* gep_0 = nullptr;
@@ -2888,19 +2888,6 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
      gep_0 = __ CreateGEP(int_ptr, add);
   }
  
-  /*if(!instr->value()->IsConstant()){
-    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
-    llvm::Value* Store = __ CreateStore(Use(instr->value()), casted_address);
-    instr->set_llvm_value(Store);
-  } else {
-    HConstant* constant = HConstant::cast(instr->value());
-    Handle<Object> handle_value = constant->handle(isolate());
-    int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
-    auto llvm_val = __ getInt64(value);
-    llvm::Value* casted_address = __ CreateBitCast(gep_0, Types::ptr_i64);
-    llvm::Value* Store = __ CreateStore(llvm_val, casted_address);
-    instr->set_llvm_value(Store);
-  }*/
   HValue* hValue = instr->value();
   llvm::Value* store = nullptr;
   if (hValue->representation().IsInteger32()) {
