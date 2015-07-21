@@ -2904,24 +2904,18 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   HValue* hValue = instr->value();
   llvm::Value* store = nullptr;
   if (hValue->representation().IsInteger32()) {
-    llvm::Value* store_address = ConstructAddress(Use(instr->elements()), inst_offset);
-    llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+    llvm::Value* casted_adderss = __ CreateBitCast(gep_0,
                                                    Types::ptr_i32);
-    llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i32);
-    store = __ CreateStore(casted_value, casted_adderss);
+    store = __ CreateStore(Use(hValue), casted_adderss);
   } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
-    llvm::Value* store_address = ConstructAddress(Use(instr->elements()), inst_offset);
-    llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+    llvm::Value* casted_adderss = __ CreateBitCast(gep_0,
                                                    Types::ptr_i64);
-    llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i64);
-    store = __ CreateStore(casted_value, casted_adderss);
+    store = __ CreateStore(Use(hValue), casted_adderss);
   } else {
     DCHECK(hValue->IsConstant());
     HConstant* constant = HConstant::cast(instr->value());
     Handle<Object> handle_value = constant->handle(isolate());
-    llvm::Value* store_address = ConstructAddress(Use(instr->elements()),
-                                                  inst_offset);
-    llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+    llvm::Value* casted_adderss = __ CreateBitCast(gep_0,
                                                   Types::ptr_i64);
     auto llvm_val = MoveHeapObject(handle_value);
     store = __ CreateStore(llvm_val, casted_adderss);
