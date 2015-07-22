@@ -776,14 +776,14 @@ llvm::Value* LLVMChunkBuilder::CompareMap(llvm::Value* object,
 llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
   auto page_align_mask = __ getInt64(~Page::kPageAlignmentMask);
   // TODO(llvm): do the types match?
-  auto masked_object = __ CreateAnd(object, page_align_mask);
+  auto masked_object = __ CreateAnd(object, page_align_mask, "CheckPageFlag1");
   auto flags_address = ConstructAddress(masked_object,
                                         MemoryChunk::kFlagsOffset);
   auto i32_ptr_flags_address = __ CreateBitCast(flags_address, Types::ptr_i32);
   auto flags = __ CreateLoad(i32_ptr_flags_address);
   auto llvm_mask = __ getInt32(mask);
   auto and_result = __ CreateAnd(flags, llvm_mask);
-  return __ CreateICmpEQ(and_result, __ getInt32(0));
+  return __ CreateICmpEQ(and_result, __ getInt32(0), "CheckPageFlag");
 }
 
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
@@ -963,6 +963,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
   Deoptimizer::BailoutType bailout_type = info()->IsStub()
       ? Deoptimizer::LAZY
       : Deoptimizer::EAGER;
+  DCHECK_EQ(bailout_type, Deoptimizer::EAGER); // We don't support lazy yet.
 
   Address entry;
   {
@@ -1347,6 +1348,10 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
     extended = true;
   }
   llvm::Value* value = __ getInt64(intptr_value);
+//  bool is_volatile = true;
+//  llvm::Value* pointer = __ CreateAlloca(Types::i64);
+//  __ CreateStore(value, pointer, is_volatile);
+//  value = __ CreateLoad(pointer, is_volatile);
 
   // Here we use the intptr_value (data) only to identify the entry in the map
   RelocInfo rinfo(rmode, intptr_value);
@@ -1411,7 +1416,7 @@ void LLVMChunkBuilder::DoReturn(HReturn* instr) {
 }
 
 void LLVMChunkBuilder::DoAbnormalExit(HAbnormalExit* instr) {
-//  UNIMPLEMENTED();
+  __ CreateUnreachable();
 }
 
 void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
@@ -2335,7 +2340,12 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
   DCHECK(type == Deoptimizer::EAGER);
   auto reason = instr->reason();
   USE(reason);
-  DeoptimizeIf(__ getTrue(), instr->block());
+  bool negate_condition = false;
+  // It's unreacheable, but we don't care. We need it so that DeoptimizeIf()
+  // does not create a new basic block which ends up unterminated.
+  auto next_block = Use(instr->SuccessorAt(0));
+  DeoptimizeIf(__ getTrue(), instr->block(), negate_condition, next_block);
+
 }
 
 void LLVMChunkBuilder::DoDiv(HDiv* instr) {
@@ -3116,7 +3126,8 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
   llvm::BasicBlock* end = NewBlock("TransitionElementsKind end");
   llvm::BasicBlock* cont = NewBlock("TransitionElementsKind meat");
 
-  auto comp = Compare(FieldOperand(object, HeapObject::kMapOffset), from_map);
+  auto comp = Compare(LoadFieldOperand(object, HeapObject::kMapOffset),
+                      from_map);
   __ CreateCondBr(comp, cont, end);
   __ SetInsertPoint(cont);
 
@@ -3150,7 +3161,7 @@ void LLVMChunkBuilder::RecordWriteForMap(llvm::Value* object,
 
   if (emit_debug_code()) {
     // FIXME(llvm): maybe we should dereference the FieldOperand
-    Assert(Compare(map, FieldOperand(object, HeapObject::kMapOffset)));
+    Assert(Compare(map, LoadFieldOperand(object, HeapObject::kMapOffset)));
   }
 
   auto map_address = FieldOperand(object, HeapObject::kMapOffset);
