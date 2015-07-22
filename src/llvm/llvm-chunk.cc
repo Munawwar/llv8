@@ -498,36 +498,46 @@ void LLVMChunkBuilder::ResolvePhis(HBasicBlock* block) {
   }
 }
 
+llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
+  switch (r.kind()) {
+    case Representation::Kind::kInteger32:
+      return Types::i32;
+    case Representation::Kind::kTagged:
+      return Types::tagged;
+    case Representation::Kind::kSmi:
+      return Types::i64;
+    case Representation::Kind::kDouble:
+      return Types::float64;
+    default:
+      UNIMPLEMENTED();
+      return nullptr;
+  }
+}
+
+void LLVMChunkBuilder::DoDummyUse(HInstruction* instr) {
+  Representation r = instr->representation();
+  llvm::Type* type = GetLLVMType(r);
+  auto dummy_constant = __ getInt64(0xdead);
+  auto casted_dummy_constant = __ CreateBitOrPointerCast(dummy_constant, type);
+  for (int i = 1; i < instr->OperandCount(); ++i) {
+    if (instr->OperandAt(i)->IsControlInstruction()) continue;
+    Use(instr->OperandAt(i)); // Visit all operands and dummy-use them as well.
+  }
+  instr->set_llvm_value(casted_dummy_constant);
+}
+
 void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
   HInstruction* old_current = current_instruction_;
   current_instruction_ = current;
 
-//  LInstruction* instr = NULL;
   if (current->CanReplaceWithDummyUses()) {
-    if (current->OperandCount() == 0) {
-//      instr = DefineAsRegister(new(zone()) LDummy());
-      UNIMPLEMENTED();
-    } else {
-      DCHECK(!current->OperandAt(0)->IsControlInstruction());
-      UNIMPLEMENTED();
-//      instr = DefineAsRegister(new(zone())
-//          LDummyUse(UseAny(current->OperandAt(0))));
-    }
-    for (int i = 1; i < current->OperandCount(); ++i) {
-      if (current->OperandAt(i)->IsControlInstruction()) continue;
-        UNIMPLEMENTED();
-//      LInstruction* dummy =
-//          new(zone()) LDummyUse(UseAny(current->OperandAt(i)));
-//      dummy->set_hydrogen_value(current);
-//      chunk()->AddInstruction(dummy, current_block_);
-    }
+    DoDummyUse(current);
   } else {
     HBasicBlock* successor;
     if (current->IsControlInstruction() &&
         HControlInstruction::cast(current)->KnownSuccessorBlock(&successor) &&
         successor != NULL) {
-      // Goto(successor)
-      __ CreateBr(Use(successor));
+      __ CreateBr(Use(successor)); // Goto(successor)
     } else {
       current->CompileToLLVM(this); // the meat
     }
@@ -535,11 +545,7 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
 
 //  argument_count_ += current->argument_delta();
 //  DCHECK(argument_count_ >= 0);
-//
-//  if (instr != NULL) {
-//    AddInstruction(instr, current);
-//  }
-//
+
   current_instruction_ = old_current;
 }
 
@@ -693,6 +699,15 @@ llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
   return __ CreateGEP(base_casted, offset_val);
 }
 
+// TODO(llvm): It should probably become 'load field operand as type'
+// with tagged as default.
+llvm::Value* LLVMChunkBuilder::LoadFieldOperand(llvm::Value* base, int offset) {
+  llvm::Value* address = FieldOperand(base, offset);
+  llvm::Value* casted_address = __ CreatePointerCast(address,
+                                                     Types::ptr_tagged);
+  return __ CreateLoad(casted_address);
+}
+
 llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
     llvm::Value* offset_val = __ getInt64(offset);
     llvm::Value* base_casted = __ CreateIntToPtr(base, Types::ptr_i8);
@@ -746,15 +761,16 @@ llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, Handle<Object> rhs) {
     //    Cmp(dst, Smi::cast(*rhs));
     return nullptr;
   } else {
-    llvm::Value* llvm_rhs = __ CreateBitOrPointerCast(
-        MoveHeapObject(rhs), Types::ptr_i8);
-    return __ CreateICmpEQ(lhs, llvm_rhs);
+    auto type = Types::tagged;
+    auto llvm_rhs = __ CreateBitOrPointerCast(MoveHeapObject(rhs), type);
+    auto casted_lhs = __ CreateBitOrPointerCast(lhs, type);
+    return __ CreateICmpEQ(casted_lhs, llvm_rhs);
   }
 }
 
 llvm::Value* LLVMChunkBuilder::CompareMap(llvm::Value* object,
                                           Handle<Map> map) {
-  return Compare(FieldOperand(object, HeapObject::kMapOffset), map);
+  return Compare(LoadFieldOperand(object, HeapObject::kMapOffset), map);
 }
 
 llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
@@ -1211,23 +1227,7 @@ LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
 
 void LLVMChunkBuilder::DoPhi(HPhi* phi) {
   Representation r = phi->RepresentationFromInputs();
-  llvm::Type* phi_type;
-  switch (r.kind()) {
-    case Representation::Kind::kInteger32:
-      phi_type = Types::i32;
-      break;
-    case Representation::Kind::kTagged:
-    case Representation::Kind::kSmi:
-      phi_type = Types::i64;
-      break;
-    case Representation::Kind::kDouble:
-      phi_type = Types::float64;
-      break;
-    default:
-      UNIMPLEMENTED();
-      phi_type = nullptr;
-  }
-
+  llvm::Type* phi_type = GetLLVMType(r);
   llvm::PHINode* llvm_phi = __ CreatePHI(phi_type, phi->OperandCount());
   phi->set_llvm_value(llvm_phi);
 }
@@ -1411,7 +1411,7 @@ void LLVMChunkBuilder::DoReturn(HReturn* instr) {
 }
 
 void LLVMChunkBuilder::DoAbnormalExit(HAbnormalExit* instr) {
-  UNIMPLEMENTED();
+//  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoAccessArgumentsAt(HAccessArgumentsAt* instr) {
@@ -2322,7 +2322,20 @@ void LLVMChunkBuilder::DoDeclareGlobals(HDeclareGlobals* instr) {
 }
 
 void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
-  UNIMPLEMENTED();
+  Deoptimizer::BailoutType type = instr->type();
+  // TODO(danno): Stubs expect all deopts to be lazy for historical reasons (the
+  // needed return address), even though the implementation of LAZY and EAGER is
+  // now identical. When LAZY is eventually completely folded into EAGER, remove
+  // the special case below.
+  if (info()->IsStub() && type == Deoptimizer::EAGER) {
+    type = Deoptimizer::LAZY;
+    UNIMPLEMENTED();
+  }
+  // we don't support lazy yet, since we have no test cases
+  DCHECK(type == Deoptimizer::EAGER);
+  auto reason = instr->reason();
+  USE(reason);
+  DeoptimizeIf(__ getTrue(), instr->block());
 }
 
 void LLVMChunkBuilder::DoDiv(HDiv* instr) {

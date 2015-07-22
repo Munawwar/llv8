@@ -520,6 +520,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
+  llvm::Value* LoadFieldOperand(llvm::Value* base, int offset);
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
   llvm::Value* MoveHeapObject(Handle<Object> obj);
   llvm::Value* Move(Handle<Object> object, RelocInfo::Mode rmode);
@@ -547,6 +548,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
                     llvm::BasicBlock* true_target,
                     llvm::BasicBlock* false_target);
 
+  llvm::Type* GetLLVMType(Representation r);
+  void DoDummyUse(HInstruction* instr);
   void DoStoreKeyedFixedArray(HStoreKeyed* value);
   void DoLoadKeyedFixedArray(HLoadKeyed* value);
   void DoLoadKeyedFixedDoubleArray(HLoadKeyed* value);
