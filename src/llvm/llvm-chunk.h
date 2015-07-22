@@ -558,7 +558,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void AddStabilityDependency(Handle<Map> map);
   void CallStackMap(int stackmap_id, llvm::Value* value);
   void CallStackMap(int stackmap_id, std::vector<llvm::Value*>& values);
-
+  void DoMathAbs(HUnaryMathOperation* instr);
+  void DoMathPowHalf(HUnaryMathOperation* instr);
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;

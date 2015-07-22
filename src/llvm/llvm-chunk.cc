@@ -3177,8 +3177,72 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
+void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
+  llvm::BasicBlock* is_negative = NewBlock("INTEGER CANDIDATE IS NEGATIVE");
+  llvm::BasicBlock* is_positive = NewBlock("INTEGER CANDIDATE IS POSITIVE");
+
+  llvm::Value* zero = __ getInt64(0);
+  llvm::Value* cmp =  __ CreateICmpSLT(Use(instr->value()), zero);
+  __ CreateCondBr(cmp, is_negative, is_positive);
+  __ SetInsertPoint(is_negative);
+  llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
+  DeoptimizeIf(cmp, instr->block(), true);
+  __ CreateBr(is_positive);
+  __ SetInsertPoint(is_positive);
+  llvm::Value* val = Use(instr->value());
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(neg_val, is_negative);
+  phi->addIncoming(val, is_positive);
+  instr->set_llvm_value(phi);
+}
+
+void LLVMChunkBuilder::DoMathPowHalf(HUnaryMathOperation* instr) {
+  llvm::BasicBlock* is_equal = NewBlock("INTEGER CANDIDATE IS EQ");
+  llvm::BasicBlock* is_n_equal = NewBlock("INTEGER CANDIDATE IS NEQ");
+  llvm::BasicBlock* continue_block = NewBlock("CONTINUE BLOCK");  
+
+  llvm::Value* input_ =  Use(instr->value());
+  llvm::Value* double_input = __ CreateSIToFP(input_, Types::float64); 
+  llvm::Value* v8_int_64_c = __ getInt64(-4503599627370496);
+  llvm::Value* double_val = __ CreateSIToFP(v8_int_64_c, Types::float64);
+  llvm::Value* cmp = __ CreateFCmpOEQ(double_input, double_val);
+  __ CreateCondBr(cmp, is_equal, is_n_equal);
+  __ SetInsertPoint(is_equal);
+  __ CreateXor(double_input, double_input);
+  llvm::Value* infinit_val = __ CreateFSub(double_input, double_val);
+  __ CreateBr(continue_block);
+  __ SetInsertPoint(is_n_equal);
+  __ CreateXor(double_val, double_val);
+  __ CreateFAdd(double_input, double_val);
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::sqrt, Types::i64);
+
+      llvm::Value* params = double_input;
+      llvm::Value* call = __ CreateCall(intrinsic, params);
+  llvm::Value* sqrt = __ CreateExtractValue(call, 0);
+  __ CreateBr(continue_block);
+  __ SetInsertPoint(continue_block);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(infinit_val, is_equal);
+  phi->addIncoming(sqrt, is_n_equal);
+  instr->set_llvm_value(phi); 
+  
+}
+
 void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
-  UNIMPLEMENTED();
+  switch (instr->op()) {
+    case kMathAbs:
+      DoMathAbs(instr);
+      break;
+    case kMathPowHalf:
+      DoMathPowHalf(instr);
+      break;
+      //UNIMPLEMENTED();//return DoMathPowHalf(instr);
+      break;
+    default:
+      UNREACHABLE();
+  }
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
