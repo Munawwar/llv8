@@ -16,7 +16,7 @@ bool IsIntReg() {
 }
 
 bool IsDoubleReg() {
-   return index_ - Register::kNumRegisters < XMMRegister::kMaxNumRegisters;
+   return index_ >= Register::kNumRegisters && index_ - Register::kNumRegisters < XMMRegister::kMaxNumRegisters;
 }
 
 Register IntReg() {
@@ -27,8 +27,7 @@ Register IntReg() {
 
 XMMRegister XMMReg() {
    DCHECK(IsDoubleReg());
-   XMMRegister reg { index_ - Register::kNumRegisters };  
-   return reg;
+   return XMMRegister::FromAllocationIndex(index_ - Register::kNumRegisters);
 }
 const char* ToString() {
   return "unknown"; //FIXME: fix

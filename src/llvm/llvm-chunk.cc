@@ -199,13 +199,21 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
       translation->StoreInt32StackSlot(index);
     }
   } else if (location.kind == StackMaps::Location::kRegister) {
-    Register reg = location.dwarf_reg.reg().IntReg();
-    if (is_tagged) {
-      translation->StoreRegister(reg);
-    } else if (is_uint32) {
-      translation->StoreUint32Register(reg);
+    StackMapReg stack_reg = location.dwarf_reg.reg();
+    if (stack_reg.IsIntReg()) {
+      Register reg = stack_reg.IntReg();
+      if (is_tagged) {
+        translation->StoreRegister(reg);
+      } else if (is_uint32) {
+        translation->StoreUint32Register(reg);
+      } else {
+        translation->StoreInt32Register(reg);
+      }
+    } else if(stack_reg.IsDoubleReg()) {
+      XMMRegister reg = stack_reg.XMMReg();
+      translation->StoreDoubleRegister(reg);
     } else {
-      translation->StoreInt32Register(reg);
+      UNIMPLEMENTED();
     }
   } else if (location.kind == StackMaps::Location::kConstantIndex) {
     // FIXME(llvm): We assume large constant is a heap object address
@@ -1883,13 +1891,16 @@ llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
       ExternalReference::roots_array_start(isolate()).address();
   auto int64_address =
       __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
-  auto int64_ptr_address = __ CreateIntToPtr(int64_address, Types::ptr_i64);
-  auto loaded_root = __ CreateLoad(int64_ptr_address);
-//  auto bias_value = __ getInt64(kRootRegisterBias);
-//  auto r13_val = __ CreateAdd(loaded_root, bias_value);
-  int offset = (index << kPointerSizeLog2) - kRootRegisterBias;
-//  auto load_address = ConstructAddress(r13_val, offset);
-  auto load_address = ConstructAddress(loaded_root, offset);
+  //auto int64_ptr_address = __ CreateIntToPtr(int64_address, Types::ptr_i64);
+  //auto loaded_root = __ CreateLoad(int64_ptr_address);
+  //auto bias_value = __ getInt64(kRootRegisterBias);
+  //auto r13_val = __ CreateAdd(loaded_root, bias_value);
+  //auto r13_val = ConstructAddress(int64_address, kRootRegisterBias);
+  //auto casted_r13_address = __ CreateBitCast(r13_val, Types::ptr_i64);
+  //auto loaded_root = __ CreateLoad(casted_r13_address);
+  int offset = (index << kPointerSizeLog2);// - kRootRegisterBias;
+  // auto load_address = ConstructAddress(r13_val, offset);
+  auto load_address = ConstructAddress(int64_address, offset);
   auto casted_load_address = __ CreateBitCast(load_address, Types::ptr_i64);
   return __ CreateLoad(casted_load_address);
 }
