@@ -998,7 +998,6 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
   else
     __ CreateCondBr(compare, next_block, deopt_block);
   __ SetInsertPoint(next_block);
-  block->set_llvm_end_basic_block(next_block);
 }
 
 llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
@@ -1153,6 +1152,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 //    block->set_last_instruction_index(end);
 //  }
   block->set_argument_count(argument_count_);
+  block->set_llvm_end_basic_block(__ GetInsertBlock());
   next_block_ = NULL;
   current_block_ = NULL;
 }
@@ -2010,8 +2010,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     __ CreateBr(merge_inner);
 
     __ SetInsertPoint(no_heap_number);
-    __ CreateUnreachable();
-    // FIXME(llvm): deal with oddballs
+    Assert(__ getFalse()); // FIXME(llvm): deal with oddballs
     __ CreateBr(merge_inner);
 
     __ SetInsertPoint(merge_inner);
@@ -2019,7 +2018,6 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     phi_inner->addIncoming(__ getInt32(0x0badbeef), no_heap_number); // FIXME
     phi_inner->addIncoming(truncate_heap_number_result, truncate_heap_number);
     relult_for_not_smi = phi_inner;
-    __ CreateBr(merge_and_ret);
     not_smi_merge = merge_inner;
   } else {
     bool negate = true;
@@ -2039,7 +2037,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
 
     if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) UNIMPLEMENTED();
     relult_for_not_smi = int32;
-    not_smi_merge =  instr->block()->llvm_end_basic_block();
+    not_smi_merge =  __ GetInsertBlock();
   }
   __ CreateBr(merge_and_ret);
 
