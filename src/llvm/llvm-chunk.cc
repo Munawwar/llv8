@@ -1894,17 +1894,10 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
 llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
   Address root_array_start_address =
       ExternalReference::roots_array_start(isolate()).address();
+  // TODO(llvm): Move(RelocInfo::EXTERNAL_REFERENCE)
   auto int64_address =
       __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
-  //auto int64_ptr_address = __ CreateIntToPtr(int64_address, Types::ptr_i64);
-  //auto loaded_root = __ CreateLoad(int64_ptr_address);
-  //auto bias_value = __ getInt64(kRootRegisterBias);
-  //auto r13_val = __ CreateAdd(loaded_root, bias_value);
-  //auto r13_val = ConstructAddress(int64_address, kRootRegisterBias);
-  //auto casted_r13_address = __ CreateBitCast(r13_val, Types::ptr_i64);
-  //auto loaded_root = __ CreateLoad(casted_r13_address);
-  int offset = (index << kPointerSizeLog2);// - kRootRegisterBias;
-  // auto load_address = ConstructAddress(r13_val, offset);
+  int offset = index << kPointerSizeLog2;
   auto load_address = ConstructAddress(int64_address, offset);
   auto casted_load_address = __ CreateBitCast(load_address, Types::ptr_i64);
   return __ CreateLoad(casted_load_address);
