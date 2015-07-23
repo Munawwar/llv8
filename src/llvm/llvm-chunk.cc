@@ -286,8 +286,8 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
-  auto it = std::find_if(std::begin(stackmaps.stack_sizes),
-                         std::end(stackmaps.stack_sizes),
+  auto it = std::find_if(stackmaps.stack_sizes.begin(),
+                         stackmaps.stack_sizes.end(),
                          [address](const StackMaps::StackSize& s) {
                            return s.functionOffset ==  address;
                          });
@@ -1156,6 +1156,8 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   while (current != NULL && !is_aborted()) {
     // Code for constants in registers is generated lazily.
     if (!current->EmitAtUses()) {
+      VisitInstruction(current);
+    } else if (current->IsConstant() && current->representation().IsTagged()) {
       VisitInstruction(current);
     }
     current = current->next();
