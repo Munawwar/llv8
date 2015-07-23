@@ -3181,7 +3181,7 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
+void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
   llvm::BasicBlock* is_negative = NewBlock("INTEGER CANDIDATE IS NEGATIVE");
   llvm::BasicBlock* is_positive = NewBlock("INTEGER CANDIDATE IS POSITIVE");
 
@@ -3200,36 +3200,31 @@ void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
   instr->set_llvm_value(phi);
 }
 
-void LLVMChunkBuilder::DoMathPowHalf(HUnaryMathOperation* instr) {
-  llvm::BasicBlock* is_equal = NewBlock("INTEGER CANDIDATE IS EQ");
-  llvm::BasicBlock* is_n_equal = NewBlock("INTEGER CANDIDATE IS NEQ");
-  llvm::BasicBlock* continue_block = NewBlock("CONTINUE BLOCK");  
+void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
+  Representation r = instr->representation();
+  if (r.IsDouble()) {
+    UNIMPLEMENTED();
+  } else if (r.IsInteger32()) {
+    DoIntegerMathAbs(instr);
+  } else if (r.IsSmi()) {
+    UNIMPLEMENTED();
+  } else {
+    UNIMPLEMENTED();
+  }
+}
 
+void LLVMChunkBuilder::DoMathPowHalf(HUnaryMathOperation* instr) {
+  //TODO : -infinity to infinity
   llvm::Value* input_ =  Use(instr->value());
   llvm::Value* double_input = __ CreateSIToFP(input_, Types::float64); 
-  llvm::Value* v8_int_64_c = __ getInt64(-4503599627370496);
-  llvm::Value* double_val = __ CreateSIToFP(v8_int_64_c, Types::float64);
-  llvm::Value* cmp = __ CreateFCmpOEQ(double_input, double_val);
-  __ CreateCondBr(cmp, is_equal, is_n_equal);
-  __ SetInsertPoint(is_equal);
-  __ CreateXor(double_input, double_input);
-  llvm::Value* infinit_val = __ CreateFSub(double_input, double_val);
-  __ CreateBr(continue_block);
-  __ SetInsertPoint(is_n_equal);
-  __ CreateXor(double_val, double_val);
-  __ CreateFAdd(double_input, double_val);
   llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::sqrt, Types::i64);
-
-      llvm::Value* params = double_input;
-      llvm::Value* call = __ CreateCall(intrinsic, params);
-  llvm::Value* sqrt = __ CreateExtractValue(call, 0);
-  __ CreateBr(continue_block);
-  __ SetInsertPoint(continue_block);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
-  phi->addIncoming(infinit_val, is_equal);
-  phi->addIncoming(sqrt, is_n_equal);
-  instr->set_llvm_value(phi); 
+          llvm::Intrinsic::sqrt, Types::float64);
+  llvm::Value* tmp = __ CreateFPToSI(double_input, Types::float64);
+  std::vector<llvm::Value*> params;
+  params.push_back(tmp);
+  llvm::Value* call = __ CreateCall(intrinsic, params);
+  llvm::Value* sqrt = __ CreateSIToFP(call, Types::float64);
+  instr->set_llvm_value(sqrt); 
   
 }
 
@@ -3241,12 +3236,23 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
     case kMathPowHalf:
       DoMathPowHalf(instr);
       break;
-      //UNIMPLEMENTED();//return DoMathPowHalf(instr);
-      break;
+    case kMathFloor:
+      UNIMPLEMENTED();
+    case kMathRound:
+      UNIMPLEMENTED();
+    case kMathFround:
+      UNIMPLEMENTED();
+    case kMathLog:
+      UNIMPLEMENTED();
+    case kMathExp:
+      UNIMPLEMENTED();
+    case kMathSqrt:
+      UNIMPLEMENTED();
+    case kMathClz32:
+      UNIMPLEMENTED();
     default:
       UNREACHABLE();
   }
-  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
