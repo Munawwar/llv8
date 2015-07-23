@@ -207,6 +207,7 @@ class LLVMGranularity FINAL {
     auto intel_syntax = 1;
     inst_printer_ = std::unique_ptr<llvm::MCInstPrinter>(
         target->createMCInstPrinter(intel_syntax, *mai, *mii_, *mri, *sti));
+    inst_printer_->setPrintImmHex(true);
     DCHECK(inst_printer_);
     std::unique_ptr<llvm::MCObjectFileInfo> mofi(new llvm::MCObjectFileInfo());
     DCHECK(mofi);
