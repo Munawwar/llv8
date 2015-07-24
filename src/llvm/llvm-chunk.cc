@@ -2858,7 +2858,11 @@ void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
     UNIMPLEMENTED();
   }
   if (instr->NeedsCanonicalization()) {
-    UNIMPLEMENTED();
+    llvm::Value* val_ = __ getInt64(0);
+    __ CreateXor(val_, val_);
+    llvm::Value* double_val_ = __ CreateSIToFP(val_, Types::float64);
+    llvm::Value* double_input_ = __ CreateSIToFP(Use(instr->value()), Types::float64);
+    __ CreateFSub(double_input_, double_val_);
   }
   if (key->IsConstant()) {
     uint32_t const_val = (HConstant::cast(key))->Integer32Value();
