@@ -243,6 +243,30 @@ struct DoubleRegister {
   bool IsAllocatable() const;
   bool is_valid() const { return 0 <= reg_code && reg_code < kMaxNumRegisters; }
   bool is(DoubleRegister reg) const { return reg_code == reg.reg_code; }
+
+  const char* ToString() {
+    DCHECK(is_valid());
+    const char* const names[] = {
+      "xmm0",
+      "xmm1",
+      "xmm2",
+      "xmm3",
+      "xmm4",
+      "xmm5",
+      "xmm6",
+      "xmm7",
+      "xmm8",
+      "xmm9",
+      "xmm10",
+      "xmm11",
+      "xmm12",
+      "xmm13",
+      "xmm14",
+      "xmm15"
+    };
+    return names[code()];
+  }
+
   int code() const {
     DCHECK(is_valid());
     return reg_code;
