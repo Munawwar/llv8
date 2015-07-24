@@ -962,7 +962,14 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
   deopt_data_->Add(environment);
 
   if (FLAG_deopt_every_n_times != 0 && !info()->IsStub()) UNIMPLEMENTED();
-  if (info()->ShouldTrapOnDeopt()) UNIMPLEMENTED();
+  if (info()->ShouldTrapOnDeopt()) {
+    // Our trap on deopt does not allow to proceed to the actual deopt
+    // because it gets DCE'd.
+    // It could be avoided if we ever need this though.
+    auto one = true;
+    auto negated_condition = __ CreateXor(__ getInt1(one), compare);
+    Assert(negated_condition);
+  }
 
   Deoptimizer::BailoutType bailout_type = info()->IsStub()
       ? Deoptimizer::LAZY
