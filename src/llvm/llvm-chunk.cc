@@ -2814,7 +2814,7 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
     auto gep = FieldOperand(address_val, 8);
     llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
     llvm::Value* deopt_val = CompareRoot(casted_address, Heap::kTheHoleValueRootIndex);
-    DeoptimizeIf(deopt_val, instr->block(), true);
+    DeoptimizeIf(deopt_val, instr->block());
     llvm::Value* store_cell = __ CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(store_cell);    
     //UNIMPLEMENTED();
