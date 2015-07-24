@@ -299,17 +299,7 @@ class LLVMEnvironment FINAL:  public ZoneObject {
 
   void AddValue(llvm::Value* value,
                 Representation representation,
-                bool is_uint32) {
-    values_.Add(value, zone());
-    if (representation.IsSmiOrTagged()) {
-      DCHECK(!is_uint32);
-      is_tagged_.Add(values_.length() - 1, zone());
-    }
-
-    if (is_uint32) {
-      is_uint32_.Add(values_.length() - 1, zone());
-    }
-  }
+                bool is_uint32);
 
   bool HasTaggedValueAt(int index) const {
     return is_tagged_.Contains(index);
@@ -461,6 +451,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   }
   ~LLVMChunkBuilder() {}
 
+  static llvm::Type* GetLLVMType(Representation r);
+
   LLVMChunk* chunk() const { return static_cast<LLVMChunk*>(chunk_); };
   void set_emit_degug_code(bool v) { emit_debug_code_ = v; }
   bool emit_debug_code() { return emit_debug_code_; }
@@ -549,7 +541,6 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
                     llvm::BasicBlock* true_target,
                     llvm::BasicBlock* false_target);
 
-  llvm::Type* GetLLVMType(Representation r);
   void DoDummyUse(HInstruction* instr);
   void DoStoreKeyedFixedArray(HStoreKeyed* value);
   void DoLoadKeyedFixedArray(HLoadKeyed* value);

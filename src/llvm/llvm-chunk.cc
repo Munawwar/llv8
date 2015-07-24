@@ -573,6 +573,8 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
     VisitInstruction(instr);
   }
   DCHECK(value->llvm_value());
+  DCHECK_EQ(value->llvm_value()->getType(),
+            GetLLVMType(value->representation()));
   return value->llvm_value();
 }
 
@@ -1209,6 +1211,7 @@ LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
     CHECK(!value->IsPushArguments());  // Do not deopt outgoing arguments
     if (value->IsArgumentsObject() || value->IsCapturedObject()) {
       op = LLVMEnvironment::materialization_marker();
+      UNIMPLEMENTED();
     } else {
       op = Use(value);
     }
@@ -2079,7 +2082,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
         llvm::Value* cond = SmiCheck(Use(val), not_smi);
-        DeoptimizeIf(cond, instr->block());
+        DeoptimizeIf(cond, instr->block()); // Deoptimizer::kNotASmi
       }
       instr->set_llvm_value(Use(val));
     } else {
@@ -3349,6 +3352,21 @@ void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {
 
 void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
   UNIMPLEMENTED();
+}
+
+void LLVMEnvironment::AddValue(llvm::Value* value,
+                               Representation representation,
+                               bool is_uint32) {
+  DCHECK(value->getType() == LLVMChunkBuilder::GetLLVMType(representation));
+  values_.Add(value, zone());
+  if (representation.IsSmiOrTagged()) {
+    DCHECK(!is_uint32);
+    is_tagged_.Add(values_.length() - 1, zone());
+  }
+
+  if (is_uint32) {
+    is_uint32_.Add(values_.length() - 1, zone());
+  }
 }
 
 #undef __
