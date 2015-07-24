@@ -1399,6 +1399,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     instr->set_llvm_value(value);
   } else if (r.IsTagged()) {
     AllowHandleAllocation allow_handle_allocation;
+    AllowHeapAllocation allow_heap_allocation;
     Handle<Object> object = instr->handle(isolate());
     auto value = MoveHeapObject(object);
     instr->set_llvm_value(value);
@@ -2676,7 +2677,55 @@ void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
 }
 
 void LLVMChunkBuilder::DoMod(HMod* instr) {
-  UNIMPLEMENTED();
+  if (instr->representation().IsSmiOrInteger32()) {
+    if (instr->RightIsPowerOf2()) {
+       DoModByPowerOf2I(instr);
+    } else if (instr->right()->IsConstant()) {
+      UNIMPLEMENTED();
+      //return DoModByConstI(instr);
+    } else {
+      UNIMPLEMENTED();
+      //return DoModI(instr);
+    }
+  } else if (instr->representation().IsDouble()) {
+    UNIMPLEMENTED();
+    //return DoArithmeticD(Token::MOD, instr);
+  } else {
+    UNIMPLEMENTED();
+    //return DoArithmeticT(Token::MOD, instr);
+  }
+}
+
+void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
+  llvm::BasicBlock* is_not_negative = NewBlock("DIVIDEND_IS_NOT_NEGATIVE");
+  llvm::BasicBlock* near = NewBlock("Near");
+  llvm::BasicBlock* done = NewBlock("DONE");
+
+  HValue* dividend = instr->left();
+  int32_t divisor = instr->right()->GetInteger32Constant();
+  int32_t mask = divisor < 0 ? -(divisor + 1) : (divisor - 1);
+  llvm::Value* l_mask = __ getInt64(mask);
+  llvm::Value* div1 = nullptr;
+  if (instr->CheckFlag(HValue::kLeftCanBeNegative)) {
+    llvm::Value* zero = __ getInt64(0);
+    llvm::Value* cmp =  __ CreateICmpSGT(Use(dividend), zero);
+    __ CreateCondBr(cmp, is_not_negative, near);
+    __ SetInsertPoint(near);
+    __ CreateNeg(Use(dividend));
+    div1 =  __ CreateAnd(Use(dividend), l_mask);
+    if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+      UNIMPLEMENTED();
+    }
+    __ CreateBr(done);
+  }
+  __ SetInsertPoint(is_not_negative);
+  llvm::Value* div2 = __ CreateAnd(Use(dividend), l_mask);
+  __ CreateBr(done);
+  __ SetInsertPoint(done);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(div1, near);
+  phi->addIncoming(div2, is_not_negative);
+  instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::DoMul(HMul* instr) {
