@@ -182,7 +182,8 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
     Register reg = location.dwarf_reg.reg().IntReg();
     if (!reg.is(rbp)) UNIMPLEMENTED();
     auto offset = location.offset;
-    DCHECK(offset % kPointerSize == 0);
+    DCHECK(offset % kInt32Size == 0);
+    // TODO(llvm): check for off-by-one error in int32 case on real deopts.
     auto index = offset / kPointerSize;
     CHECK(index != 1 && index != 0); // rbp and return address
     if (index >= 0)
@@ -192,10 +193,13 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
         (StandardFrameConstants::kFixedFrameSize / kPointerSize - 1);
     }
     if (is_tagged) {
+      DCHECK(location.size == kPointerSize);
       translation->StoreStackSlot(index);
     } else if (is_uint32) {
+      DCHECK(location.size == kInt32Size);
       translation->StoreUint32StackSlot(index);
     } else {
+      DCHECK(location.size == kInt32Size);
       translation->StoreInt32StackSlot(index);
     }
   } else if (location.kind == StackMaps::Location::kRegister) {
@@ -1944,9 +1948,10 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
       // It is unimplemented as a matter of fact
       // but we don't have a test case yet
       // and our tests don't need this conversion.
-      // UNIMPLEMENTED();
+      Assert(cmp_val); // UNIMPLEMENTED(); if not_equal
     } else {
-      DeoptimizeIf(cmp_val, instr->block(), true);
+      bool deopt_on_not_equal = true;
+      DeoptimizeIf(cmp_val, instr->block(), deopt_on_not_equal);
     }
 
     if (deoptimize_on_minus_zero) {
