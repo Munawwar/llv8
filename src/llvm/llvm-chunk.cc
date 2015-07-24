@@ -662,7 +662,6 @@ llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
   llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
   bool is_var_arg = false;
 
-  // Tagged return type won't hurt even if in fact it's void
   auto return_type = Types::float64;
   std::vector<llvm::Type*> param_types;
   param_types.push_back(params[0]->getType());
@@ -3208,7 +3207,7 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
     auto store_addr = FieldOperand(object, HeapObject::kMapOffset);
     auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_i64);
     __ CreateStore(new_map, casted_store_addr);
-    // Write barrier
+    // Write barrier. TODO(llvm): give llvm.gcwrite and company a thought.
     RecordWriteForMap(object, new_map);
     __ CreateBr(end);
   } else {
@@ -3235,12 +3234,38 @@ void LLVMChunkBuilder::RecordWriteForMap(llvm::Value* object,
     Assert(Compare(map, LoadFieldOperand(object, HeapObject::kMapOffset)));
   }
 
-  auto map_address = FieldOperand(object, HeapObject::kMapOffset);
-  USE(map_address);
+  auto map_address = FieldOperand(object, HeapObject::kMapOffset); // dst
+  map_address = __ CreateBitOrPointerCast(map_address, Types::tagged);
 
   auto equal = CheckPageFlag(map,
                              MemoryChunk::kPointersToHereAreInterestingMask);
-  Assert(equal); // UNIMPLEMENTED : here should go RecordWriteStub
+
+  auto cont = NewBlock("CheckPageFlag OK");
+  auto call_stub = NewBlock("Call RecordWriteStub");
+  __ CreateCondBr(equal, cont, call_stub);
+
+  __ SetInsertPoint(call_stub);
+  // The following are the registers expected by the calling convention.
+  // They can be changed, but the CC must be adjusted accordingly.
+  Register object_reg = rbx;
+  Register map_reg = rcx;
+  Register dst_reg = rdx;
+  RecordWriteStub stub(isolate(), object_reg, map_reg, dst_reg,
+                       OMIT_REMEMBERED_SET, kDontSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap_alloc;
+    code = stub.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+  std::vector<llvm::Value*> params = { object, map, map_address };
+  CallAddress(code->instruction_start(),
+              llvm::CallingConv::X86_64_V8_RWS,
+              params);
+  __ CreateBr(cont);
+
+  __ SetInsertPoint(cont);
 
   // Count number of write barriers in generated code.
   isolate()->counters()->write_barriers_static()->Increment();
