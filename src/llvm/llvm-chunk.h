@@ -446,7 +446,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())),
         reloc_data_(nullptr),
         pending_pushed_args_(4, info->zone()),
-        emit_debug_code_(FLAG_debug_code) {
+        emit_debug_code_(FLAG_debug_code),
+        volatile_zero_address_(nullptr) {
     reloc_data_ = new(zone()) LLVMRelocationData();
   }
   ~LLVMChunkBuilder() {}
@@ -493,6 +494,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void DoPhi(HPhi* phi);
   void ResolvePhis();
   void ResolvePhis(HBasicBlock* block);
+  void CreateVolatileZero();
+  llvm::Value* GetVolatileZero();
   llvm::BasicBlock* NewBlock(const char* name);
   // if the llvm counterpart of the block does not exist, create it
   llvm::BasicBlock* Use(HBasicBlock* block);
@@ -569,6 +572,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   LLVMRelocationData* reloc_data_;
   ZoneList<llvm::Value*> pending_pushed_args_;
   bool emit_debug_code_;
+  llvm::Value* volatile_zero_address_;
   enum ScaleFactor {
     times_1 = 0,
     times_2 = 1,

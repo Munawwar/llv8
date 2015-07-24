@@ -1098,6 +1098,17 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   return *this;
 }
 
+void LLVMChunkBuilder::CreateVolatileZero() {
+  volatile_zero_address_ = __ CreateAlloca(Types::i64);
+  bool is_volatile = true;
+  __ CreateStore(__ getInt64(0), volatile_zero_address_, is_volatile);
+}
+
+llvm::Value* LLVMChunkBuilder::GetVolatileZero() {
+  bool is_volatile = true;
+  return __ CreateLoad(volatile_zero_address_, is_volatile, "volatile_zero");
+}
+
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
 #ifdef DEBUG
@@ -1108,6 +1119,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
+    CreateVolatileZero();
     block->UpdateEnvironment(graph_->start_environment());
     argument_count_ = 0;
   } else if (block->predecessors()->length() == 1) {
@@ -1364,11 +1376,8 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
     intptr_value = (intptr_value << 32) | kExtFillingValue;
     extended = true;
   }
-  llvm::Value* value = __ getInt64(intptr_value);
-//  bool is_volatile = true;
-//  llvm::Value* pointer = __ CreateAlloca(Types::i64);
-//  __ CreateStore(value, pointer, is_volatile);
-//  value = __ CreateLoad(pointer, is_volatile);
+
+  auto value = __ CreateAdd(GetVolatileZero(), __ getInt64(intptr_value));
 
   // Here we use the intptr_value (data) only to identify the entry in the map
   RelocInfo rinfo(rmode, intptr_value);
