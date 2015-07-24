@@ -213,7 +213,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
       } else {
         translation->StoreInt32Register(reg);
       }
-    } else if(stack_reg.IsDoubleReg()) {
+    } else if (stack_reg.IsDoubleReg()) {
       XMMRegister reg = stack_reg.XMMReg();
       translation->StoreDoubleRegister(reg);
     } else {
@@ -507,6 +507,7 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
     case Representation::Kind::kInteger32:
       return Types::i32;
     case Representation::Kind::kTagged:
+    case Representation::Kind::kExternal: // For now.
       return Types::tagged;
     case Representation::Kind::kSmi:
       return Types::i64;
