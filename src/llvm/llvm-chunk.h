@@ -537,6 +537,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* RecordRelocInfo(uint64_t intptr_value, RelocInfo::Mode rmode);
   void RecordWriteForMap(llvm::Value* object, llvm::Value* map);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
+  void ChangeDoubleToI(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);
   void ChangeTaggedToISlow(HValue* val, HChange* instr);
   void BranchTagged(HBranch* instr,
