@@ -2331,21 +2331,10 @@ void LLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* ins
 }
 
 void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
-   auto offset = __ getInt64(HeapObject::kMapOffset - kHeapObjectTag);
-   Handle<Object> handle_value = instr->map().handle();
-   int64_t value = reinterpret_cast<int64_t>((handle_value.location()));
-   auto address_val = __ getInt64(value);
-   //llvm::Value* int8_ptr = __ CreateIntToPtr(
-     //    address_val, llvm::Type::getInt64PtrTy(context));
-   llvm::Value* int8_ptr_1 = __ CreateIntToPtr(Use(instr->value()),
-                                               Types::ptr_i64);
-   llvm::Value* gep = __ CreateGEP(int8_ptr_1, offset);
-   llvm::Value* load = __ CreateLoad(gep);
-   llvm::Value* compare = __ CreateICmpNE(load, address_val);
+   auto compare = CompareMap(Use(instr->value()), instr->map().handle());
    llvm::BranchInst* branch = __ CreateCondBr(compare,
          Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
    instr->set_llvm_value(branch);
-  UNIMPLEMENTED(); // TODO(llvm): this function needs refactoring
 }
 
 void LLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
