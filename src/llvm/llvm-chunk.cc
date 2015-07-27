@@ -1930,12 +1930,9 @@ llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
   return __ CreateLoad(casted_load_address);
 }
 
-llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* operand_address,
+llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* operand,
                                            Heap::RootListIndex index) {
   llvm::Value* root_value_by_index = LoadRoot(index);
-  llvm::Value* operand_addr_casted = __ CreateBitOrPointerCast(operand_address,
-                                                               Types::ptr_i64);
-  llvm::Value* operand = __ CreateLoad(operand_addr_casted);
   llvm::Value* cmp_result = __ CreateICmpEQ(operand, root_value_by_index);
   return cmp_result;
 }
@@ -1957,7 +1954,7 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
     __ CreateCondBr(cond, is_smi, is_any_tagged);
     __ SetInsertPoint(is_any_tagged);
 
-    llvm::Value* cmp_first = FieldOperand(Use(val), HeapObject::kMapOffset);
+    llvm::Value* cmp_first = LoadFieldOperand(Use(val), HeapObject::kMapOffset);
     cmp_val = CompareRoot(cmp_first, Heap::kHeapNumberMapRootIndex);
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
 
@@ -2013,7 +2010,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   llvm::Value* relult_for_not_smi = nullptr;
   bool truncating = instr->CanTruncateToInt32();
 
-  llvm::Value* vals_map = FieldOperand(Use(val), HeapObject::kMapOffset);
+  llvm::Value* vals_map = LoadFieldOperand(Use(val), HeapObject::kMapOffset);
   llvm::Value* cmp = CompareRoot(vals_map, Heap::kHeapNumberMapRootIndex);
 
   if (truncating) {
@@ -2885,7 +2882,8 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
     auto address_val = __ getInt64(ptr_value);
     auto gep = FieldOperand(address_val, 8);
     llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
-    llvm::Value* deopt_val = CompareRoot(casted_address, Heap::kTheHoleValueRootIndex);
+    auto loaded_value = __ CreateLoad(casted_address);
+    llvm::Value* deopt_val = CompareRoot(loaded_value, Heap::kTheHoleValueRootIndex);
     DeoptimizeIf(deopt_val, instr->block());
     llvm::Value* store_cell = __ CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(store_cell);    

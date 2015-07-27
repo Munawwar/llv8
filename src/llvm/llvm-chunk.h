@@ -533,7 +533,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
   llvm::Value* LoadRoot(Heap::RootListIndex index);
-  llvm::Value* CompareRoot(llvm::Value* val_address, Heap::RootListIndex index);
+  llvm::Value* CompareRoot(llvm::Value* val, Heap::RootListIndex index);
   llvm::Value* RecordRelocInfo(uint64_t intptr_value, RelocInfo::Mode rmode);
   void RecordWriteForMap(llvm::Value* object, llvm::Value* map);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
