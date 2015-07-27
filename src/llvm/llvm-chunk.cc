@@ -301,11 +301,13 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
   if (true_deopt_count == 0) return;
 
-  int deopt_entry_number = 0;
-
   for (auto i = 0; i < true_deopt_count; i++) {
     auto stackmap_record = stackmaps.records[i];
     auto stackmap_id = stackmap_record.patchpointID;
+
+    // It's important. It seems something expects deopt entries to be stored
+    // is the same order they were added.
+    int deopt_entry_number = stackmap_id;
     // The corresponding Environment is stored in the array by index = id.
     LLVMEnvironment* env = deopt_data_->deoptimizations()[stackmap_id];
     int translation_index = WriteTranslationFor(env,
@@ -319,7 +321,6 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
     // pc offset can be obtained from the stackmap TODO(llvm):
     // but we do not support lazy deopt yet (and for eager it should be -1)
     data->SetPc(deopt_entry_number, Smi::FromInt(-1));
-    deopt_entry_number++;
   }
 
   auto literals_len = deopt_data_->deoptimization_literals().length();
@@ -2193,6 +2194,7 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
   if (instr->HasMigrationTarget()) {
     // Call deferred.
     UNIMPLEMENTED();
+    // Don't let the success BB go stray (__ SetInsertPoint).
   } else {
     bool deopt_on_not_equal = true;
     // kWrongMap
@@ -2325,7 +2327,7 @@ void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
    llvm::BranchInst* branch = __ CreateCondBr(compare,
          Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
    instr->set_llvm_value(branch);
-  //UNIMPLEMENTED();
+  UNIMPLEMENTED(); // TODO(llvm): this function needs refactoring
 }
 
 void LLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
