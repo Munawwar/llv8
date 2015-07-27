@@ -2108,8 +2108,10 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     }
   } else if (from.IsDouble()) {
       if (to.IsInteger32()) {
-        llvm::Value* casted_int =  __ CreateFPToSI(Use(val), Types::i32);
-        instr->set_llvm_value(casted_int);
+        llvm::Value* casted_int =  __ CreateFPToSI(Use(val), Types::i64);
+        //FIXME: Figure out why we need this step. Fix for bitops-nsieve-bits
+        auto result = __ CreateTruncOrBitCast(casted_int, Types::i32); 
+        instr->set_llvm_value(result);
       } else if (to.IsTagged()) {
         ChangeDoubleToTagged(val, instr);
       } else {
