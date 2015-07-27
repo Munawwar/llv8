@@ -301,13 +301,23 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
   if (true_deopt_count == 0) return;
 
+  std::vector<uint32_t> sorted_ids;
+  for (auto i = 0; i < true_deopt_count; i++)
+    sorted_ids.push_back(stackmaps.records[i].patchpointID);
+  std::sort(sorted_ids.begin(), sorted_ids.end());
+
   for (auto i = 0; i < true_deopt_count; i++) {
     auto stackmap_record = stackmaps.records[i];
     auto stackmap_id = stackmap_record.patchpointID;
 
+    // stackmap_id s are unique so we'll find exactly one.
+    auto it = std::lower_bound(sorted_ids.begin(),
+                               sorted_ids.end(),
+                               stackmap_id);
+
     // It's important. It seems something expects deopt entries to be stored
     // is the same order they were added.
-    int deopt_entry_number = stackmap_id;
+    int deopt_entry_number = it - sorted_ids.begin();
     // The corresponding Environment is stored in the array by index = id.
     LLVMEnvironment* env = deopt_data_->deoptimizations()[stackmap_id];
     int translation_index = WriteTranslationFor(env,
