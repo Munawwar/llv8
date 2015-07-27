@@ -2718,10 +2718,10 @@ void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
   HValue* dividend = instr->left();
   int32_t divisor = instr->right()->GetInteger32Constant();
   int32_t mask = divisor < 0 ? -(divisor + 1) : (divisor - 1);
-  llvm::Value* l_mask = __ getInt64(mask);
+  llvm::Value* l_mask = __ getInt32(mask);
   llvm::Value* div1 = nullptr;
   if (instr->CheckFlag(HValue::kLeftCanBeNegative)) {
-    llvm::Value* zero = __ getInt64(0);
+    llvm::Value* zero = __ getInt32(0);
     llvm::Value* cmp =  __ CreateICmpSGT(Use(dividend), zero);
     __ CreateCondBr(cmp, is_not_negative, near);
     __ SetInsertPoint(near);
@@ -2736,7 +2736,7 @@ void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
   llvm::Value* div2 = __ CreateAnd(Use(dividend), l_mask);
   __ CreateBr(done);
   __ SetInsertPoint(done);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
   phi->addIncoming(div1, near);
   phi->addIncoming(div2, is_not_negative);
   instr->set_llvm_value(phi);
