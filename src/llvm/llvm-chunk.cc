@@ -2670,7 +2670,11 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
   }
 
   if (instr->representation().IsDouble()){
-    UNIMPLEMENTED();
+    llvm::Value* address = FieldOperand(Use(instr->object()), offset);
+    llvm::Value* cast_double = __ CreateBitCast(address, Types::ptr_float64);
+    llvm::Value* result = __ CreateLoad(cast_double);
+    instr->set_llvm_value(result);
+    return;
   }
 
   if(!access.IsInobject()) {
