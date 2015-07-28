@@ -3360,7 +3360,7 @@ void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
 }
 
 void LLVMChunkBuilder::DoMathPowHalf(HUnaryMathOperation* instr) {
-  //TODO : -infinity to infinity
+  //TODO : add -infinity and  infinity checks
   llvm::Value* input_ =  Use(instr->value());
   llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
           llvm::Intrinsic::sqrt, Types::float64);
@@ -3369,6 +3369,15 @@ void LLVMChunkBuilder::DoMathPowHalf(HUnaryMathOperation* instr) {
   llvm::Value* call = __ CreateCall(intrinsic, params);
   instr->set_llvm_value(call); 
   
+}
+
+void LVMChunkBuilder::DoMathSqrt(HUnaryMathOperation* instr) {
+   llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::sqrt, Types::float64);
+   std::vector<llvm::Value*> params;
+   params.push_back(Use(instr->value()));
+   llvm::Value* sqrt = __ CreateCall(intrinsic, params);
+   instr->set_llvm_value(sqrt);
 }
 
 void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
@@ -3390,7 +3399,7 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
     case kMathExp:
       UNIMPLEMENTED();
     case kMathSqrt:
-      UNIMPLEMENTED();
+      DoMathSqrt();
     case kMathClz32:
       UNIMPLEMENTED();
     default:
