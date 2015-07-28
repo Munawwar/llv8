@@ -961,6 +961,13 @@ llvm::Value* LLVMChunkBuilder::GetContext() {
   return function_->arg_begin();
 }
 
+llvm::Value* LLVMChunkBuilder::GetNan() {
+  // Is this NaN OK? :) I see it might be slow...
+  // TODO(llvm): use 0/0 or llvm NaN for better performance
+  return __ CreateBitCast(LoadRoot(Heap::kNanValueRootIndex), Types::float64);
+  //  return __ CreateSIToFP(__ getInt64(0), Types::float64); // 0 for debug
+}
+
 LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
   HEnvironment* hydrogen_env = current_block_->last_environment();
   int argument_index_accumulator = 0;
@@ -969,6 +976,7 @@ LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
       hydrogen_env, &argument_index_accumulator, &objects_to_materialize);
 }
 
+// TODO(llvm): refactor (block is not needed anymore).
 void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
                                     bool negate, llvm::BasicBlock* next_block) {
   LLVMEnvironment* environment = AssignEnvironment();
@@ -1967,50 +1975,64 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   
   llvm::BasicBlock* is_smi = NewBlock("NUMBER_CANDIDATE_IS_SMI");
   llvm::BasicBlock* is_any_tagged = NewBlock("NUMBER_CANDIDATE_IS_ANY_TAGGED");
-  llvm::BasicBlock* continue_block = NewBlock("Continue Block");
+  llvm::BasicBlock* merge_block = NewBlock("ChangeTaggedToDouble Merge");
 
-  llvm::Value* cmp_val = nullptr;
-  llvm::LoadInst* load_d = nullptr;
-  llvm::Value* cond = SmiCheck(Use(val));
+  llvm::Value* is_heap_number = nullptr;
+  llvm::Value* loaded_double_value = nullptr;
+  llvm::Value* nan_value = nullptr;
+  llvm::Value* llvm_val = Use(val);
+  llvm::Value* cond = SmiCheck(llvm_val);
+  llvm::BasicBlock* conversion_end = nullptr;
+
   if (!val->representation().IsSmi()) {
     __ CreateCondBr(cond, is_smi, is_any_tagged);
     __ SetInsertPoint(is_any_tagged);
 
-    llvm::Value* cmp_first = LoadFieldOperand(Use(val), HeapObject::kMapOffset);
-    cmp_val = CompareRoot(cmp_first, Heap::kHeapNumberMapRootIndex);
-    llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
+    llvm::Value* vals_map = LoadFieldOperand(llvm_val, HeapObject::kMapOffset);
+    is_heap_number = CompareRoot(vals_map, Heap::kHeapNumberMapRootIndex);
 
-    llvm::Value* bitcast = __ CreateBitCast(value_addr, Types::ptr_float64);
-    load_d = __ CreateLoad(bitcast);
-    // TODO(llvm): deopt
-    // AssignEnvironment(DefineSameAsFirst(new(zone()) LCheckSmi(value)));
+    llvm::Value* value_addr = FieldOperand(llvm_val, HeapNumber::kValueOffset);
+    llvm::Value* value_as_double_addr = __ CreateBitCast(value_addr,
+                                                         Types::ptr_float64);
 
-    //FIXME(llvm): implement!
+    // On x64 it is safe to load at heap number offset before evaluating the map
+    // check, since all heap objects are at least two words long.
+    loaded_double_value = __ CreateLoad(value_as_double_addr);
+
     if (can_convert_undefined_to_nan) {
-      // It is unimplemented as a matter of fact
-      // but we don't have a test case yet
-      // and our tests don't need this conversion.
-      Assert(cmp_val); // UNIMPLEMENTED(); if not_equal
+      auto conversion_start = NewBlock("can_convert_undefined_to_nan "
+          "conversion_start");
+      __ CreateCondBr(is_heap_number, merge_block, conversion_start);
+
+      __ SetInsertPoint(conversion_start);
+      auto is_undefined = CompareRoot(llvm_val, Heap::kUndefinedValueRootIndex);
+      conversion_end = NewBlock("can_convert_undefined_to_nan: getting NaN");
+      bool deopt_on_not_undefined = true;
+      // kNotAHeapNumberUndefined
+      DeoptimizeIf(is_undefined, instr->block(), deopt_on_not_undefined, conversion_end);
+      nan_value = GetNan();
+      __ CreateBr(merge_block);
     } else {
       bool deopt_on_not_equal = true;
-      DeoptimizeIf(cmp_val, instr->block(), deopt_on_not_equal);
+      DeoptimizeIf(is_heap_number, instr->block(), deopt_on_not_equal, merge_block);
     }
 
     if (deoptimize_on_minus_zero) {
       UNIMPLEMENTED();
     }
-    
-    __ CreateBr(continue_block);
   }
   
   __ SetInsertPoint(is_smi);
-  llvm::Value* int32_val = SmiToInteger32(val);
-  llvm::Value* double_val = __ CreateSIToFP(int32_val, Types::float64);
-  __ CreateBr(continue_block);
-  __ SetInsertPoint(continue_block);
-  llvm::PHINode* phi = __ CreatePHI(Types::float64, 2);
-  phi->addIncoming(load_d, is_any_tagged);
-  phi->addIncoming(double_val, is_smi);
+  auto int32_val = SmiToInteger32(val);
+  auto double_val_from_smi = __ CreateSIToFP(int32_val, Types::float64);
+  __ CreateBr(merge_block);
+
+  __ SetInsertPoint(merge_block);
+  llvm::PHINode* phi = __ CreatePHI(Types::float64,
+                                    2 + can_convert_undefined_to_nan);
+  phi->addIncoming(loaded_double_value, is_any_tagged);
+  phi->addIncoming(double_val_from_smi, is_smi);
+  if (can_convert_undefined_to_nan) phi->addIncoming(nan_value, conversion_end);
   instr->set_llvm_value(phi);
 }
 
