@@ -472,7 +472,6 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
       ZoneList<HValue*>* objects_to_materialize);
 
   void DeoptimizeIf(llvm::Value* compare,
-                    HBasicBlock* block,
                     bool negate = false,
                     llvm::BasicBlock* next_block = nullptr);
 

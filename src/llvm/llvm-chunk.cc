@@ -976,9 +976,9 @@ LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
       hydrogen_env, &argument_index_accumulator, &objects_to_materialize);
 }
 
-// TODO(llvm): refactor (block is not needed anymore).
-void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare, HBasicBlock* block,
-                                    bool negate, llvm::BasicBlock* next_block) {
+void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
+                                    bool negate,
+                                    llvm::BasicBlock* next_block) {
   LLVMEnvironment* environment = AssignEnvironment();
   deopt_data_->Add(environment);
 
@@ -1491,7 +1491,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* sum = __ CreateExtractValue(call, 0);
       llvm::Value* overflow = __ CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
-      DeoptimizeIf(overflow, instr->block());
+      DeoptimizeIf(overflow);
     }
   } else if (instr->representation().IsDouble()) {
       DCHECK(instr->left()->representation().IsDouble());
@@ -1611,7 +1611,7 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
     UNIMPLEMENTED();
   } else {
     bool negate = true;
-    DeoptimizeIf(compare, instr->block(), negate); // kOutOfBounds
+    DeoptimizeIf(compare, negate); // kOutOfBounds
   }
   instr->set_llvm_value(compare);
 }
@@ -1739,7 +1739,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // We've seen something for the first time -> deopt.
     // This can only happen if we are not generic already.
     auto no_condition = __ getTrue();
-    DeoptimizeIf(no_condition, instr->block()); // kUnexpectedObject
+    DeoptimizeIf(no_condition); // kUnexpectedObject
 
     // Since we deoptimize on True the continue block is never reached.
     __ CreateUnreachable();
@@ -2009,12 +2009,12 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
       conversion_end = NewBlock("can_convert_undefined_to_nan: getting NaN");
       bool deopt_on_not_undefined = true;
       // kNotAHeapNumberUndefined
-      DeoptimizeIf(is_undefined, instr->block(), deopt_on_not_undefined, conversion_end);
+      DeoptimizeIf(is_undefined, deopt_on_not_undefined, conversion_end);
       nan_value = GetNan();
       __ CreateBr(merge_block);
     } else {
       bool deopt_on_not_equal = true;
-      DeoptimizeIf(is_heap_number, instr->block(), deopt_on_not_equal, merge_block);
+      DeoptimizeIf(is_heap_number, deopt_on_not_equal, merge_block);
     }
 
     if (deoptimize_on_minus_zero) {
@@ -2090,7 +2090,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     not_smi_merge = merge_inner;
   } else {
     bool negate = true;
-    DeoptimizeIf(cmp, instr->block(), negate); // Deoptimizer::kNotAHeapNumber
+    DeoptimizeIf(cmp, negate); // Deoptimizer::kNotAHeapNumber
 
     auto address = FieldOperand(Use(val), HeapNumber::kValueOffset);
     auto double_addr = __ CreateBitCast(address, Types::ptr_float64);
@@ -2102,7 +2102,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     auto double_2 = __ CreateSIToFP(int32, Types::float64);
     auto ordered_and_equal = __ CreateFCmpOEQ(double_val, double_2);
     negate = true;
-    DeoptimizeIf(ordered_and_equal, instr->block(), negate);
+    DeoptimizeIf(ordered_and_equal, negate);
 
     if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) UNIMPLEMENTED();
     relult_for_not_smi = int32;
@@ -2135,7 +2135,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
         llvm::Value* cond = SmiCheck(Use(val), not_smi);
-        DeoptimizeIf(cond, instr->block()); // Deoptimizer::kNotASmi
+        DeoptimizeIf(cond); // Deoptimizer::kNotASmi
       }
       instr->set_llvm_value(Use(val));
     } else {
@@ -2187,7 +2187,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
 void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
   if (!instr->value()->type().IsHeapObject()) {
     llvm::Value* is_smi = SmiCheck(Use(instr->value()));
-    DeoptimizeIf(is_smi, instr->block());
+    DeoptimizeIf(is_smi);
   }
 }
 
@@ -2238,7 +2238,7 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
   } else {
     bool deopt_on_not_equal = true;
     // kWrongMap
-    DeoptimizeIf(compare, instr->block(), deopt_on_not_equal, success);
+    DeoptimizeIf(compare, deopt_on_not_equal, success);
   }
   if (instr->HasMigrationTarget()) {
     //    info()->MarkAsDeferredCalling();
@@ -2393,7 +2393,7 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
   // It's unreacheable, but we don't care. We need it so that DeoptimizeIf()
   // does not create a new basic block which ends up unterminated.
   auto next_block = Use(instr->SuccessorAt(0));
-  DeoptimizeIf(__ getTrue(), instr->block(), negate_condition, next_block);
+  DeoptimizeIf(__ getTrue(), negate_condition, next_block);
 
 }
 
@@ -2645,7 +2645,7 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
     } else {
       // FIXME(access-nsieve): not tested
       llvm::Value* cmp = CompareRoot(load, Heap::kTheHoleValueRootIndex);
-      DeoptimizeIf(cmp, instr->block()); // kHole
+      DeoptimizeIf(cmp); // kHole
     }
   }
   instr->set_llvm_value(load);
@@ -2916,7 +2916,7 @@ void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
     llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
     auto loaded_value = __ CreateLoad(casted_address);
     llvm::Value* deopt_val = CompareRoot(loaded_value, Heap::kTheHoleValueRootIndex);
-    DeoptimizeIf(deopt_val, instr->block());
+    DeoptimizeIf(deopt_val);
     llvm::Value* store_cell = __ CreateStore(Use(instr->value()), casted_address);
     instr->set_llvm_value(store_cell);    
     //UNIMPLEMENTED();
@@ -3325,7 +3325,8 @@ void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
   __ CreateCondBr(cmp, is_negative, is_positive);
   __ SetInsertPoint(is_negative);
   llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
-  DeoptimizeIf(cmp, instr->block(), true);
+  bool negate_condition = true;
+  DeoptimizeIf(cmp,  negate_condition);
   __ CreateBr(is_positive);
   __ SetInsertPoint(is_positive);
   llvm::Value* val = Use(instr->value());
