@@ -2233,17 +2233,23 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
   llvm::Value* compare = CompareMap(val, maps->at(maps->size() - 1).handle());
   if (instr->HasMigrationTarget()) {
     // Call deferred.
-    UNIMPLEMENTED();
+    bool deopt_on_equal = false;
+    llvm::BasicBlock* defered_block = NewBlock("CheckMaps deferred");
+    __ CreateCondBr(compare, success, defered_block);
+    __ SetInsertPoint(defered_block);
+    DCHECK(pending_pushed_args_.is_empty());
+    pending_pushed_args_.Add(Use(instr->value()), info()->zone());
+    llvm::Value* result = CallRuntimeViaId(Runtime::kTryMigrateInstance);
+    llvm::Value* casted = __ CreateBitOrPointerCast(result, Types::i64);
+    llvm::Value* and_result = __ CreateAnd(casted, __ getInt64(kSmiTagMask));
+    llvm::Value* compare_result = __ CreateICmpEQ(and_result, __ getInt64(0));
+    DeoptimizeIf(compare_result, instr->block(), deopt_on_equal, success);
     // Don't let the success BB go stray (__ SetInsertPoint).
+    
   } else {
     bool deopt_on_not_equal = true;
     // kWrongMap
     DeoptimizeIf(compare, deopt_on_not_equal, success);
-  }
-  if (instr->HasMigrationTarget()) {
-    //    info()->MarkAsDeferredCalling();
-    //    result = AssignPointerMap(result);
-    UNIMPLEMENTED();
   }
 }
 
