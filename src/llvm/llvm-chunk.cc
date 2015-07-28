@@ -1890,7 +1890,29 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
 }
 
 void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
-  UNIMPLEMENTED();
+  int arity = instr->argument_count()-1;
+  llvm::Value* arity_val_ = __ getInt64(arity);
+  if (arity == 0) {
+    arity_val_ = __ CreateXor(arity_val_, arity_val_);
+  } else if (is_uint32(arity)) {
+    arity_val_ = __ getInt32(static_cast<uint32_t>(arity));
+  }
+  LoadRoot(Heap::kUndefinedValueRootIndex);
+  CallConstructStub stub(isolate(), NO_CALL_CONSTRUCTOR_FLAGS);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap;
+    code = stub.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+  std::vector<llvm::Value*> params;
+  for (int i = 0; i < instr->OperandCount(); i++)
+    params.push_back(Use(instr->OperandAt(i)));
+  pending_pushed_args_.Clear();
+  llvm::Value* call = CallAddress(code->instruction_start(),
+                                  llvm::CallingConv::X86_64_V8, params);
+  instr->set_llvm_value(call);
 }
 
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
@@ -2139,7 +2161,24 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     auto ordered_and_equal = __ CreateFCmpOEQ(double_val, double_2);
     negate = true;
     DeoptimizeIf(ordered_and_equal, negate);
-    if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO)  UNIMPLEMENTED();
+    if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) {
+      llvm::BasicBlock* not_zero = NewBlock("NOT ZERO");
+      llvm::BasicBlock* done = NewBlock("DONE");
+      llvm::Value* zero_val = llvm::ConstantFP::get(Types::float64, 0);
+      auto not_equal_ = __ CreateFCmpONE(double_val, zero_val);
+      __ CreateCondBr(not_equal_, not_zero, done);
+      __ SetInsertPoint(not_zero);
+      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+             llvm::Intrinsic::x86_sse2_movmsk_pd);
+      llvm::Value* input_val = __ CreateSIToFP(Use(val), Types::float64);
+      llvm::Value* param_vect = __ CreateVectorSplat(2, input_val);
+      __ CreateInsertElement(param_vect, double_val, __ getInt32(0));
+      llvm::Value* call = __ CreateCall(intrinsic, param_vect);
+      __ CreateAnd(call, __ getInt32(1));
+      DeoptimizeIf(not_equal_, true);
+      __ CreateBr(done);
+      __ SetInsertPoint(done);
+    }
     relult_for_not_smi = int32;
     not_smi_merge =  __ GetInsertBlock();
   }
