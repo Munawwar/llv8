@@ -2135,6 +2135,11 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     // FIXME(llvm): add NaN check
     // cmpq(result_reg, Immediate(1)); (MacroAssembler::TruncateHeapNumberToI)
     // And implement the slow case call (SlowTruncateToI)
+    auto not_qnan = __ CreateFCmpORD(double_val, double_val);
+    Assert(not_qnan);
+    auto not_indef = __ CreateICmpNE(truncate_heap_number_result,
+                                     __ getInt32(0x80000000));
+    Assert(not_indef);
 
     __ CreateBr(merge_inner);
 
