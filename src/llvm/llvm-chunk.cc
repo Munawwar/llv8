@@ -3371,7 +3371,7 @@ void LLVMChunkBuilder::DoMathPowHalf(HUnaryMathOperation* instr) {
   
 }
 
-void LVMChunkBuilder::DoMathSqrt(HUnaryMathOperation* instr) {
+void LLVMChunkBuilder::DoMathSqrt(HUnaryMathOperation* instr) {
    llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
           llvm::Intrinsic::sqrt, Types::float64);
    std::vector<llvm::Value*> params;
@@ -3399,7 +3399,7 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
     case kMathExp:
       UNIMPLEMENTED();
     case kMathSqrt:
-      DoMathSqrt();
+      DoMathSqrt(instr);
     case kMathClz32:
       UNIMPLEMENTED();
     default:
