@@ -1894,7 +1894,43 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
 }
 
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
-  UNIMPLEMENTED();
+  int arity = instr->argument_count()-1;
+  llvm::Value* arity_val_ = __ getInt64(arity);
+  if (arity == 0) {
+    arity_val_ = __ CreateXor(arity_val_, arity_val_);
+  } else if (is_uint32(arity)) {
+    arity_val_ = __ getInt32(static_cast<uint32_t>(arity));
+  }
+  LoadRoot(Heap::kUndefinedValueRootIndex);
+  ElementsKind kind = instr->elements_kind();
+  AllocationSiteOverrideMode override_mode =
+      (AllocationSite::GetMode(kind) == TRACK_ALLOCATION_SITE)
+          ? DISABLE_ALLOCATION_SITES
+          : DONT_OVERRIDE;
+  if (arity == 0) {
+    UNIMPLEMENTED();
+  } else if (arity == 1) {
+    if (IsFastPackedElementsKind(kind)) {
+      UNIMPLEMENTED();
+    }
+    ArraySingleArgumentConstructorStub stub(isolate(), kind, override_mode);
+    Handle<Code> code = Handle<Code>::null();
+    {
+      AllowHandleAllocation allow_handles;
+      AllowHeapAllocation allow_heap;
+      code = stub.GetCode();
+      // FIXME(llvm,gc): respect reloc info mode...
+    }
+    std::vector<llvm::Value*> params;
+    for (int i = 0; i < instr->OperandCount(); i++)
+      params.push_back(Use(instr->OperandAt(i)));
+    pending_pushed_args_.Clear();
+    llvm::Value* call = CallAddress(code->instruction_start(),
+                                    llvm::CallingConv::X86_64_V8, params);
+    llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
+    instr->set_llvm_value(return_val);
+  }
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCallRuntime(HCallRuntime* instr) {
@@ -2103,8 +2139,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     auto ordered_and_equal = __ CreateFCmpOEQ(double_val, double_2);
     negate = true;
     DeoptimizeIf(ordered_and_equal, negate);
-
-    if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) UNIMPLEMENTED();
+    if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO)  UNIMPLEMENTED();
     relult_for_not_smi = int32;
     not_smi_merge =  __ GetInsertBlock();
   }
