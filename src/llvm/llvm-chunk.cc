@@ -609,16 +609,17 @@ llvm::Value* LLVMChunkBuilder::SmiCheck(llvm::Value* value, bool negate) {
       res, __ getInt64(0));
 }
 
-void LLVMChunkBuilder::Assert(llvm::Value* condition) {
-  auto cont = NewBlock("After assertion");
+void LLVMChunkBuilder::Assert(llvm::Value* condition,
+                              llvm::BasicBlock* next_block) {
+  if (!next_block) next_block = NewBlock("After assertion");
   auto fail = NewBlock("Fail assertion");
-  __ CreateCondBr(condition, cont, fail);
+  __ CreateCondBr(condition, next_block, fail);
   __ SetInsertPoint(fail);
   llvm::Function* debug_trap = llvm::Intrinsic::getDeclaration(
       module_.get(), llvm::Intrinsic::debugtrap);
   __ CreateCall(debug_trap);
   __ CreateUnreachable();
-  __ SetInsertPoint(cont);
+  __ SetInsertPoint(next_block);
 }
 
 void LLVMChunkBuilder::IncrementCounter(StatsCounter* counter, int value) {
@@ -982,6 +983,9 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
   LLVMEnvironment* environment = AssignEnvironment();
   deopt_data_->Add(environment);
 
+  if (!next_block) next_block = NewBlock("BlockCont");
+  llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
+
   if (FLAG_deopt_every_n_times != 0 && !info()->IsStub()) UNIMPLEMENTED();
   if (info()->ShouldTrapOnDeopt()) {
     // Our trap on deopt does not allow to proceed to the actual deopt
@@ -989,7 +993,8 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
     // It could be avoided if we ever need this though.
     auto one = true;
     auto negated_condition = __ CreateXor(__ getInt1(one), compare);
-    Assert(negated_condition);
+    Assert(negated_condition, next_block);
+    return;
   }
 
   Deoptimizer::BailoutType bailout_type = info()->IsStub()
@@ -1010,9 +1015,6 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
 
   // TODO(llvm): create Deoptimizer::DeoptInfo & Deoptimizer::JumpTableEntry (?)
 
-  llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
-  if (!next_block)
-    next_block = NewBlock("BlockCont");
   llvm::BasicBlock* deopt_block = NewBlock("DeoptBlock");
   __ SetInsertPoint(deopt_block);
 
