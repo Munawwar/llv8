@@ -3352,15 +3352,12 @@ void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
 void LLVMChunkBuilder::DoMathPowHalf(HUnaryMathOperation* instr) {
   //TODO : -infinity to infinity
   llvm::Value* input_ =  Use(instr->value());
-  llvm::Value* double_input = __ CreateSIToFP(input_, Types::float64); 
   llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
           llvm::Intrinsic::sqrt, Types::float64);
-  llvm::Value* tmp = __ CreateFPToSI(double_input, Types::float64);
   std::vector<llvm::Value*> params;
-  params.push_back(tmp);
+  params.push_back(input_);
   llvm::Value* call = __ CreateCall(intrinsic, params);
-  llvm::Value* sqrt = __ CreateSIToFP(call, Types::float64);
-  instr->set_llvm_value(sqrt); 
+  instr->set_llvm_value(call); 
   
 }
 
