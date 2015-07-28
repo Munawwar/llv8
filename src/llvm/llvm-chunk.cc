@@ -2243,7 +2243,7 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
     llvm::Value* casted = __ CreateBitOrPointerCast(result, Types::i64);
     llvm::Value* and_result = __ CreateAnd(casted, __ getInt64(kSmiTagMask));
     llvm::Value* compare_result = __ CreateICmpEQ(and_result, __ getInt64(0));
-    DeoptimizeIf(compare_result, instr->block(), deopt_on_equal, success);
+    DeoptimizeIf(compare_result, deopt_on_equal, success);
     // Don't let the success BB go stray (__ SetInsertPoint).
     
   } else {
@@ -3398,8 +3398,10 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
       UNIMPLEMENTED();
     case kMathExp:
       UNIMPLEMENTED();
-    case kMathSqrt:
+    case kMathSqrt: {
       DoMathSqrt(instr);
+      break;
+    }
     case kMathClz32:
       UNIMPLEMENTED();
     default:
