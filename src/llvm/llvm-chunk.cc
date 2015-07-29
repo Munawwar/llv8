@@ -2036,7 +2036,8 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
   
   llvm::BasicBlock* is_smi = NewBlock("NUMBER_CANDIDATE_IS_SMI");
   llvm::BasicBlock* is_any_tagged = NewBlock("NUMBER_CANDIDATE_IS_ANY_TAGGED");
-  llvm::BasicBlock* merge_block = NewBlock("ChangeTaggedToDouble Merge");
+  llvm::BasicBlock* merge_block = NewBlock(
+      std::string("ChangeTaggedToDouble Merge ") + std::to_string(instr->id()));
 
   llvm::Value* is_heap_number = nullptr;
   llvm::Value* loaded_double_value = nullptr;
@@ -2102,7 +2103,8 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
 
   llvm::BasicBlock* is_smi = NewBlock("is Smi fast case");
   llvm::BasicBlock* not_smi = NewBlock("'deferred' case");
-  llvm::BasicBlock* merge_and_ret = NewBlock("merge and ret");
+  llvm::BasicBlock* merge_and_ret = NewBlock(
+      std::string("merge and ret ") + std::to_string(instr->id()));
   llvm::BasicBlock* not_smi_merge = nullptr;
 
   __ CreateCondBr(cond, is_smi, not_smi);
