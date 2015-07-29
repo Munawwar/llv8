@@ -989,12 +989,14 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
 
   if (FLAG_deopt_every_n_times != 0 && !info()->IsStub()) UNIMPLEMENTED();
   if (info()->ShouldTrapOnDeopt()) {
-    // Our trap on deopt does not allow to proceed to the actual deopt
-    // because it gets DCE'd.
-    // It could be avoided if we ever need this though.
-    auto one = true;
-    auto negated_condition = __ CreateXor(__ getInt1(one), compare);
-    Assert(negated_condition, next_block);
+    // Our trap on deopt does not allow to proceed to the actual deopt.
+    // It could be avoided if we ever need this though. But be prepared
+    // that implementation would involve some careful BB management.
+    if (!negate) { // We assert !compare, so if negate, we assert !!compare.
+      auto one = true;
+      compare = __ CreateXor(__ getInt1(one), compare);
+    }
+    Assert(compare, next_block);
     return;
   }
 
@@ -2012,7 +2014,8 @@ llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
 llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* operand,
                                            Heap::RootListIndex index) {
   llvm::Value* root_value_by_index = LoadRoot(index);
-  llvm::Value* cmp_result = __ CreateICmpEQ(operand, root_value_by_index);
+  llvm::Value* cmp_result = __ CreateICmpEQ(operand, root_value_by_index,
+                                            "CompareRoot");
   return cmp_result;
 }
 
