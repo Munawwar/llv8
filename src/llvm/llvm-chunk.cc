@@ -2279,7 +2279,32 @@ void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
 }
 
 void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* address_ = FieldOperand(Use(instr->value()), HeapObject::kMapOffset);
+  llvm::Value* cast_int_ = __ CreateBitCast(address_, Types::ptr_i64);
+  llvm::Value* value_ = __ CreateLoad(cast_int_);
+  
+  if (instr->is_interval_check()) {
+    UNIMPLEMENTED();
+  } else {
+    uint8_t mask;
+    uint8_t tag;
+    instr->GetCheckMaskAndTag(&mask, &tag);
+    
+    if (base::bits::IsPowerOfTwo32(mask)) {
+      llvm::Value* addr_ = FieldOperand(value_ , Map::kInstanceTypeOffset);
+      llvm::Value* cast_to_int_ = __ CreateBitCast(addr_, Types::ptr_i64);
+      llvm::Value* val_ = __ CreateLoad(cast_to_int_);
+      llvm::Value* cmp_ = nullptr;
+      if (tag == 0) {
+        cmp_ = __ CreateICmpNE(val_, __ getInt64(mask));
+      } else {
+        cmp_ = __ CreateICmpEQ(val_, __ getInt64(mask));
+      }
+      DeoptimizeIf(cmp_, true); 
+    } else {
+      UNIMPLEMENTED();
+    }
+  }
 }
 
 void LLVMChunkBuilder::Retry(BailoutReason reason) {
@@ -2734,7 +2759,9 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   llvm::Value* load = __ CreateLoad(casted_address);
   if (requires_hole_check) {
     if (IsFastSmiElementsKind(instr->elements_kind())) {
-      UNIMPLEMENTED();
+      llvm::Value* cmp_ = SmiCheck(load, false);
+      DeoptimizeIf(cmp_, true);
+      //UNIMPLEMENTED();
     } else {
       // FIXME(access-nsieve): not tested
       llvm::Value* cmp = CompareRoot(load, Heap::kTheHoleValueRootIndex);
