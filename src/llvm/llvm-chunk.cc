@@ -565,14 +565,15 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
   current_instruction_ = old_current;
 }
 
-llvm::BasicBlock* LLVMChunkBuilder::NewBlock(const char* name) {
+llvm::BasicBlock* LLVMChunkBuilder::NewBlock(const std::string& name) {
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   return llvm::BasicBlock::Create(llvm_context, name, function_);
 }
 
 llvm::BasicBlock* LLVMChunkBuilder::Use(HBasicBlock* block) {
   if (!block->llvm_start_basic_block()) {
-    llvm::BasicBlock* llvm_block = NewBlock("BlockEntry");
+    llvm::BasicBlock* llvm_block = NewBlock(
+        std::string("BlockEntry") + std::to_string(block->block_id()));
     block->set_llvm_start_basic_block(llvm_block);
   }
   DCHECK(block->llvm_start_basic_block());
