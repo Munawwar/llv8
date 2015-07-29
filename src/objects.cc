@@ -11641,8 +11641,9 @@ void Code::CopyFrom(const CodeDesc& desc, const Vector<byte>* reloc_data) {
     CopyBytes(relocation_start(),
               desc.buffer + desc.buffer_size - desc.reloc_size,
               static_cast<size_t>(desc.reloc_size));
-  } else
+  } else {
     CopyBytes(relocation_start(), reloc_data->start(), reloc_data->length());
+  }
 
   // unbox handles and relocate
   intptr_t delta = instruction_start() - desc.buffer;
