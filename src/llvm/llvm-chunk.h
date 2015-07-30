@@ -14,6 +14,7 @@
 #include "src/lithium.h"
 #include "llvm-stackmaps.h"
 #include "mcjit-memory-manager.h"
+#include "src/base/division-by-constant.h"
 
 #include <memory>
 
@@ -559,6 +560,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void DoMathPowHalf(HUnaryMathOperation* instr);
   void DoMathSqrt(HUnaryMathOperation* instr);
   void DoModByPowerOf2I(HMod* instr);
+  void DoModByConstI(HMod* instr);
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;

@@ -2848,8 +2848,8 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
     if (instr->RightIsPowerOf2()) {
        DoModByPowerOf2I(instr);
     } else if (instr->right()->IsConstant()) {
-      UNIMPLEMENTED();
-      //return DoModByConstI(instr);
+      //UNIMPLEMENTED();
+      DoModByConstI(instr);
     } else {
       UNIMPLEMENTED();
       //return DoModI(instr);
@@ -2861,6 +2861,55 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
     UNIMPLEMENTED();
     //return DoArithmeticT(Token::MOD, instr);
   }
+}
+
+void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
+  HValue* dividend = instr->left();
+  llvm::Value* l_dividend = Use(dividend);
+  llvm::Value* l_rax = nullptr;
+  llvm::Value* l_rdx = nullptr;
+  int32_t divisor = instr->right()->GetInteger32Constant();
+
+  if (divisor == 0) {
+    UNIMPLEMENTED();
+  }
+  //__TruncatingDiv(dividend, divisor);
+  int32_t abs_div = Abs(divisor);
+  base::MagicNumbersForDivision<uint32_t> mag =
+      base::SignedDivisionByConstant(static_cast<uint32_t>(abs_div));
+  llvm::Value* l_mag = __ getInt32(mag.multiplier);
+  l_rdx = __ CreateNSWMul(l_dividend, l_mag);
+  bool neg = (mag.multiplier & (static_cast<uint32_t>(1) << 31)) != 0;
+  if (abs_div > 0 && neg)
+    l_rdx = __ CreateNSWAdd(l_rdx, l_dividend);
+  if (abs_div < 0 && !neg && mag.multiplier > 0)
+    l_rdx = __ CreateNSWSub(l_rdx, l_dividend);
+  if (mag.shift > 0) {
+    llvm::Value* shift = __ getInt32(mag.shift);
+    l_rdx = __ CreateAShr(l_rdx, shift);
+  }
+  llvm::Value* shift = __ getInt32(31);
+  l_rax = __ CreateLShr(l_dividend, shift);
+  l_rdx = __ CreateAdd(l_rdx, l_dividend);
+  //over
+  llvm::Value* l_abs_div = __ getInt32(abs_div);
+  l_rdx = __ CreateNSWMul(l_rdx, l_abs_div);
+  l_rax = l_dividend;
+  l_rax = __ CreateNSWSub(l_rax, l_rdx);
+
+  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+    llvm::BasicBlock* remainder_not_zero = NewBlock("Remainder not zero");
+    llvm::BasicBlock* near = NewBlock("Near");
+
+    llvm::Value* zero = __ getInt32(0);
+    llvm::Value* cmp_zero = __ CreateICmpNE(l_rax, zero);
+    __ CreateCondBr(cmp_zero, remainder_not_zero, near);
+    __ SetInsertPoint(near);
+    DeoptimizeIf(cmp_zero, instr->block());
+    __ CreateBr(remainder_not_zero);
+    __ SetInsertPoint(remainder_not_zero);
+  }
+  instr->set_llvm_value(l_rax);
 }
 
 void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
