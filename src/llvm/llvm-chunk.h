@@ -497,6 +497,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void ResolvePhis(HBasicBlock* block);
   void CreateVolatileZero();
   llvm::Value* GetVolatileZero();
+  llvm::Value* ConstFoldBarrier(llvm::Value* imm);
   llvm::BasicBlock* NewBlock(const std::string& name);
   // if the llvm counterpart of the block does not exist, create it
   llvm::BasicBlock* Use(HBasicBlock* block);

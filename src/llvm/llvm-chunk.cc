@@ -732,7 +732,9 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
 }
 
 llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
-  llvm::Value* offset_val = __ getInt64(offset - kHeapObjectTag);
+  // The problem is (volatile_0 + imm) + offset == volatile_0 + (imm + offset),
+  // so...
+  auto offset_val = ConstFoldBarrier(__ getInt64(offset - kHeapObjectTag));
   // I don't know why, but it works OK even if base was already an i8*
   llvm::Value* base_casted = __ CreateIntToPtr(base, Types::ptr_i8);
   return __ CreateGEP(base_casted, offset_val);
@@ -750,32 +752,34 @@ llvm::Value* LLVMChunkBuilder::LoadFieldOperand(llvm::Value* base, int offset,
 }
 
 llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
-    llvm::Value* offset_val = __ getInt64(offset);
-    llvm::Value* base_casted = __ CreateIntToPtr(base, Types::ptr_i8);
-    return __ CreateGEP(base_casted, offset_val);
+  // The problem is (volatile_0 + imm) + offset == volatile_0 + (imm + offset),
+  // so...
+  llvm::Value* offset_val = ConstFoldBarrier(__ getInt64(offset));
+  llvm::Value* base_casted = __ CreateIntToPtr(base, Types::ptr_i8);
+  return __ CreateGEP(base_casted, offset_val);
 }
 
 llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
-    if (object->IsSmi()) {
-      // TODO(llvm): use/write a function for that
-      Smi* smi = Smi::cast(*object);
-      intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
-      llvm::Value* value = __ getInt64(intptr_value);
-      return value;
-    } else { // Heap object
-      // MacroAssembler::MoveHeapObject
-      AllowHeapAllocation allow_allocation;
-      AllowHandleAllocation allow_handles;
-      DCHECK(object->IsHeapObject());
-      if (isolate()->heap()->InNewSpace(*object)) {
-        Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
-        llvm::Value* value = Move(new_cell, RelocInfo::CELL);
-        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
-        return  __ CreateLoad(ptr);
-      } else {
-        return Move(object, RelocInfo::EMBEDDED_OBJECT);
-      }
+  if (object->IsSmi()) {
+    // TODO(llvm): use/write a function for that
+    Smi* smi = Smi::cast(*object);
+    intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
+    llvm::Value* value = __ getInt64(intptr_value);
+    return value;
+  } else { // Heap object
+    // MacroAssembler::MoveHeapObject
+    AllowHeapAllocation allow_allocation;
+    AllowHandleAllocation allow_handles;
+    DCHECK(object->IsHeapObject());
+    if (isolate()->heap()->InNewSpace(*object)) {
+      Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
+      llvm::Value* value = Move(new_cell, RelocInfo::CELL);
+      llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
+      return  __ CreateLoad(ptr);
+    } else {
+      return Move(object, RelocInfo::EMBEDDED_OBJECT);
     }
+  }
 }
 
 llvm::Value* LLVMChunkBuilder::Move(Handle<Object> object,
@@ -1154,6 +1158,10 @@ llvm::Value* LLVMChunkBuilder::GetVolatileZero() {
   return __ CreateLoad(volatile_zero_address_, is_volatile, "volatile_zero");
 }
 
+llvm::Value* LLVMChunkBuilder::ConstFoldBarrier(llvm::Value* imm) {
+  return __ CreateAdd(GetVolatileZero(), imm);
+}
+
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
 #ifdef DEBUG
@@ -1422,7 +1430,7 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
     extended = true;
   }
 
-  auto value = __ CreateAdd(GetVolatileZero(), __ getInt64(intptr_value));
+  auto value = ConstFoldBarrier(__ getInt64(intptr_value));
 
   // Here we use the intptr_value (data) only to identify the entry in the map
   RelocInfo rinfo(rmode, intptr_value);
