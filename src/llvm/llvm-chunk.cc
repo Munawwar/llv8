@@ -690,9 +690,29 @@ llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
   return call_inst;
 }
 
+llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
+                                       llvm::CallingConv::ID calling_conv,
+                                       std::vector<llvm::Value*>& params) {
+  bool is_var_arg = false;
+
+  auto return_type = Types::tagged;
+  auto param_type = Types::tagged;
+  std::vector<llvm::Type*> param_types(params.size(), param_type);
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      return_type, param_types, is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+
+  auto casted = __ CreateBitOrPointerCast(callable_value, ptr_to_function);
+  llvm::CallInst* call_inst = __ CreateCall(casted, params);
+  call_inst->setCallingConv(calling_conv);
+
+  return call_inst;
+}
+
 llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
                                            llvm::CallingConv::ID calling_conv,
                                            std::vector<llvm::Value*>& params) {
+  // TODO(llvm): reimplement via CallVal. See what's up with tagged first
   llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
   bool is_var_arg = false;
 
@@ -720,11 +740,13 @@ llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
 
 // TODO(llvm): It should probably become 'load field operand as type'
 // with tagged as default.
-llvm::Value* LLVMChunkBuilder::LoadFieldOperand(llvm::Value* base, int offset) {
+llvm::Value* LLVMChunkBuilder::LoadFieldOperand(llvm::Value* base, int offset,
+                                                bool is_volatile,
+                                                const char* name) {
   llvm::Value* address = FieldOperand(base, offset);
   llvm::Value* casted_address = __ CreatePointerCast(address,
                                                      Types::ptr_tagged);
-  return __ CreateLoad(casted_address);
+  return __ CreateLoad(casted_address, is_volatile, name);
 }
 
 llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
@@ -1111,8 +1133,8 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
-  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
-  LLVMGranularity::getInstance().OptimizeModule(module_.get());
+//  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
+//  LLVMGranularity::getInstance().OptimizeModule(module_.get());
 #ifdef DEBUG
   std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
   llvm::errs() << *(module_.get());
@@ -1832,52 +1854,28 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   // Don't know what this is yet.
   if (instr->pass_argument_count()) UNIMPLEMENTED();
   // Code that follows relies on this assumption
+  // (well, maybe it's not, we haven't seen a test case yet)
   if (!instr->function()->IsConstant()) UNIMPLEMENTED();
+  // TODO(llvm): self call
 
-  Use(instr->function()); // It's an int constant (a ptr)
-
-  Handle<JSFunction> js_function = Handle<JSFunction>::null();
-  HConstant* fun_const = HConstant::cast(instr->function());
-  js_function = Handle<JSFunction>::cast(fun_const->handle(isolate()));
-  Address js_function_addr = reinterpret_cast<Address>(*js_function);
-  Address js_context_ptr =
-      js_function_addr + JSFunction::kContextOffset - kHeapObjectTag;
-  Address target_entry_ptr =
-      js_function_addr + JSFunction::kCodeEntryOffset - kHeapObjectTag;
-
-  llvm::Value* js_function_val = __ getInt64(
-      reinterpret_cast<uint64_t>(js_function_addr));
-  llvm::Value* js_context_ptr_val = __ getInt64(
-      reinterpret_cast<uint64_t>(js_context_ptr));
-  js_context_ptr_val = __ CreateIntToPtr(js_context_ptr_val, Types::ptr_i64);
+  // TODO(llvm): record safepoints...
+  auto function_object = Use(instr->function()); // It's an int constant (a ptr)
+  bool is_volatile = true;
+  auto target_entry = LoadFieldOperand(function_object,
+                                       JSFunction::kCodeEntryOffset,
+                                       is_volatile,
+                                       "target_entry");
+  auto target_context = LoadFieldOperand(function_object,
+                                         JSFunction::kContextOffset,
+                                         is_volatile,
+                                         "target_context");
 
   auto argument_count = instr->argument_count() + 2; // rsi, rdi
 
-  // Construct the function type (signature)
-  std::vector<llvm::Type*> params(argument_count, nullptr);
-  for (auto i = 0; i < argument_count; i++)
-    params[i] = Types::i64;
-  bool is_var_arg = false;
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      Types::i64, params, is_var_arg);
-
-  // Get the callee's address
-  // TODO(llvm): it is a pointer, not an int64
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::PointerType* ptr_to_ptr_to_function = ptr_to_function->getPointerTo();
-
-  llvm::Value* target_entry_ptr_val = __ CreateIntToPtr(
-     __ getInt64(reinterpret_cast<int64_t>(target_entry_ptr)),
-     ptr_to_ptr_to_function);
-  llvm::Value* target_entry_val =  __ CreateAlignedLoad(
-      target_entry_ptr_val, 1);
-
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
-  // FIXME(llvm): pointers, not int64
-  args[0] = __ CreateAlignedLoad(js_context_ptr_val, 1);
-  args[1] = js_function_val;
-
+  args[0] = target_context;
+  args[1] = function_object;
   DCHECK(pending_pushed_args_.length() + 2 == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
   for (int i = 0; i < pending_pushed_args_.length(); i++) {
@@ -1885,8 +1883,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   }
   pending_pushed_args_.Clear();
 
-  llvm::CallInst* call = __ CreateCall(target_entry_val, args);
-  call->setCallingConv(llvm::CallingConv::X86_64_V8);
+  auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args);
   instr->set_llvm_value(call);
 }
 

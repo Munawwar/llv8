@@ -89,7 +89,8 @@ class LLVMGranularity FINAL {
         .setErrorStr(&err_str_)
         .setEngineKind(llvm::EngineKind::JIT)
         .setTargetOptions(options)
-        .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
+//        .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
+        .setOptLevel(llvm::CodeGenOpt::None) // backend opt level
         .create();
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
       CHECK(engine_);
@@ -510,15 +511,23 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void Assert(llvm::Value* condition, llvm::BasicBlock* next_block = nullptr);
   void IncrementCounter(StatsCounter* counter, int value);
   llvm::Value* CallVoid(Address target);
-  llvm::Value* CallAddressForMathPow(Address target, llvm::CallingConv::ID calling_conv,
-                           std::vector<llvm::Value*>& params);
-  // This is intended to be a highly reusable method for calling stuff.
-  llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
+  llvm::Value* CallAddressForMathPow(Address target,
+                                     llvm::CallingConv::ID calling_conv,
+                                     std::vector<llvm::Value*>& params);
+  // These Call functions are intended to be highly reusable.
+  llvm::Value* CallVal(llvm::Value* callable_value,
+                       llvm::CallingConv::ID calling_conv,
+                       std::vector<llvm::Value*>& params);
+  llvm::Value* CallAddress(Address target,
+                           llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params);
   void CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val, llvm::BasicBlock* bb);
   llvm::Value* EnumLength(llvm::Value* map_);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
-  llvm::Value* LoadFieldOperand(llvm::Value* base, int offset);
+  llvm::Value* LoadFieldOperand(llvm::Value* base,
+                                int offset,
+                                bool is_volatile = false,
+                                const char* name = "");
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
   llvm::Value* MoveHeapObject(Handle<Object> obj);
   llvm::Value* Move(Handle<Object> object, RelocInfo::Mode rmode);
