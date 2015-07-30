@@ -2561,8 +2561,111 @@ void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   UNIMPLEMENTED();
 }
 
+llvm::Value* LLVMChunkBuilder::EnumLength(llvm::Value* map_) {
+  llvm::Value* address_1_ = FieldOperand(map_, Map::kBitField3Offset);
+  llvm::Value* cast_int_1_ = __ CreateBitCast(address_1_, Types::ptr_i32);
+  llvm::Value* value_ = __ CreateLoad(cast_int_1_);
+  llvm::Value* dst_ = __ CreateAnd(value_, __ getInt32(Map::EnumLengthBits::kMask));
+  return dst_;
+}
+
+void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val, llvm::BasicBlock* bb) {
+  // Add Declaration in .h
+  llvm::BasicBlock* next_ = NewBlock("NEXT");
+  llvm::BasicBlock* start_ = NewBlock("START");
+
+  llvm::Value* arr_val_ = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
+  llvm::Value* load_val_ = Use(instr->enumerable());
+  llvm::Value* address_ = FieldOperand(load_val_, HeapObject::kMapOffset);
+  llvm::Value* cast_int_ = __ CreateBitCast(address_, Types::ptr_i64);
+  llvm::Value* map_ = __ CreateLoad(cast_int_);
+  //EnumLength
+  llvm::Value* length_val_ = EnumLength(map_);
+  //IntegerToSmi in EnumLength
+  llvm::Value* smi_tmp_val_ = __ CreateZExt(length_val_, Types::i64);
+  llvm::Value* smi_val_ = __ CreateShl(smi_tmp_val_, kSmiShift);
+  //Cmp
+  llvm::Value* cmp_arg_ = __ getInt64(kInvalidEnumCacheSentinel);
+  llvm::Value* cmp_ = __ CreateICmpEQ(smi_val_, cmp_arg_);
+  __ CreateCondBr(cmp_, bb, start_);
+
+  __ CreateBr(start_);
+  
+  __ SetInsertPoint(next_);
+  
+  llvm::Value* val_address_ = FieldOperand(load_val_, HeapObject::kMapOffset);
+  llvm::Value* cast_int64_ = __ CreateBitCast(val_address_, Types::ptr_i64);
+  llvm::Value* map_1_ = __ CreateLoad(cast_int64_);
+ 
+  length_val_ = EnumLength(map_1_);
+  llvm::Value* cmp_val_ = __ CreateICmpNE(length_val_ , __ getInt32(0));
+  __ CreateCondBr(cmp_val_, bb, start_);
+  __ SetInsertPoint(start_);
+  
+  llvm::BasicBlock* no_elements_ = NewBlock("IF NO ELEMENTS");
+  llvm::BasicBlock* continue_ = NewBlock("IF ELEMENTS EXIST");
+  llvm::BasicBlock* final_ = NewBlock("JMP TO THE END OF FUNCTION");
+  llvm::Value* tmp1_ = __ CreatePtrToInt(FieldOperand(load_val_, JSObject::kElementsOffset), Types::i64);
+  llvm::Value* cmp_equal_ = __ CreateICmpEQ(arr_val_, tmp1_);
+  __ CreateCondBr(cmp_equal_, no_elements_, continue_);
+  __ SetInsertPoint(continue_);
+  llvm::Value* r_value_ = LoadRoot(Heap::kEmptySlowElementDictionaryRootIndex);
+  llvm::Value* cmp_not_equal_ = __ CreateICmpEQ(r_value_, tmp1_);
+  __ CreateCondBr(cmp_not_equal_, bb, no_elements_);
+  __ SetInsertPoint(no_elements_);
+  llvm::Value* val_addr_ = FieldOperand(map_1_, Map::kPrototypeOffset);
+  llvm::Value* int64_ = __ CreateBitCast(val_addr_, Types::ptr_i64);
+  llvm::Value* val_map_ = __ CreateLoad(int64_);
+  llvm::Value* cmp_n_equal_ = __ CreateICmpNE(val_map_, val);
+  __ CreateCondBr(cmp_n_equal_, next_, final_);
+  __ SetInsertPoint(final_);
+  
+}
+
 void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* cmp_ = CompareRoot(Use(instr->enumerable()),
+          Heap::kUndefinedValueRootIndex);
+  DeoptimizeIf(cmp_, true);
+
+  llvm::Value* load_r_ = LoadRoot(Heap::kNullValueRootIndex);
+  llvm::Value* cmp_eq_ = __ CreateICmpEQ(Use(instr->enumerable()), load_r_);
+  DeoptimizeIf(cmp_eq_, true);
+
+  llvm::Value* smi_check_ = SmiCheck(Use(instr->enumerable()), true);
+  DeoptimizeIf(smi_check_, true);
+
+  STATIC_ASSERT(FIRST_JS_PROXY_TYPE == FIRST_SPEC_OBJECT_TYPE);
+  llvm::Value* address_ = FieldOperand(Use(instr->enumerable()),
+          HeapObject::kMapOffset);
+  llvm::Value* cast_int_ = __ CreateBitCast(address_, Types::ptr_i64);
+  llvm::Value* map_ = __ CreateLoad(cast_int_);
+  llvm::Value* cmp_below_eq_ = __ CreateICmpUGE(map_, 
+         __ getInt64(static_cast<int8_t>(LAST_JS_PROXY_TYPE)));
+  DeoptimizeIf(cmp_below_eq_, true);
+
+  llvm::BasicBlock* use_cache_ = NewBlock("USE CACHE");
+  llvm::BasicBlock* call_runtime_ = NewBlock("CALL RUNTIME");
+  CheckEnumCache(instr, load_r_, call_runtime_);
+  
+  llvm::Value* addr_ = FieldOperand(Use(instr->enumerable()), HeapObject::kMapOffset);
+  llvm::Value* int64_ = __ CreateBitCast(addr_, Types::ptr_i64);
+  __ CreateLoad(int64_);
+  __ CreateBr(use_cache_);
+
+  __ SetInsertPoint(call_runtime_);
+  std::vector<llvm::Value*> args_;
+  args_.push_back(Use(instr->enumerable()));
+  llvm::Value* alloc_ =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
+          Use(instr->context()), args_);
+  auto alloc_casted_ = __ CreatePtrToInt(alloc_, Types::i64);
+  instr->set_llvm_value(alloc_casted_);
+  llvm::Value* tmp_ = __ CreatePtrToInt(FieldOperand(Use(instr->enumerable()),
+               HeapObject::kMapOffset), Types::i64);
+  llvm::Value* cmp_root_ = CompareRoot(tmp_, Heap::kMetaMapRootIndex);
+  DeoptimizeIf(cmp_root_, true);
+  __ SetInsertPoint(use_cache_);
+  
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoFunctionLiteral(HFunctionLiteral* instr) {

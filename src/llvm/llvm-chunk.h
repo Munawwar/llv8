@@ -515,6 +515,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // This is intended to be a highly reusable method for calling stuff.
   llvm::Value* CallAddress(Address target, llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params);
+  void CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val, llvm::BasicBlock* bb);
+  llvm::Value* EnumLength(llvm::Value* map_);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
   llvm::Value* LoadFieldOperand(llvm::Value* base, int offset);
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
