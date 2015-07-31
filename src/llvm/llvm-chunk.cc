@@ -1373,18 +1373,28 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 #ifdef DEBUG
   std::cerr << __FUNCTION__ << std::endl;
 #endif
-//  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-//  std::vector<llvm::Type*> types(1, __ getInt64Ty());
-//
-//  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-//      llvm::Intrinsic::read_register, types);
-//
-//  auto metadata =
-//    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
-//  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
-//      llvm_context, metadata);
-//
-//  llvm::Value* rsp_value = __ CreateCall(intrinsic, val);
+  if (instr->is_function_entry()) {
+    LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+
+    llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+        llvm::Intrinsic::read_register, { Types::i64 });
+
+    auto metadata =
+      llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
+    llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
+        llvm_context, metadata);
+
+    llvm::Value* rsp_value = __ CreateCall(intrinsic, val);
+
+//    auto greater = CompareRoot(rsp_value, Heap::kStackLimitRootIndex,
+//                               llvm::CmpInst::ICMP_UGT);
+    auto above_equal = CompareRoot(rsp_value, Heap::kStackLimitRootIndex,
+                                   llvm::CmpInst::ICMP_UGE);
+    Assert(above_equal);
+  } else {
+    DCHECK(instr->is_backwards_branch());
+    UNIMPLEMENTED();
+  }
 //
 //  llvm::Value* rsp_ptr = __ CreateIntToPtr(rsp_value,
 //      __ getInt64Ty()->getPointerTo());
@@ -2017,10 +2027,11 @@ llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
 }
 
 llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* operand,
-                                           Heap::RootListIndex index) {
+                                           Heap::RootListIndex index,
+                                           llvm::CmpInst::Predicate predicate) {
   llvm::Value* root_value_by_index = LoadRoot(index);
-  llvm::Value* cmp_result = __ CreateICmpEQ(operand, root_value_by_index,
-                                            "CompareRoot");
+  llvm::Value* cmp_result = __ CreateICmp(predicate, operand,
+                                          root_value_by_index, "CompareRoot");
   return cmp_result;
 }
 
