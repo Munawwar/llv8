@@ -75,6 +75,12 @@ Handle<Code> LLVMChunk::Codegen() {
   LLVMGranularity::getInstance().Disass(
       code->instruction_start(),
       code->instruction_start() + code->instruction_size());
+
+  std::cerr << "\nRelocInfo (size = " << code->relocation_size() << ")\n";
+  for (RelocIterator it(*code.location()); !it.done(); it.next()) {
+    it.rinfo()->Print(isolate, std::cerr);
+  }
+  std::cerr << "\n";
 #endif
   return code;
 }
