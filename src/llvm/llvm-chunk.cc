@@ -1378,42 +1378,17 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 #ifdef DEBUG
   std::cerr << __FUNCTION__ << std::endl;
 #endif
-  if (instr->is_function_entry()) {
-    LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-
-    llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-        llvm::Intrinsic::read_register, { Types::i64 });
-
-    auto metadata =
-      llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
-    llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
-        llvm_context, metadata);
-
-    llvm::Value* rsp_value = __ CreateCall(intrinsic, val);
-
-//    auto greater = CompareRoot(rsp_value, Heap::kStackLimitRootIndex,
-//                               llvm::CmpInst::ICMP_UGT);
-    auto above_equal = CompareRoot(rsp_value, Heap::kStackLimitRootIndex,
-                                   llvm::CmpInst::ICMP_UGE);
-    Assert(above_equal);
-  } else {
-    DCHECK(instr->is_backwards_branch());
-    UNIMPLEMENTED();
-  }
-//
-//  llvm::Value* rsp_ptr = __ CreateIntToPtr(rsp_value,
-//      __ getInt64Ty()->getPointerTo());
-//  llvm::Value* r13_value = __ CreateLoad(rsp_ptr);
-//
-//  llvm::Value* compare = __ CreateICmp(llvm::CmpInst::ICMP_ULT,
-//                                                      rsp_value,
-//                                                      r13_value);
-//
-////  byte* target = isolate()->builtins()->StackCheck()->instruction_start();
-//  Address target = reinterpret_cast<Address>(0);
-//  instr->block()->set_llvm_end_basic_block(DoBadThing(compare, target));
-//  instr->set_llvm_value(sum);
-//  UNIMPLEMENTED();
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+      llvm::Intrinsic::read_register, { Types::i64 });
+  auto metadata =
+    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
+  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
+      llvm_context, metadata);
+  llvm::Value* rsp_value = __ CreateCall(intrinsic, val);
+  auto above_equal = CompareRoot(rsp_value, Heap::kStackLimitRootIndex,
+                                 llvm::CmpInst::ICMP_UGE);
+  Assert(above_equal);
 }
 
 // TODO(llvm): this version of stackmap call is most often
