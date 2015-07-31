@@ -749,12 +749,11 @@ llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
 // TODO(llvm): It should probably become 'load field operand as type'
 // with tagged as default.
 llvm::Value* LLVMChunkBuilder::LoadFieldOperand(llvm::Value* base, int offset,
-                                                bool is_volatile,
                                                 const char* name) {
   llvm::Value* address = FieldOperand(base, offset);
   llvm::Value* casted_address = __ CreatePointerCast(address,
                                                      Types::ptr_tagged);
-  return __ CreateLoad(casted_address, is_volatile, name);
+  return __ CreateLoad(casted_address, name);
 }
 
 llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int offset) {
@@ -1143,8 +1142,8 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   llvm::errs() << *(module_.get());
   std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
-//  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
-//  LLVMGranularity::getInstance().OptimizeModule(module_.get());
+  LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
+  LLVMGranularity::getInstance().OptimizeModule(module_.get());
 #ifdef DEBUG
   std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
   llvm::errs() << *(module_.get());
@@ -1884,14 +1883,11 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 
   // TODO(llvm): record safepoints...
   auto function_object = Use(instr->function()); // It's an int constant (a ptr)
-  bool is_volatile = true;
   auto target_entry = LoadFieldOperand(function_object,
                                        JSFunction::kCodeEntryOffset,
-                                       is_volatile,
                                        "target_entry");
   auto target_context = LoadFieldOperand(function_object,
                                          JSFunction::kContextOffset,
-                                         is_volatile,
                                          "target_context");
 
   auto argument_count = instr->argument_count() + 2; // rsi, rdi

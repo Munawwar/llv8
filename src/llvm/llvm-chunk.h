@@ -89,8 +89,7 @@ class LLVMGranularity FINAL {
         .setErrorStr(&err_str_)
         .setEngineKind(llvm::EngineKind::JIT)
         .setTargetOptions(options)
-//        .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
-        .setOptLevel(llvm::CodeGenOpt::None) // backend opt level
+        .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
         .create();
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
       CHECK(engine_);
@@ -527,7 +526,6 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
   llvm::Value* LoadFieldOperand(llvm::Value* base,
                                 int offset,
-                                bool is_volatile = false,
                                 const char* name = "");
   llvm::Value* ConstructAddress(llvm::Value* base, int offset);
   llvm::Value* MoveHeapObject(Handle<Object> obj);

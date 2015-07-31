@@ -5689,7 +5689,6 @@ void LCodeGen::DoDummyUse(LDummyUse* instr) {
 
 
 void LCodeGen::DoDeferredStackCheck(LStackCheck* instr) {
-  __ int3();
   PushSafepointRegistersScope scope(this);
   __ movp(rsi, Operand(rbp, StandardFrameConstants::kContextOffset));
   __ CallRuntimeSaveDoubles(Runtime::kStackGuard);
@@ -5724,7 +5723,6 @@ void LCodeGen::DoStackCheck(LStackCheck* instr) {
 
     DCHECK(instr->context()->IsRegister());
     DCHECK(ToRegister(instr->context()).is(rsi));
-    __ int3();
     CallCode(isolate()->builtins()->StackCheck(),
              RelocInfo::CODE_TARGET,
              instr);
