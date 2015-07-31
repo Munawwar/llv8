@@ -1378,17 +1378,17 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 #ifdef DEBUG
   std::cerr << __FUNCTION__ << std::endl;
 #endif
-  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-      llvm::Intrinsic::read_register, { Types::i64 });
-  auto metadata =
-    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
-  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
-      llvm_context, metadata);
-  llvm::Value* rsp_value = __ CreateCall(intrinsic, val);
-  auto above_equal = CompareRoot(rsp_value, Heap::kStackLimitRootIndex,
-                                 llvm::CmpInst::ICMP_UGE);
-  Assert(above_equal);
+//  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+//  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+//      llvm::Intrinsic::read_register, { Types::i64 });
+//  auto metadata =
+//    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
+//  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
+//      llvm_context, metadata);
+//  llvm::Value* rsp_value = __ CreateCall(intrinsic, val);
+//  auto above_equal = CompareRoot(rsp_value, Heap::kStackLimitRootIndex,
+//                                 llvm::CmpInst::ICMP_UGE);
+//  Assert(above_equal);
 }
 
 // TODO(llvm): this version of stackmap call is most often
