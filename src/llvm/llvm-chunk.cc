@@ -616,15 +616,19 @@ llvm::Value* LLVMChunkBuilder::SmiCheck(llvm::Value* value, bool negate) {
       res, __ getInt64(0));
 }
 
+void LLVMChunkBuilder::InsertDebugTrap() {
+  llvm::Function* debug_trap = llvm::Intrinsic::getDeclaration(
+      module_.get(), llvm::Intrinsic::debugtrap);
+  __ CreateCall(debug_trap);
+}
+
 void LLVMChunkBuilder::Assert(llvm::Value* condition,
                               llvm::BasicBlock* next_block) {
   if (!next_block) next_block = NewBlock("After assertion");
   auto fail = NewBlock("Fail assertion");
   __ CreateCondBr(condition, next_block, fail);
   __ SetInsertPoint(fail);
-  llvm::Function* debug_trap = llvm::Intrinsic::getDeclaration(
-      module_.get(), llvm::Intrinsic::debugtrap);
-  __ CreateCall(debug_trap);
+  InsertDebugTrap();
   __ CreateUnreachable();
   __ SetInsertPoint(next_block);
 }
@@ -871,23 +875,15 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   {
     AllowHandleAllocation allow_handles;
     code = ces.GetCode();
-    // FIXME(llvm,gc): respect reloc info mode...
   }
 
-  llvm::Value* target_address = __ getInt64(
-      reinterpret_cast<uint64_t>(code->instruction_start()));
-
-  std::vector<llvm::Type*> param_types(arg_count + 3, nullptr);
-  // First 3 types are Types::i64, Types::ptr_i8, Types::i64. The rest is tagged
-  for (auto i = 0; i < arg_count + 3; i++)
-    param_types[i] = Types::i64;
-  param_types[1] = Types::ptr_i8; // Do not change order.
-  bool is_var_arg = false;
-
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      Types::ptr_i8, param_types, is_var_arg);
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
+  // FIXME(llvm): RelocInfo::CODE... (?)
+  // Also, our method of calling is suboptimal compared to CS (call disp32).
+  auto code_obj = MoveHeapObject(code);
+  auto target_address = LoadFieldOperand(code_obj, Code::kHeaderSize);
+//  llvm::Value* target_address = RecordRelocInfo(
+//      reinterpret_cast<uint64_t>(code->instruction_start()),
+//      RelocInfo::EMBEDDED_OBJECT);
 
   // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
   // It will also fix arguments offset mismatch problem in runtime functions
@@ -903,7 +899,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
 
   auto llvm_nargs = __ getInt64(arg_count);
   auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
-  auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
+  auto llvm_rt_target = target_temp; //__ CreateIntToPtr(target_temp, Types::ptr_i8);
   auto context = GetContext();
   std::vector<llvm::Value*> args(arg_count + 3, nullptr);
   args[0] = llvm_nargs;
@@ -915,10 +911,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   }
   pending_pushed_args_.Clear();
 
-  llvm::CallInst* call_inst = __ CreateCall(casted, args);
-  call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
-  // return value has type i8*
-  return call_inst;
+  return CallVal(target_address, llvm::CallingConv::X86_64_V8_CES, args);
 }
 
 llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,

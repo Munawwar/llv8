@@ -509,6 +509,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void AssertSmi(llvm::Value* value, bool assert_not_smi = false);
   void AssertNotSmi(llvm::Value* value);
   void Assert(llvm::Value* condition, llvm::BasicBlock* next_block = nullptr);
+  void InsertDebugTrap();
   void IncrementCounter(StatsCounter* counter, int value);
   llvm::Value* CallVoid(Address target);
   llvm::Value* CallAddressForMathPow(Address target,
