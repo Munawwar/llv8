@@ -1903,17 +1903,18 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   llvm::Value* call = CallAddress(code->instruction_start(),
                                   llvm::CallingConv::X86_64_V8, params);
   instr->set_llvm_value(call);
+  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
   int arity = instr->argument_count()-1;
-  llvm::Value* arity_val_ = __ getInt64(arity);
-  if (arity == 0) {
-    arity_val_ = __ CreateXor(arity_val_, arity_val_);
+  llvm::Value* arity_val = __ getInt64(arity);
+  /*if (arity == 0) {
+    __ CreateXor(arity_val, arity_val);
   } else if (is_uint32(arity)) {
-    arity_val_ = __ getInt32(static_cast<uint32_t>(arity));
-  }
-  LoadRoot(Heap::kUndefinedValueRootIndex);
+    arity_val = __ getInt64(static_cast<uint32_t>(arity));
+  }*/
+  llvm::Value* load_root = LoadRoot(Heap::kUndefinedValueRootIndex);
   ElementsKind kind = instr->elements_kind();
   AllocationSiteOverrideMode override_mode =
       (AllocationSite::GetMode(kind) == TRACK_ALLOCATION_SITE)
@@ -1934,15 +1935,28 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
       // FIXME(llvm,gc): respect reloc info mode...
     }
     std::vector<llvm::Value*> params;
-    for (int i = 0; i < instr->OperandCount(); i++)
+    params.push_back(GetContext()); 
+    for (int i = 1; i < instr->OperandCount(); ++i)
       params.push_back(Use(instr->OperandAt(i)));
+    params.push_back(arity_val);
+    params.push_back(load_root);
     pending_pushed_args_.Clear();
+    // arguments number must be corrected
+    std::string arg_offset = std::to_string(4 * 8);
+    std::string asm_string1 = "sub $$";
+    std::string asm_string2 = ", %rsp";
+    std::string final_strig = asm_string1 + arg_offset + asm_string2;
+    llvm::FunctionType* inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(),
+                                                               false);
+    llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
+      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
+    __ CreateCall(inline_asm, "");
     llvm::Value* call = CallAddress(code->instruction_start(),
-                                    llvm::CallingConv::X86_64_V8, params);
+                                    llvm::CallingConv::X86_64_V8_S3, params);
     llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
     instr->set_llvm_value(return_val);
   }
-  //UNIMPLEMENTED();
+  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCallRuntime(HCallRuntime* instr) {
@@ -3399,15 +3413,26 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
-//  llvm::Value* context = __ CreateLoad(instr->context()->llvm_value(), "RSI");
-  // see GetContext()!
   StringAddStub stub(isolate(),
                      instr->flags(),
                      instr->pretenure_flag());
-
-  //llvm::Function* callStrAdd = llvm::Function::Create(&LCodeGen::CallCode, llvm::Function::ExternalLinkage );
-  //LCodeGen(NULL, NULL, NULL).CallCode(stub.GetCode(), RelocInfo::CODE_TARGET, NULL);
-  UNIMPLEMENTED();
+  
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap;
+    code = stub.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+  std::vector<llvm::Value*> params;
+  params.push_back(GetContext());
+  for (int i = 1; i < instr->OperandCount() ; ++i)
+    params.push_back(Use(instr->OperandAt(i)));
+  pending_pushed_args_.Clear();
+  llvm::Value* call = CallAddress(code->instruction_start(),
+                                  llvm::CallingConv::X86_64_V8_S4, params);
+  llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
+  instr->set_llvm_value(return_val); 
 }
 
 void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {

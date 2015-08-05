@@ -3954,7 +3954,7 @@ void LCodeGen::DoCallNewArray(LCallNewArray* instr) {
       __ jmp(&done, Label::kNear);
       __ bind(&packed_case);
     }
-
+    
     ArraySingleArgumentConstructorStub stub(isolate(), kind, override_mode);
     CallCode(stub.GetCode(), RelocInfo::CONSTRUCT_CALL, instr);
     __ bind(&done);
