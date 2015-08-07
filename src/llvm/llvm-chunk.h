@@ -155,7 +155,7 @@ class LLVMGranularity FINAL {
     }
   }
 
-  Vector<byte> Patch(Address, Address, LLVMRelocationData::RelocMap&);
+  std::vector<RelocInfo> Patch(Address, Address, LLVMRelocationData::RelocMap&);
 
   static const char* x64_target_triple;
  private:
@@ -358,9 +358,7 @@ class LLVMDeoptData {
        deoptimization_literals_(8, zone),
        zone_(zone) {}
 
-  void Add(LLVMEnvironment* environment) {
-    deoptimizations_.Add(environment, environment->zone());
-  }
+  void Add(LLVMEnvironment* environment);
 
   ZoneList<LLVMEnvironment*>& deoptimizations() { return deoptimizations_; }
   TranslationBuffer& translations() { return translations_; }
@@ -387,7 +385,11 @@ class LLVMChunk FINAL : public LowChunk {
     : LowChunk(info, graph),
       llvm_function_id_(-1),
       reloc_data_(nullptr),
-      deopt_data_(nullptr) {}
+      deopt_data_(nullptr),
+      masm_(nullptr, nullptr, 0),
+      target_index_for_ppid_() {}
+
+  using PpIdToIndexMap = std::map<int64_t, uint32_t>;
 
   static LLVMChunk* NewChunk(HGraph *graph);
 
@@ -403,10 +405,15 @@ class LLVMChunk FINAL : public LowChunk {
     reloc_data_ = reloc_data;
     reloc_data->transfer();
   }
+  Assembler& masm() { return masm_; }
+  PpIdToIndexMap& target_index_for_ppid() {
+    return target_index_for_ppid_;
+  }
  private:
   static const int kStackSlotSize = kPointerSize;
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi
 
+  std::vector<RelocInfo> SetUpRelativeCalls(Address start);
   void SetUpDeoptimizationData(Handle<Code> code);
   Vector<byte> GetRelocationData(CodeDesc& code_desc);
   // Returns translation index of the newly generated translation
@@ -432,6 +439,9 @@ class LLVMChunk FINAL : public LowChunk {
   LLVMRelocationData* reloc_data_;
   // Ownership gets transferred from LLVMChunkBuilder
   std::unique_ptr<LLVMDeoptData> deopt_data_;
+  Assembler masm_;
+  // Map patchpointId -> index in masm_.code_targets_
+  std::map<int64_t, uint32_t> target_index_for_ppid_;
 };
 
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
@@ -448,7 +458,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         reloc_data_(nullptr),
         pending_pushed_args_(4, info->zone()),
         emit_debug_code_(FLAG_debug_code),
-        volatile_zero_address_(nullptr) {
+        volatile_zero_address_(nullptr),
+        last_reloc_index_offset_(-1) {
     reloc_data_ = new(zone()) LLVMRelocationData();
   }
   ~LLVMChunkBuilder() {}
@@ -481,6 +492,16 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)
 #undef DECLARE_DO
   static const uintptr_t kExtFillingValue = 0xabcdbeef;
+  static const int64_t kMaxDeoptCount = (1 << 16) - 1;
+  static const int64_t kFirstRelocIndex = kMaxDeoptCount + 1;
+
+  static bool IsPatchpointIdDeopt(int64_t patchpoint_id) {
+    return patchpoint_id <= LLVMChunkBuilder::kMaxDeoptCount;
+  }
+
+  static bool IsPatchpointIdReloc(int64_t patchpoint_id) {
+    return !IsPatchpointIdDeopt(patchpoint_id);
+  }
 
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
@@ -539,6 +560,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment
   llvm::Value* AllocateHeapNumber();
+  void DirtyHack(int arg_count);
   llvm::Value* CallRuntime(const Runtime::Function*);
   llvm::Value* CallRuntimeViaId(Runtime::FunctionId id);
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
@@ -589,6 +611,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   ZoneList<llvm::Value*> pending_pushed_args_;
   bool emit_debug_code_;
   llvm::Value* volatile_zero_address_;
+  int last_reloc_index_offset_;
   enum ScaleFactor {
     times_1 = 0,
     times_2 = 1,

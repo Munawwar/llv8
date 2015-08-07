@@ -1596,6 +1596,8 @@ class Assembler : public AssemblerBase {
   void vpd(byte op, XMMRegister dst, XMMRegister src1, XMMRegister src2);
   void vpd(byte op, XMMRegister dst, XMMRegister src1, const Operand& src2);
 
+  inline uint32_t GetCodeTargetIndex(Handle<Code> target);
+
   // Debugging
   void Print();
 

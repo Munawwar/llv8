@@ -59,7 +59,7 @@ class MCJITMemoryManager : public llvm::RTDyldMemoryManager {
   // Returns true if an error occurred, false otherwise.
   bool finalizeMemory(std::string *ErrMsg) override;
 
-  CodeDesc LastAllocatedCode() { return allocated_code_.last(); }
+  CodeDesc& LastAllocatedCode() { return allocated_code_.last(); }
 
   List<byte*>& stackmaps() { return stackmaps_; }
 

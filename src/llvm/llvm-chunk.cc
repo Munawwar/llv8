@@ -26,6 +26,8 @@ llvm::PointerType* Types::ptr_i64 = nullptr;
 llvm::PointerType* Types::ptr_float64 = nullptr;
 llvm::Type* Types::tagged = nullptr;
 llvm::PointerType* Types::ptr_tagged = nullptr;
+const int64_t LLVMChunkBuilder::kMaxDeoptCount;
+const int64_t LLVMChunkBuilder::kFirstRelocIndex;
 
 LLVMChunk::~LLVMChunk() {}
 
@@ -47,25 +49,49 @@ Handle<Code> LLVMChunk::Codegen() {
 #endif
 
   Isolate* isolate = info()->isolate();
-  CodeDesc code_desc =
+  CodeDesc& code_desc =
       LLVMGranularity::getInstance().memory_manager_ref()->LastAllocatedCode();
+
+  code_desc.origin = &masm_;
 
 #ifdef DEBUG
   LLVMGranularity::getInstance().Disass(
       code_desc.buffer, code_desc.buffer + code_desc.instr_size);
 #endif
 
-  Vector<byte> reloc_data = LLVMGranularity::getInstance().Patch(
+  // Relocation info comes from 2 sources:
+  // 1) reloc info already present in reloc_data_;
+  // 2) patchpoints (CODE_TARGET reloc info has to be extracted from them).
+  std::vector<RelocInfo> reloc_data_2 = SetUpRelativeCalls(code_desc.buffer);
+  std::vector<RelocInfo> reloc_data_1 = LLVMGranularity::getInstance().Patch(
       code_desc.buffer, code_desc.buffer + code_desc.instr_size,
       reloc_data_->reloc_map());
+  RelocInfoBuffer buffer_writer(8, code_desc.buffer);
+  // Mege reloc infos, sort all of them by pc_ and write to the buffer.
+  std::vector<RelocInfo> reloc_data_merged;
+  reloc_data_merged.insert(reloc_data_merged.end(),
+                           reloc_data_1.begin(), reloc_data_1.end());
+  reloc_data_merged.insert(reloc_data_merged.end(),
+                           reloc_data_2.begin(), reloc_data_2.end());
+  std::sort(reloc_data_merged.begin(), reloc_data_merged.end(),
+            [](const RelocInfo a, const RelocInfo b) {
+              return a.pc() < b.pc();
+            });
+  for (auto r : reloc_data_merged) buffer_writer.Write(&r);
+  v8::internal::Vector<byte> reloc_bytevector = buffer_writer.GetResult();
+  // TODO(llvm): what's up with setting reloc_info's host_ to *code?
 
   // Allocate and install the code.
-  Handle<Code> code = isolate->factory()->NewLLVMCode(code_desc, &reloc_data,
-                                                      info()->flags());
+  Handle<Code> code = isolate->factory()->NewLLVMCode(code_desc,
+      &reloc_bytevector, info()->flags());
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
   SetUpDeoptimizationData(code);
+  // TODO(llvm): it is not thread-safe. It's not anything-safe.
+  // We assume a new function gets attention after the previous one
+  // has been fully processed by llv8.
+  LLVMGranularity::getInstance().memory_manager_ref()->DropStackmaps();
 #ifdef DEBUG
   std::cout << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
@@ -277,6 +303,41 @@ int LLVMDeoptData::DefineDeoptimizationLiteral(Handle<Object> literal) {
   return result;
 }
 
+void LLVMDeoptData::Add(LLVMEnvironment* environment) {
+  deoptimizations_.Add(environment, environment->zone());
+  CHECK_LE(deoptimizations_.length(), LLVMChunkBuilder::kMaxDeoptCount);
+}
+
+std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
+  std::vector<RelocInfo> result;
+  // --------------------------------------------------------------
+  // TODO(llvm): it's a duplication (see SetUpDeoptimizationData).
+  // Move stackmap parse to, say, Codegen().
+  List<byte*>& stackmap_list =
+      LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
+  if (stackmap_list.length() == 0) return result;
+  DCHECK(stackmap_list.length() == 1);
+  StackMaps stackmaps;
+  DataView view(stackmap_list[0]);
+  stackmaps.parse(&view);
+  // --------------------------------------------------------------
+
+  for (auto i = 0; i < stackmaps.records.size(); i++) {
+    auto record = stackmaps.records[i];
+    auto id = record.patchpointID;
+    if (!LLVMChunkBuilder::IsPatchpointIdReloc(id)) continue;
+
+    auto pc_offset = start + record.instructionOffset;
+    *pc_offset++ = 0xE8; // Call relative offset.
+    // TODO(llvm): it's always CODE_TARGET for now.
+    RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
+    result.push_back(reloc_info);
+    Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
+  }
+
+  return result;
+}
+
 void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   List<byte*>& stackmap_list =
       LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
@@ -292,6 +353,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
+  // I suspect stackmaps.stack_sizes.size() = 1 and the below search is useless.
   auto it = std::find_if(stackmaps.stack_sizes.begin(),
                          stackmaps.stack_sizes.end(),
                          [address](const StackMaps::StackSize& s) {
@@ -301,20 +363,23 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   DCHECK(it->size / kStackSlotSize - kPhonySpillCount >= 0);
   code->set_stack_slots(it->size / kStackSlotSize - kPhonySpillCount);
 
-  auto true_deopt_count = stackmaps.records.size();
+  std::vector<uint32_t> sorted_ids;
+  for (auto i = 0; i < stackmaps.records.size(); i++) {
+    auto id = stackmaps.records[i].patchpointID;
+    // Check it's a stackmap record corresponding to a deopt, not a reloc.
+    if (LLVMChunkBuilder::IsPatchpointIdDeopt(id)) sorted_ids.push_back(id);
+  }
+  std::sort(sorted_ids.begin(), sorted_ids.end());
+  auto true_deopt_count = sorted_ids.size();
   Handle<DeoptimizationInputData> data =
       DeoptimizationInputData::New(isolate(), true_deopt_count, TENURED);
 
   if (true_deopt_count == 0) return;
 
-  std::vector<uint32_t> sorted_ids;
-  for (auto i = 0; i < true_deopt_count; i++)
-    sorted_ids.push_back(stackmaps.records[i].patchpointID);
-  std::sort(sorted_ids.begin(), sorted_ids.end());
-
-  for (auto i = 0; i < true_deopt_count; i++) {
+  for (auto i = 0; i < stackmaps.records.size(); i++) {
     auto stackmap_record = stackmaps.records[i];
     auto stackmap_id = stackmap_record.patchpointID;
+    if (!LLVMChunkBuilder::IsPatchpointIdDeopt(stackmap_id)) continue;
 
     // stackmap_id s are unique so we'll find exactly one.
     auto it = std::lower_bound(sorted_ids.begin(),
@@ -370,15 +435,11 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   data->SetOsrPcOffset(Smi::FromInt(-1));
 
   code->set_deoptimization_data(*data);
-  // TODO(llvm): it is not thread-safe. It's not anything-safe.
-  // We assume a new function gets attention after the previous one
-  // has been fully processed by llv8.
-  LLVMGranularity::getInstance().memory_manager_ref()->DropStackmaps();
 }
 
-Vector<byte> LLVMGranularity::Patch(Address start, Address end,
-                                    LLVMRelocationData::RelocMap& reloc_map) {
-  RelocInfoBuffer buffer_writer(4, start);
+std::vector<RelocInfo> LLVMGranularity::Patch(
+    Address start, Address end, LLVMRelocationData::RelocMap& reloc_map) {
+  std::vector<RelocInfo> updated_reloc_infos;
 
   auto pos = start;
   while (pos < end) {
@@ -409,7 +470,7 @@ Vector<byte> LLVMGranularity::Patch(Address start, Address end,
             Memory::uintptr_at(pos + 2) = imm >> 32;
           }
           rinfo.set_pc(pos + 2);
-          buffer_writer.Write(&rinfo);
+          updated_reloc_infos.push_back(rinfo);
         } else {
           UNIMPLEMENTED();
         }
@@ -417,8 +478,7 @@ Vector<byte> LLVMGranularity::Patch(Address start, Address end,
     }
     pos += size;
   }
-  // Here we just (rightfully) hope for RVO
-  return buffer_writer.GetResult();
+  return updated_reloc_infos;
 }
 
 LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
@@ -853,13 +913,26 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
   return allocated;
 }
 
+void LLVMChunkBuilder::DirtyHack(int arg_count) {
+  // FIXME Dirty hack. We need to find way to push arguments in stack instead of
+  // moving them.
+  // It will also fix arguments offset mismatch problem in runtime functions.
+  std::string arg_offset = std::to_string(arg_count * kPointerSize);
+  std::string asm_string1 = "sub $$";
+  std::string asm_string2 = ", %rsp";
+  std::string final_strig = asm_string1 + arg_offset + asm_string2;
+  auto inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(), false);
+  llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
+      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
+  __ CreateCall(inline_asm, "");
+}
+
 llvm::Value* LLVMChunkBuilder::CallRuntimeViaId(Runtime::FunctionId id) {
   return CallRuntime(Runtime::FunctionForId(id));
 }
 
 llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   auto arg_count = function->nargs;
-  // if (arg_count != 0) UNIMPLEMENTED();
 
   Address rt_target = ExternalReference(function, isolate()).address();
   // TODO(llvm): we shouldn't always save FP regs
@@ -877,25 +950,12 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
     code = ces.GetCode();
   }
 
-  // FIXME(llvm): RelocInfo::CODE... (?)
-  // Also, our method of calling is suboptimal compared to CS (call disp32).
-  auto code_obj = MoveHeapObject(code);
-  auto target_address = LoadFieldOperand(code_obj, Code::kHeaderSize);
-//  llvm::Value* target_address = RecordRelocInfo(
-//      reinterpret_cast<uint64_t>(code->instruction_start()),
-//      RelocInfo::EMBEDDED_OBJECT);
+  auto index = chunk()->masm().GetCodeTargetIndex(code);
 
-  // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
-  // It will also fix arguments offset mismatch problem in runtime functions
-  std::string arg_offset = std::to_string(arg_count * kPointerSize);
-  std::string asm_string1 = "sub $$";
-  std::string asm_string2 = ", %rsp";
-  std::string final_strig = asm_string1 + arg_offset + asm_string2;
-  llvm::FunctionType* inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(),
-                                                               false);
-  llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
-      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-  __ CreateCall(inline_asm, "");
+  // 1) emit relative 32 call to index which would follow the calling convention
+  // 2) record reloc info when we know the pc offset (RelocInfo::CODE...)
+
+  DirtyHack(arg_count);
 
   auto llvm_nargs = __ getInt64(arg_count);
   auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
@@ -911,7 +971,22 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   }
   pending_pushed_args_.Clear();
 
-  return CallVal(target_address, llvm::CallingConv::X86_64_V8_CES, args);
+  llvm::Function* patchpoint = llvm::Intrinsic::getDeclaration(
+      module_.get(), llvm::Intrinsic::experimental_patchpoint_i64);
+  int64_t pp_id = ++last_reloc_index_offset_ + kFirstRelocIndex;
+  auto llvm_pp_id = __ getInt64(pp_id);
+  auto nop_size = __ getInt32(5); // call relative i32 takes 5 bytes: `e8` + i32
+  auto num_args = __ getInt32(args.size());
+  auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
+  std::vector<llvm::Value*>  patchpoint_args =
+    { llvm_pp_id, nop_size, llvm_null, num_args };
+  patchpoint_args.insert(patchpoint_args.end(), args.begin(), args.end());
+  auto call_inst = __ CreateCall(patchpoint, patchpoint_args);
+  call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
+
+  // Map pp_id -> index in code_targets_.
+  chunk()->target_index_for_ppid()[pp_id] = index;
+  return call_inst;
 }
 
 llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
@@ -956,6 +1031,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
   // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
   // It will also fix arguments offset mismatch problem in runtime functions
+  // TODO(llvm): refactor (just call DirtyHack)
   std::string argOffset = std::to_string(arg_count * 8);
   std::string asm_string1 = "sub $$";
   std::string asm_string2 = ", %rsp";

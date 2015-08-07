@@ -53,6 +53,16 @@ void Assembler::emitw(uint16_t x) {
   pc_ += sizeof(uint16_t);
 }
 
+uint32_t Assembler::GetCodeTargetIndex(Handle<Code> target) {
+  int current = code_targets_.length();
+  if (current > 0 && code_targets_.last().is_identical_to(target)) {
+    // Optimization if we keep jumping to the same code target.
+    return current - 1;
+  } else {
+    code_targets_.Add(target);
+    return current;
+  }
+}
 
 void Assembler::emit_code_target(Handle<Code> target,
                                  RelocInfo::Mode rmode,
@@ -64,14 +74,8 @@ void Assembler::emit_code_target(Handle<Code> target,
   } else {
     RecordRelocInfo(rmode);
   }
-  int current = code_targets_.length();
-  if (current > 0 && code_targets_.last().is_identical_to(target)) {
-    // Optimization if we keep jumping to the same code target.
-    emitl(current - 1);
-  } else {
-    code_targets_.Add(target);
-    emitl(current);
-  }
+  auto code_target_index = GetCodeTargetIndex(target);
+  emitl(code_target_index);
 }
 
 
