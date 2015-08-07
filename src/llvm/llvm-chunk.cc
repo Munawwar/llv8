@@ -188,6 +188,7 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
                      stackmaps,
                      environment->HasTaggedValueAt(i),
                      environment->HasUint32ValueAt(i),
+                     environment->HasDoubleValueAt(i),
                      &object_index,
                      &dematerialized_index);
   }
@@ -200,6 +201,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
                                  const StackMaps& stackmaps,
                                  bool is_tagged,
                                  bool is_uint32,
+                                 bool is_double,
                                  int* object_index_pointer,
                                  int* dematerialized_index_pointer) {
   if (op == LLVMEnvironment::materialization_marker()) {
@@ -231,8 +233,13 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
       DCHECK(location.size == kInt32Size);
       translation->StoreUint32StackSlot(index);
     } else {
-      DCHECK(location.size == kInt32Size);
-      translation->StoreInt32StackSlot(index);
+      if (is_double) {
+        DCHECK(location.size == kDoubleSize);
+        translation->StoreDoubleStackSlot(index);
+      } else {
+        DCHECK(location.size == kInt32Size);
+        translation->StoreInt32StackSlot(index);
+      }
     }
   } else if (location.kind == StackMaps::Location::kRegister) {
     StackMapReg stack_reg = location.dwarf_reg.reg();
@@ -3200,7 +3207,7 @@ void LLVMChunkBuilder::DoSar(HSar* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
-    llvm::Value* AShr = __ CreateAShr(Use(left), Use(right),"");
+    llvm::Value* AShr = __ CreateAShr(Use(left), Use(right), "Sar");
     instr->set_llvm_value(AShr);
   }
   else {
@@ -3804,6 +3811,10 @@ void LLVMEnvironment::AddValue(llvm::Value* value,
 
   if (is_uint32) {
     is_uint32_.Add(values_.length() - 1, zone());
+  }
+
+  if (representation.IsDouble()) {
+    is_double_.Add(values_.length() - 1, zone());
   }
 }
 

@@ -260,14 +260,14 @@ struct Types FINAL : public AllStatic {
 class LLVMEnvironment FINAL:  public ZoneObject {
  public:
   LLVMEnvironment(Handle<JSFunction> closure,
-               FrameType frame_type,
-               BailoutId ast_id,
-               int parameter_count,
-               int argument_count,
-               int value_count,
-               LLVMEnvironment* outer,
-               HEnterInlined* entry,
-               Zone* zone)
+                  FrameType frame_type,
+                  BailoutId ast_id,
+                  int parameter_count,
+                  int argument_count,
+                  int value_count,
+                  LLVMEnvironment* outer,
+                  HEnterInlined* entry,
+                  Zone* zone)
       : closure_(closure),
         frame_type_(frame_type),
         arguments_stack_height_(argument_count),
@@ -279,6 +279,7 @@ class LLVMEnvironment FINAL:  public ZoneObject {
         values_(value_count, zone),
         is_tagged_(value_count, zone),
         is_uint32_(value_count, zone),
+        is_double_(value_count, zone),
         object_mapping_(0, zone),
         outer_(outer),
         entry_(entry),
@@ -308,6 +309,10 @@ class LLVMEnvironment FINAL:  public ZoneObject {
 
   bool HasUint32ValueAt(int index) const {
     return is_uint32_.Contains(index);
+  }
+
+  bool HasDoubleValueAt(int index) const {
+    return is_double_.Contains(index);
   }
 
   ~LLVMEnvironment() { // FIXME(llvm): remove unused fields.
@@ -340,6 +345,7 @@ class LLVMEnvironment FINAL:  public ZoneObject {
   ZoneList<llvm::Value*> values_;
   GrowableBitVector is_tagged_;
   GrowableBitVector is_uint32_;
+  GrowableBitVector is_double_;
 
   // Map with encoded information about materialization_marker operands.
   ZoneList<uint32_t> object_mapping_;
@@ -431,6 +437,7 @@ class LLVMChunk FINAL : public LowChunk {
                         const StackMaps& stackmaps,
                         bool is_tagged,
                         bool is_uint32,
+                        bool is_double,
                         int* object_index_pointer,
                         int* dematerialized_index_pointer);
 
