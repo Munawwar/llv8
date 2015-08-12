@@ -446,7 +446,10 @@ class LLVMChunk FINAL : public LowChunk {
   LLVMRelocationData* reloc_data_;
   // Ownership gets transferred from LLVMChunkBuilder
   std::unique_ptr<LLVMDeoptData> deopt_data_;
+  // FIXME(llvm): memory leak. Assembler is Malloced and doesn't die either.
   Assembler masm_;
+  // FIXME(llvm): memory leak
+  // (this map allocates keys on the heap and doesn't die).
   // Map patchpointId -> index in masm_.code_targets_
   std::map<int64_t, uint32_t> target_index_for_ppid_;
 };
