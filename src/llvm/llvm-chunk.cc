@@ -1992,11 +1992,6 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
   int arity = instr->argument_count()-1;
   llvm::Value* arity_val = __ getInt64(arity);
-  /*if (arity == 0) {
-    __ CreateXor(arity_val, arity_val);
-  } else if (is_uint32(arity)) {
-    arity_val = __ getInt64(static_cast<uint32_t>(arity));
-  }*/
   llvm::Value* load_root = LoadRoot(Heap::kUndefinedValueRootIndex);
   ElementsKind kind = instr->elements_kind();
   AllocationSiteOverrideMode override_mode =
@@ -2024,8 +2019,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     params.push_back(arity_val);
     params.push_back(load_root);
     pending_pushed_args_.Clear();
-    // arguments number must be corrected
-    std::string arg_offset = std::to_string(4 * 8);
+    std::string arg_offset = std::to_string(2 * 8);
     std::string asm_string1 = "sub $$";
     std::string asm_string2 = ", %rsp";
     std::string final_strig = asm_string1 + arg_offset + asm_string2;
@@ -2039,7 +2033,6 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
     instr->set_llvm_value(return_val);
   }
-  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCallRuntime(HCallRuntime* instr) {
