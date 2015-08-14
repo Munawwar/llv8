@@ -1964,13 +1964,13 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
 
 void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   int arity = instr->argument_count()-1;
-  llvm::Value* arity_val_ = __ getInt64(arity);
+  llvm::Value* arity_val = __ getInt64(arity);
   if (arity == 0) {
-    arity_val_ = __ CreateXor(arity_val_, arity_val_);
+    arity_val = __ CreateXor(arity_val, arity_val);
   } else if (is_uint32(arity)) {
-    arity_val_ = __ getInt32(static_cast<uint32_t>(arity));
+    arity_val = __ getInt64(static_cast<uint32_t>(arity));
   }
-  LoadRoot(Heap::kUndefinedValueRootIndex);
+  llvm::Value* load_r = LoadRoot(Heap::kUndefinedValueRootIndex);
   CallConstructStub stub(isolate(), NO_CALL_CONSTRUCTOR_FLAGS);
   Handle<Code> code = Handle<Code>::null();
   {
@@ -1982,11 +1982,12 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   std::vector<llvm::Value*> params;
   for (int i = 0; i < instr->OperandCount(); i++)
     params.push_back(Use(instr->OperandAt(i)));
+  params.push_back(arity_val);
+  params.push_back(load_r);
   pending_pushed_args_.Clear();
   llvm::Value* call = CallAddress(code->instruction_start(),
-                                  llvm::CallingConv::X86_64_V8, params);
+                                  llvm::CallingConv::X86_64_V8_S3, params);
   instr->set_llvm_value(call);
-  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
