@@ -2443,7 +2443,11 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
 }
 
 void LLVMChunkBuilder::DoCheckMapValue(HCheckMapValue* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* val = Use(instr->value());
+  llvm::Value* int_val = __ CreatePtrToInt(FieldOperand(val, HeapObject::kMapOffset), Types::i64);
+  llvm::Value* cmp = __ CreateICmpNE(Use(instr->map()), int_val);
+  DeoptimizeIf(cmp, true);
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCheckSmi(HCheckSmi* instr) {
@@ -2635,7 +2639,25 @@ void LLVMChunkBuilder::DoForceRepresentation(HForceRepresentation* instr) {
 }
 
 void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* map_val = Use(instr->map());
+  llvm::BasicBlock* load_cache = NewBlock("LOAD CACHE");
+  llvm::BasicBlock* done_block = NewBlock("DONE");
+  
+  llvm::Value* result = EnumLength(map_val);
+  llvm::Value* cmp_neq = __ CreateICmpNE(result, __ getInt32(0));
+  __ CreateCondBr(cmp_neq, load_cache, __ GetInsertBlock());
+  result = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
+  __ CreateBr(done_block);
+  __ SetInsertPoint(load_cache);
+  result = FieldOperand(map_val, Map::kDescriptorsOffset);
+  result = FieldOperand(result, DescriptorArray::kEnumCacheOffset);
+  result = FieldOperand(result, FixedArray::SizeFor(HForInCacheArray::cast(instr)->idx()));
+  __ SetInsertPoint(done_block);
+  llvm::Value* int64_res = __ CreatePtrToInt(result, Types::i64);
+  llvm::Value* cond = SmiCheck(int64_res, true);
+  DeoptimizeIf(cond, true);
+  instr->set_llvm_value(int64_res);
+  //UNIMPLEMENTED();
 }
 
 llvm::Value* LLVMChunkBuilder::EnumLength(llvm::Value* map) {
@@ -3011,7 +3033,11 @@ void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
 }
 
 void LLVMChunkBuilder::DoMapEnumLength(HMapEnumLength* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* val = EnumLength(Use(instr->value()));
+  llvm::Value* smi_tmp_val = __ CreateZExt(val, Types::i64);
+  llvm::Value* smi_val = __ CreateShl(smi_tmp_val, kSmiShift);
+  instr->set_llvm_value(smi_val);
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoMathFloorOfDiv(HMathFloorOfDiv* instr) {
