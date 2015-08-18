@@ -1987,7 +1987,8 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   pending_pushed_args_.Clear();
   llvm::Value* call = CallAddress(code->instruction_start(),
                                   llvm::CallingConv::X86_64_V8_S3, params);
-  instr->set_llvm_value(call);
+  llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
+  instr->set_llvm_value(return_val);
 }
 
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
@@ -2837,7 +2838,35 @@ void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* val1 = Use(instr->object());
+  llvm::Value* val2 = Use(instr->index());
+  // DeferredLoadMutableDouble case does not implemented,
+  llvm::BasicBlock* out_of_obj = NewBlock("OUT OF OBJECT");
+  llvm::BasicBlock* done = NewBlock("DONE");
+  /*llvm::Value* smi_tmp_val = __ CreateZExt(__ getInt64(1), Types::i64);
+  llvm::Value* smi_val = __ CreateShl(smi_tmp_val, kSmiShift);*/
+  /*llvm::Value* tmp_val = __ CreateAnd(val2, smi_val);
+  llvm::Value* test = __ CreateICmpNE(tmp_val, __ getInt64(0));*/
+  llvm::Value* smi_tmp = __ CreateAShr(val2, __ getInt64(1));
+  val2 = __ CreateLShr(smi_tmp, kSmiShift);
+  val2 = __ CreateTrunc(val2, Types::i32);
+  llvm::Value* cmp_less = __ CreateICmpSLT(val2, __ getInt32(0));
+  //FIXME: second argument may be mistaken, it also appear in InCacheCheck
+  __ CreateCondBr(cmp_less, out_of_obj, __ GetInsertBlock());
+  llvm::Value* tmp_val1 = FieldOperand(val2, JSObject::kHeaderSize);
+  llvm::Value* casted = __ CreateIntToPtr(val1, Types::ptr_i8);
+  val1 =  __ CreateGEP(casted, tmp_val1);
+  __ CreateBr(done);
+  __ SetInsertPoint(out_of_obj);
+  val1 = FieldOperand(val1, JSObject::kPropertiesOffset);
+  llvm::Value* int64_val1 = __ CreatePtrToInt(val1, Types::i64);
+  llvm::Value* neg_val1 = __ CreateNeg(int64_val1);
+  llvm::Value* tmp_val = FieldOperand(neg_val1, JSObject::kHeaderSize-kPointerSize);
+  val1 =  __ CreateGEP(val1, tmp_val);
+  __ CreateBr(done);
+  __ SetInsertPoint(done);
+  int64_val1 = __ CreatePtrToInt(val1, Types::i64);
+  instr->set_llvm_value(int64_val1);
 }
 
 void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
