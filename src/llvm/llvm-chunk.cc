@@ -3089,6 +3089,80 @@ void LLVMChunkBuilder::DoMathFloorOfDiv(HMathFloorOfDiv* instr) {
   UNIMPLEMENTED();
 }
 
+void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
+  llvm::Value* value = Use(instr->value());
+  llvm::Value* output_reg = nullptr;
+  llvm::Value* output_reg_s = nullptr;
+  llvm::Value* output_reg_p = nullptr;
+  // Let's assume we don't support this feature
+  //if (CpuFeatures::IsSupported(SSE4_1))
+
+  llvm::BasicBlock* negative_sign = NewBlock("Negative Sign");
+  llvm::BasicBlock* non_negative_sign = NewBlock("Non Negative Sign");
+  llvm::BasicBlock* positive_sign = NewBlock("Positive Sign");
+  llvm::BasicBlock* sign = NewBlock("Probably zero sign");
+  llvm::BasicBlock* check_overflow = NewBlock("Check Overflow");
+  llvm::BasicBlock* done = NewBlock("Done");
+  llvm::Value* l_zero = __ getInt64(0);
+  llvm::Value* l_double_zero = __ CreateSIToFP(l_zero, Types::float64);
+  llvm::Value* cmp = __ CreateFCmpOLT(value, l_double_zero);
+  //To do deoptimize with condition parity_even
+  //DeoptimizeIf()
+  __ CreateCondBr(cmp, negative_sign, non_negative_sign);
+  __ SetInsertPoint(non_negative_sign);
+  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+    llvm::Value* cmp_gr = __ CreateFCmpOGT(value, l_double_zero);
+    __ CreateCondBr(cmp_gr, positive_sign, sign);
+    __ SetInsertPoint(sign);
+    llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+        llvm::Intrinsic::x86_sse2_movmsk_pd);
+    llvm::Value* input_val = __ CreateSIToFP(value, Types::float64);
+    llvm::Value* param_vect = __ CreateVectorSplat(2, input_val);
+    llvm::Value* movms = __ CreateCall(intrinsic, param_vect);
+    llvm::Value* not_zero = __ CreateICmpNE(movms, __ getInt32(0));
+    DeoptimizeIf(not_zero);
+    output_reg_s = movms;
+    __ CreateBr(done);
+  } else __ CreateBr(positive_sign);
+  __ SetInsertPoint(positive_sign);
+  llvm::Value* floor_result = __ CreateFPToSI(value, Types::i32);
+  output_reg_p = floor_result;
+  auto type = instr->representation().IsSmi() ? Types::i64 : Types::i32;
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+        llvm::Intrinsic::ssub_with_overflow, type);
+
+  llvm::Value* params[] = { floor_result, __ getInt32(0x1) };
+  llvm::Value* call = __ CreateCall(intrinsic, params);
+
+  llvm::Value* overflow = __ CreateExtractValue(call, 1);
+  DeoptimizeIf(overflow);
+  __ CreateBr(done);
+  __ SetInsertPoint(negative_sign);
+  llvm::Value* floor_result_int = __ CreateFPToSI(value, Types::i32);
+  llvm::Value* floor_result_double = __ CreateSIToFP(floor_result_int, Types::float64);
+  output_reg = floor_result_int;
+  llvm::Value* cmp_eq = __ CreateFCmpOEQ(value, floor_result_double);
+  __ CreateCondBr(cmp_eq, done, check_overflow);
+  __ SetInsertPoint(check_overflow);
+
+  llvm::Function* intrinsic_1 = llvm::Intrinsic::getDeclaration(module_.get(),
+        llvm::Intrinsic::ssub_with_overflow, Types::i32);
+  llvm::Value* par[] = { floor_result_int, __ getInt32(1) };
+  llvm::Value* call_1 = __ CreateCall(intrinsic_1, par);
+  overflow = __ CreateExtractValue(call_1, 1);
+  DeoptimizeIf(overflow);
+  llvm::Value* ll = output_reg;
+  __ CreateBr(done);
+
+  __ SetInsertPoint(done);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 3);
+  phi->addIncoming(output_reg, negative_sign);
+  phi->addIncoming(output_reg_p, positive_sign);
+  phi->addIncoming(ll, check_overflow);
+  phi->addIncoming(output_reg_s, sign);
+  instr->set_llvm_value(phi);
+}
+
 void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
   UNIMPLEMENTED();
 }
@@ -3810,8 +3884,10 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
     case kMathPowHalf:
       DoMathPowHalf(instr);
       break;
-    case kMathFloor:
-      UNIMPLEMENTED();
+    case kMathFloor: {
+      DoMathFloor(instr);
+      break;
+    }
     case kMathRound:
       UNIMPLEMENTED();
     case kMathFround:
