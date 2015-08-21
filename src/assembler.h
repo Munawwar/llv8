@@ -519,6 +519,7 @@ class RelocInfo {
   void set_pc(byte* pc) { pc_ = pc; }
   Mode rmode() const {  return rmode_; }
   intptr_t data() const { return data_; }
+  void set_data(intptr_t data) { data_ = data; }
   Code* host() const { return host_; }
   void set_host(Code* host) { host_ = host; }
 

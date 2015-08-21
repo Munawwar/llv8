@@ -472,11 +472,16 @@ std::vector<RelocInfo> LLVMGranularity::Patch(
         LLVMRelocationData::ExtendedInfo minfo = pair.second;
         if (rinfo.rmode() == RelocInfo::CELL ||
             rinfo.rmode() == RelocInfo::EMBEDDED_OBJECT) {
+          intptr_t data = rinfo.data();
+          // Our invariant which is a hack. See RecrodRelocInfo().
+          DCHECK_EQ(static_cast<uint64_t>(data), imm);
           if (minfo.cell_extended) { // immediate was extended from 32 bit to 64.
             DCHECK((imm & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
             Memory::uintptr_at(pos + 2) = imm >> 32;
+            data >>= 32;
           }
           rinfo.set_pc(pos + 2);
+          rinfo.set_data(data);
           updated_reloc_infos.push_back(rinfo);
         } else {
           UNIMPLEMENTED();
@@ -654,7 +659,7 @@ llvm::BasicBlock* LLVMChunkBuilder::Use(HBasicBlock* block) {
 }
 
 llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
-  if (value->EmitAtUses() && !value->llvm_value()) {
+  if (value->EmitAtUses()) {
     HInstruction* instr = HInstruction::cast(value);
     VisitInstruction(instr);
   }
@@ -1240,7 +1245,8 @@ llvm::Value* LLVMChunkBuilder::GetVolatileZero() {
 }
 
 llvm::Value* LLVMChunkBuilder::ConstFoldBarrier(llvm::Value* imm) {
-  return __ CreateAdd(GetVolatileZero(), imm);
+//  return __ CreateAdd(GetVolatileZero(), imm);
+  return imm;
 }
 
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
@@ -1302,8 +1308,6 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   while (current != NULL && !is_aborted()) {
     // Code for constants in registers is generated lazily.
     if (!current->EmitAtUses()) {
-      VisitInstruction(current);
-    } else if (current->IsConstant() && current->representation().IsTagged()) {
       VisitInstruction(current);
     }
     current = current->next();
@@ -1496,15 +1500,27 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
     extended = true;
   }
 
-  auto value = ConstFoldBarrier(__ getInt64(intptr_value));
-
   // Here we use the intptr_value (data) only to identify the entry in the map
   RelocInfo rinfo(rmode, intptr_value);
   LLVMRelocationData::ExtendedInfo meta_info;
   meta_info.cell_extended = extended;
   reloc_data_->Add(rinfo, meta_info);
 
-  return value;
+  bool is_var_arg = false;
+  auto return_type = Types::i64;
+  auto param_types = { Types::i64 };
+  auto func_type = llvm::FunctionType::get(return_type, param_types,
+                                           is_var_arg);
+  // AT&T syntax.
+  const char* asm_string = "movabsq $1, $0";
+  // i = 64-bit integer (on x64), q = register (like r, but more regs allowed).
+  const char* constraints = "=q,i,~{dirflag},~{fpsr},~{flags}";
+  bool has_side_effects = true;
+  llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(func_type,
+                                                     asm_string,
+                                                     constraints,
+                                                     has_side_effects);
+  return __ CreateCall(inline_asm, __ getInt64(intptr_value));
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {

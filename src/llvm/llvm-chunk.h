@@ -149,6 +149,7 @@ class LLVMGranularity FINAL {
             << reinterpret_cast<void*>(pos) << std::endl;
         break;
       }
+      llvm::errs() << pos << "\t";
       inst_printer_->printInst(&inst, llvm::errs(), "");
       llvm::errs() << "\n";
       pos += size;
