@@ -219,6 +219,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
     DCHECK(offset % kInt32Size == 0);
     // TODO(llvm): check for off-by-one error in int32 case on real deopts.
     auto index = offset / kPointerSize;
+    // TODO(llvm): see StackSlotOffset()
     CHECK(index != 1 && index != 0); // rbp and return address
     if (index >= 0)
       index = 1 - index;
