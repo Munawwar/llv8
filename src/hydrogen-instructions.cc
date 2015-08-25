@@ -726,6 +726,14 @@ bool HInstruction::Dominates(HInstruction* other) {
   return false;
 }
 
+bool HValue::IsReacheableFrom(HValue* other) {
+  DCHECK(IsInstruction() && other->IsInstruction());
+  if (other->block() == block()) {
+    return HInstruction::cast(other)->Dominates(HInstruction::cast(this));
+  } else {
+    return block()->IsReacheableFrom(other->block());
+  }
+}
 
 #ifdef DEBUG
 void HInstruction::Verify() {

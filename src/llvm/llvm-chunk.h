@@ -503,15 +503,23 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)
 #undef DECLARE_DO
   static const uintptr_t kExtFillingValue = 0xabcdbeef;
-  static const int64_t kMaxDeoptCount = (1 << 16) - 1;
+  // TODO(llvm): bitvectors seem to be a much wiser solution to this.
+  static const int64_t kMaxDeoptCount = (1 << 10) - 1;
   static const int64_t kFirstRelocIndex = kMaxDeoptCount + 1;
+  static const int64_t kMaxRelocCount = (1 << 20) - 1;
+  static const int64_t kFirstSafepointIndex = kMaxRelocCount + 1;
 
   static bool IsPatchpointIdDeopt(int64_t patchpoint_id) {
     return patchpoint_id <= LLVMChunkBuilder::kMaxDeoptCount;
   }
 
+  static bool IsPatchpointIdSafepoint(int64_t patchpoint_id) {
+    return patchpoint_id >= kFirstSafepointIndex;
+  }
+
   static bool IsPatchpointIdReloc(int64_t patchpoint_id) {
-    return !IsPatchpointIdDeopt(patchpoint_id);
+    return !IsPatchpointIdDeopt(patchpoint_id)
+        && !IsPatchpointIdSafepoint(patchpoint_id);
   }
 
  private:
@@ -520,6 +528,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   static llvm::CmpInst::Predicate TokenToPredicate(Token::Value op,
                                                    bool is_unsigned,
                                                    bool is_double = false);
+  static bool HasTaggedValue(HValue* value);
 
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
@@ -591,6 +600,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
                     llvm::BasicBlock* true_target,
                     llvm::BasicBlock* false_target);
 
+  void MarkAsCall(HInstruction* instr);
   void DoDummyUse(HInstruction* instr);
   void DoStoreKeyedFixedArray(HStoreKeyed* value);
   void DoLoadKeyedFixedArray(HLoadKeyed* value);

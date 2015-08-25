@@ -782,6 +782,8 @@ class HValue : public ZoneObject {
         ? FAIL_ON_MINUS_ZERO : TREAT_MINUS_ZERO_AS_ZERO;
   }
 
+  bool IsReacheableFrom(HValue* other);
+
  protected:
   // This function must be overridden for instructions with flag kUseGVN, to
   // compare the non-Operand parts of the instruction.

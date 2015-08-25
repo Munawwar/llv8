@@ -174,6 +174,16 @@ class HBasicBlock final : public ZoneObject {
 
   inline Zone* zone() const;
 
+  // DFS by reverse edges.
+  static void ReverseDFS(HBasicBlock* v, GrowableBitVector& visited,
+                         Zone* zone);
+
+  bool IsReacheableFrom(HBasicBlock* other) {
+    GrowableBitVector visited;
+    ReverseDFS(this, visited, zone());
+    return visited.Contains(other->block_id());
+  }
+
 #ifdef DEBUG
   void Verify();
 #endif

@@ -332,6 +332,15 @@ void HBasicBlock::MarkSuccEdgeUnreachable(int succ) {
   succ_block->MarkUnreachable();
 }
 
+void HBasicBlock::ReverseDFS(HBasicBlock* v, GrowableBitVector& visited,
+                             Zone* zone) {
+  visited.Add(v->block_id(), zone);
+  for (HPredecessorIterator it(v); !it.Done(); it.Advance()) {
+    HBasicBlock* predecessor = it.Current();
+    if (!visited.Contains(predecessor->block_id()))
+      ReverseDFS(predecessor, visited, zone);
+  }
+}
 
 void HBasicBlock::RegisterPredecessor(HBasicBlock* pred) {
   if (HasPredecessor()) {

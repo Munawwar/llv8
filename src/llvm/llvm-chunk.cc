@@ -609,6 +609,44 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
   }
 }
 
+void LLVMChunkBuilder::MarkAsCall(HInstruction* call_instr) {
+  // TODO(llvm): Refactor out the AssingPointerMap() part.
+
+  // TODO(llvm): obviously it's a very naive and unoptimal algorithm.
+  // Why? Because the biggest improvement in performance is the
+  // non-working-to-working. Other words: optimization would be premature.
+
+  // FIXME(llvm): it's a hack which works as long as we have one function.
+  static int stackmap_id = kFirstSafepointIndex;
+  std::vector<llvm::Value*> mapped_values;
+
+  // FIXME(llvm): what about phi-functions?
+  const ZoneList<HBasicBlock*>* blocks = graph()->blocks();
+  for (int i = 0; i < blocks->length(); i++) {
+    HBasicBlock* block = blocks->at(i);
+    // Iterate over all instructions of the graph.
+    for (HInstructionIterator it(block); !it.Done(); it.Advance()) {
+      HInstruction* def = it.Current();
+      if (!def->llvm_value()) continue;
+      if (def == call_instr) continue;
+      if (!HasTaggedValue(def)) continue;
+      if (!def->Dominates(call_instr)) continue;
+      for (HUseIterator it(def->uses()); !it.Done(); it.Advance()) {
+        HValue* use = it.value();
+        if (use == HValue::cast(call_instr)) continue;
+        if (use->IsReacheableFrom(call_instr)) {
+          // Use(def) goes to stackmap
+          if (def->llvm_value()) mapped_values.push_back(def->llvm_value());
+          break;
+        }
+      }
+    }
+  }
+  // FIXME(llvm): Stackmap offset appears to not presicely follow the call
+  // so change it to patchpoint.
+  CallStackMap(stackmap_id++, mapped_values);
+}
+
 void LLVMChunkBuilder::DoDummyUse(HInstruction* instr) {
   Representation r = instr->representation();
   llvm::Type* type = GetLLVMType(r);
@@ -1199,6 +1237,11 @@ llvm::CmpInst::Predicate LLVMChunkBuilder::TokenToPredicate(Token::Value op,
       UNREACHABLE();
   }
   return pred;
+}
+
+bool LLVMChunkBuilder::HasTaggedValue(HValue* value) {
+  return value != NULL &&
+      value->representation().IsTagged() && !value->type().IsSmi();
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
@@ -1973,6 +2016,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 
   auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args);
   instr->set_llvm_value(call);
+  MarkAsCall(instr);
 }
 
 void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
