@@ -3146,20 +3146,20 @@ void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
   __ CreateCondBr(cmp_eq, done, check_overflow);
   __ SetInsertPoint(check_overflow);
 
-  llvm::Function* intrinsic_1 = llvm::Intrinsic::getDeclaration(module_.get(),
+  llvm::Function* intrinsic_sub_overflow = llvm::Intrinsic::getDeclaration(module_.get(),
         llvm::Intrinsic::ssub_with_overflow, Types::i32);
   llvm::Value* par[] = { floor_result_int, __ getInt32(1) };
-  llvm::Value* call_1 = __ CreateCall(intrinsic_1, par);
-  overflow = __ CreateExtractValue(call_1, 1);
+  llvm::Value* call_intrinsic = __ CreateCall(intrinsic_sub_overflow, par);
+  overflow = __ CreateExtractValue(call_intrinsic, 1);
   DeoptimizeIf(overflow);
-  llvm::Value* ll = output_reg;
+  llvm::Value* result = output_reg;
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
   llvm::PHINode* phi = __ CreatePHI(Types::i32, 3);
   phi->addIncoming(output_reg, negative_sign);
   phi->addIncoming(output_reg_p, positive_sign);
-  phi->addIncoming(ll, check_overflow);
+  phi->addIncoming(result, check_overflow);
   phi->addIncoming(output_reg_s, sign);
   instr->set_llvm_value(phi);
 }
