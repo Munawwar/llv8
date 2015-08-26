@@ -2703,22 +2703,28 @@ void LLVMChunkBuilder::DoForceRepresentation(HForceRepresentation* instr) {
 void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   llvm::Value* map_val = Use(instr->map());
   llvm::BasicBlock* load_cache = NewBlock("LOAD CACHE");
+  llvm::BasicBlock* done_block1 = NewBlock("DONE1");
   llvm::BasicBlock* done_block = NewBlock("DONE");
   
   llvm::Value* result = EnumLength(map_val);
   llvm::Value* cmp_neq = __ CreateICmpNE(result, __ getInt32(0));
-  __ CreateCondBr(cmp_neq, load_cache, __ GetInsertBlock());
-  result = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
+  __ CreateCondBr(cmp_neq, load_cache, done_block1);
+  __ SetInsertPoint(done_block1);
+  llvm::Value* result1 = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
   __ CreateBr(done_block);
   __ SetInsertPoint(load_cache);
   result = FieldOperand(map_val, Map::kDescriptorsOffset);
   result = FieldOperand(result, DescriptorArray::kEnumCacheOffset);
   result = FieldOperand(result, FixedArray::SizeFor(HForInCacheArray::cast(instr)->idx()));
-  __ SetInsertPoint(done_block);
   llvm::Value* int64_res = __ CreatePtrToInt(result, Types::i64);
-  llvm::Value* cond = SmiCheck(int64_res, true);
+  __ CreateBr(done_block);
+  __ SetInsertPoint(done_block);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(result1, load_cache);
+  phi->addIncoming(int64_res, done_block1);
+  llvm::Value* cond = SmiCheck(phi, true);
   DeoptimizeIf(cond, true);
-  instr->set_llvm_value(int64_res);
+  instr->set_llvm_value(phi);
   //UNIMPLEMENTED();
 }
 
@@ -2731,9 +2737,8 @@ llvm::Value* LLVMChunkBuilder::EnumLength(llvm::Value* map) {
 }
 
 void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val, llvm::BasicBlock* bb) {
-  // Add Declaration in .h
   llvm::BasicBlock* next = NewBlock("NEXT");
-  llvm::BasicBlock* start = NewBlock("START");
+  llvm::BasicBlock* start = NewBlock("CHECK ENUM C START");
 
   llvm::Value* arr_val = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
   llvm::Value* load_val = Use(instr->enumerable());
@@ -2750,8 +2755,6 @@ void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val,
   llvm::Value* cmp = __ CreateICmpEQ(smi_val, cmp_arg);
   __ CreateCondBr(cmp, bb, start);
 
-  __ CreateBr(start);
-  
   __ SetInsertPoint(next);
   
   llvm::Value* val_address = FieldOperand(load_val, HeapObject::kMapOffset);
@@ -2765,8 +2768,8 @@ void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val,
   
   llvm::BasicBlock* no_elements = NewBlock("IF NO ELEMENTS");
   llvm::BasicBlock* continue_block = NewBlock("IF ELEMENTS EXIST");
-  llvm::BasicBlock* final_block = NewBlock("JMP TO THE END OF FUNCTION");
-  llvm::Value* temp = __ CreatePtrToInt(FieldOperand(load_val, JSObject::kElementsOffset), Types::i64);
+  llvm::BasicBlock* final_block = NewBlock("CHECH ENUM C END");
+  llvm::Value* temp = LoadFieldOperand(load_val, JSObject::kElementsOffset);
   llvm::Value* cmp_equal = __ CreateICmpEQ(arr_val, temp);
   __ CreateCondBr(cmp_equal, no_elements, continue_block);
   __ SetInsertPoint(continue_block);
@@ -2800,12 +2803,14 @@ void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
           HeapObject::kMapOffset);
   llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
   llvm::Value* map = __ CreateLoad(cast_int);
-  llvm::Value* cmp_below_eq = __ CreateICmpUGE(map, 
+  llvm::Value* map_f = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+  llvm::Value* cmp_below_eq = __ CreateICmpULE(map_f, 
          __ getInt64(static_cast<int8_t>(LAST_JS_PROXY_TYPE)));
   DeoptimizeIf(cmp_below_eq, true);
 
-  llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
+  //llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
   llvm::BasicBlock* call_runtime = NewBlock("CALL RUNTIME");
+  llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
   CheckEnumCache(instr, load_r, call_runtime);
   
   llvm::Value* addr = FieldOperand(Use(instr->enumerable()), HeapObject::kMapOffset);
@@ -2824,6 +2829,7 @@ void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
                HeapObject::kMapOffset), Types::i64);
   llvm::Value* cmp_root = CompareRoot(tmp, Heap::kMetaMapRootIndex);
   DeoptimizeIf(cmp_root, true);
+  __ CreateBr(use_cache);
   __ SetInsertPoint(use_cache);
   
   //UNIMPLEMENTED();
@@ -2903,6 +2909,7 @@ void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
   llvm::Value* val2 = Use(instr->index());
   // DeferredLoadMutableDouble case does not implemented,
   llvm::BasicBlock* out_of_obj = NewBlock("OUT OF OBJECT");
+  llvm::BasicBlock* done1 = NewBlock("DONE1");
   llvm::BasicBlock* done = NewBlock("DONE");
   /*llvm::Value* smi_tmp_val = __ CreateZExt(__ getInt64(1), Types::i64);
   llvm::Value* smi_val = __ CreateShl(smi_tmp_val, kSmiShift);*/
@@ -2912,22 +2919,36 @@ void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
   val2 = __ CreateLShr(smi_tmp, kSmiShift);
   val2 = __ CreateTrunc(val2, Types::i32);
   llvm::Value* cmp_less = __ CreateICmpSLT(val2, __ getInt32(0));
-  //FIXME: second argument may be mistaken, it also appear in InCacheCheck
-  __ CreateCondBr(cmp_less, out_of_obj, __ GetInsertBlock());
-  llvm::Value* tmp_val1 = FieldOperand(val2, JSObject::kHeaderSize);
-  llvm::Value* casted = __ CreateIntToPtr(val1, Types::ptr_i8);
-  val1 =  __ CreateGEP(casted, tmp_val1);
+  __ CreateCondBr(cmp_less, out_of_obj, done1);
+  __ SetInsertPoint(done1);
+  llvm::Value* scale = __ getInt32(8);
+  llvm::Value* offset = __ getInt32(JSObject::kHeaderSize);
+  llvm::Value* mul = __ CreateMul(val2, scale);
+  llvm::Value* add = __ CreateAdd(mul, offset);
+  llvm::Value* int_ptr = __ CreateIntToPtr(val1, Types::ptr_i8);
+  llvm::Value* gep_0 = __ CreateGEP(int_ptr, add);
+  llvm::Value* tmp1 = __ CreateBitCast(gep_0, Types::ptr_i64);
+  llvm::Value* int64_val1 = __ CreateLoad(tmp1);
   __ CreateBr(done);
   __ SetInsertPoint(out_of_obj);
-  val1 = FieldOperand(val1, JSObject::kPropertiesOffset);
-  llvm::Value* int64_val1 = __ CreatePtrToInt(val1, Types::i64);
-  llvm::Value* neg_val1 = __ CreateNeg(int64_val1);
-  llvm::Value* tmp_val = FieldOperand(neg_val1, JSObject::kHeaderSize-kPointerSize);
-  val1 =  __ CreateGEP(val1, tmp_val);
+  scale = __ getInt64(8);
+  offset = __ getInt64(JSObject::kHeaderSize-kPointerSize);
+  llvm::Value* v2 = LoadFieldOperand(val1, JSObject::kPropertiesOffset);
+  llvm::Value* int64_val = __ CreatePtrToInt(v2, Types::i64);
+  llvm::Value* neg_val1 = __ CreateNeg(int64_val);
+  llvm::Value* mul1 = __ CreateMul(neg_val1, scale);
+  llvm::Value* add1 = __ CreateAdd(mul1, offset);
+  llvm::Value* int_ptr1 = __ CreateIntToPtr(v2, Types::ptr_i8);
+  llvm::Value* v3 =  __ CreateGEP(int_ptr1, add1);
+  llvm::Value* tmp2 = __ CreateBitCast(v3, Types::ptr_i64);
+  llvm::Value* int64_val2 = __ CreateLoad(tmp2);
   __ CreateBr(done);
   __ SetInsertPoint(done);
-  int64_val1 = __ CreatePtrToInt(val1, Types::i64);
-  instr->set_llvm_value(int64_val1);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(int64_val1, done1);
+  phi->addIncoming(int64_val2, out_of_obj);
+  instr->set_llvm_value(phi); 
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
@@ -3585,7 +3606,18 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   } 
   instr->set_llvm_value(store);
   if (instr->NeedsWriteBarrier()) {
-    UNIMPLEMENTED();
+    //Must be fixed
+    llvm::Value* value = Use(instr->value());
+    llvm::Value* key_l = Use(instr->key());
+    key_l = __ CreateLoad(gep_0);
+    /*auto new_map = Move(Use(instr->map()), RelocInfo::EMBEDDED_OBJECT);
+    auto store_addr = FieldOperand(gep_0, HeapObject::kMapOffset);
+    auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_i64);
+    __ CreateStore(new_map, casted_store_addr);*/
+    key_l = __ CreateIntToPtr(key_l, Types::ptr_i8);
+    key_l = __ CreatePtrToInt(key_l, Types::i64);
+    RecordWriteForMap(key_l, value); 
+    //UNIMPLEMENTED();
   }
 }
 
