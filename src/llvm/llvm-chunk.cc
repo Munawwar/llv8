@@ -3230,7 +3230,52 @@ void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
 }
 
 void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* left = Use(instr->left());
+  llvm::Value* right = Use(instr->right());
+  llvm::Value* left_near;
+  llvm::Value* cmpl_result;
+  llvm::BasicBlock* near = NewBlock("NEAR");
+  llvm::BasicBlock* return_block = NewBlock("MIN MAX RETURN");
+  HMathMinMax::Operation operation = instr->operation();
+  llvm::BasicBlock* insert_block = __ GetInsertBlock();
+
+  if (instr->representation().IsSmiOrInteger32()) {
+    bool cond_for_min = (operation == HMathMinMax::kMathMin);
+    if (instr->right()->IsConstant()) {
+      DCHECK(SmiValuesAre32Bits()
+        ? !instr->representation().IsSmi()
+        : SmiValuesAre31Bits());
+      int32_t right_value = (HConstant::cast(instr->right()))->Integer32Value();
+      llvm::Value* right_imm  = __ getInt32(right_value);
+
+      if (cond_for_min) {
+        cmpl_result = __ CreateICmpSLT(left, right_imm);
+      } else {
+        cmpl_result = __ CreateICmpSGT(left, right_imm);
+      }
+      __ CreateCondBr(cmpl_result, return_block, near);
+      __ SetInsertPoint(near);
+      left_near = right_imm;
+    } else {
+      if (cond_for_min) {
+        cmpl_result = __ CreateICmpSLT(left, right);
+      } else {
+        cmpl_result = __ CreateICmpSGT(left, right);
+      }
+      __ CreateCondBr(cmpl_result, return_block, near);
+      __ SetInsertPoint(near);
+      left_near = right;
+    }
+    __ CreateBr(return_block);
+    __ SetInsertPoint(return_block);
+
+    llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
+    phi->addIncoming(left_near, near);
+    phi->addIncoming(left, insert_block);
+    instr->set_llvm_value(phi);
+  } else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoMod(HMod* instr) {
@@ -3919,6 +3964,25 @@ void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
   instr->set_llvm_value(phi);
 }
 
+void LLVMChunkBuilder::DoSmiMathAbs(HUnaryMathOperation* instr) {
+  llvm::BasicBlock* is_negative = NewBlock("SMI CANDIDATE IS NEGATIVE");
+  llvm::BasicBlock* return_block = NewBlock("RETURN");
+
+  llvm::BasicBlock* insert_block = __ GetInsertBlock();
+  llvm::Value* value = Use(instr->value());
+  llvm::Value* cmp =  __ CreateICmpSLT(Use(instr->value()), __ getInt32(0));
+  __ CreateCondBr(cmp, is_negative, return_block);
+  __ SetInsertPoint(is_negative);
+  llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
+  DeoptimizeIf(cmp, true);
+  __ CreateBr(return_block);
+  __ SetInsertPoint(return_block);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
+  phi->addIncoming(neg_val, is_negative);
+  phi->addIncoming(value, insert_block);
+  instr->set_llvm_value(phi);
+}
+
 void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
   Representation r = instr->representation();
   if (r.IsDouble()) {
@@ -3926,7 +3990,7 @@ void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
   } else if (r.IsInteger32()) {
     DoIntegerMathAbs(instr);
   } else if (r.IsSmi()) {
-    UNIMPLEMENTED();
+    DoSmiMathAbs(instr);
   } else {
     UNIMPLEMENTED();
   }

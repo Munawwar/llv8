@@ -612,6 +612,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void CallStackMap(int stackmap_id, std::vector<llvm::Value*>& values);
   void DoMathAbs(HUnaryMathOperation* instr);
   void DoIntegerMathAbs(HUnaryMathOperation* instr);
+  void DoSmiMathAbs(HUnaryMathOperation* instr);
   void DoMathPowHalf(HUnaryMathOperation* instr);
   void DoMathSqrt(HUnaryMathOperation* instr);
   void DoModByPowerOf2I(HMod* instr);
