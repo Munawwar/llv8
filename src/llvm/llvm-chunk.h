@@ -524,6 +524,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
 
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
+  static const int kMaxCallSequenceLen = 16; // FIXME(llvm): find out max size.
 
   static llvm::CmpInst::Predicate TokenToPredicate(Token::Value op,
                                                    bool is_unsigned,
@@ -559,7 +560,9 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   // These Call functions are intended to be highly reusable.
   llvm::Value* CallVal(llvm::Value* callable_value,
                        llvm::CallingConv::ID calling_conv,
-                       std::vector<llvm::Value*>& params);
+                       std::vector<llvm::Value*>& params,
+                       HInstruction* call_instr = nullptr,
+                       bool record_safepoint = false);
   llvm::Value* CallAddress(Address target,
                            llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params);
@@ -600,7 +603,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
                     llvm::BasicBlock* true_target,
                     llvm::BasicBlock* false_target);
 
-  void MarkAsCall(HInstruction* instr);
+  std::vector<llvm::Value*> GetSafepointValues(HInstruction* instr);
   void DoDummyUse(HInstruction* instr);
   void DoStoreKeyedFixedArray(HStoreKeyed* value);
   void DoLoadKeyedFixedArray(HLoadKeyed* value);
@@ -610,6 +613,11 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void AddStabilityDependency(Handle<Map> map);
   void CallStackMap(int stackmap_id, llvm::Value* value);
   void CallStackMap(int stackmap_id, std::vector<llvm::Value*>& values);
+  llvm::CallInst* CallPatchPoint(int64_t stackmap_id,
+                                 llvm::Value* target_function,
+                                 std::vector<llvm::Value*>& function_args,
+                                 std::vector<llvm::Value*>& live_values,
+                                 int covering_nop_size = kMaxCallSequenceLen);
   void DoMathAbs(HUnaryMathOperation* instr);
   void DoIntegerMathAbs(HUnaryMathOperation* instr);
   void DoSmiMathAbs(HUnaryMathOperation* instr);

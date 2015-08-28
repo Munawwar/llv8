@@ -609,15 +609,14 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
   }
 }
 
-void LLVMChunkBuilder::MarkAsCall(HInstruction* call_instr) {
+std::vector<llvm::Value*> LLVMChunkBuilder::GetSafepointValues(
+    HInstruction* call_instr) {
   // TODO(llvm): Refactor out the AssingPointerMap() part.
 
   // TODO(llvm): obviously it's a very naive and unoptimal algorithm.
   // Why? Because the biggest improvement in performance is the
   // non-working-to-working. Other words: optimization would be premature.
 
-  // FIXME(llvm): it's a hack which works as long as we have one function.
-  static int stackmap_id = kFirstSafepointIndex;
   std::vector<llvm::Value*> mapped_values;
 
   // FIXME(llvm): what about phi-functions?
@@ -642,9 +641,7 @@ void LLVMChunkBuilder::MarkAsCall(HInstruction* call_instr) {
       }
     }
   }
-  // FIXME(llvm): Stackmap offset appears to not presicely follow the call
-  // so change it to patchpoint.
-  CallStackMap(stackmap_id++, mapped_values);
+  return mapped_values;
 }
 
 void LLVMChunkBuilder::DoDummyUse(HInstruction* instr) {
@@ -813,20 +810,41 @@ llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
 
 llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
                                        llvm::CallingConv::ID calling_conv,
-                                       std::vector<llvm::Value*>& params) {
+                                       std::vector<llvm::Value*>& params,
+                                       HInstruction* call_instr,
+                                       bool record_safepoint) {
   bool is_var_arg = false;
 
-  auto return_type = Types::tagged;
-  auto param_type = Types::tagged;
-  std::vector<llvm::Type*> param_types(params.size(), param_type);
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      return_type, param_types, is_var_arg);
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
+
+  // FIXME(llvm): it's a hack which works as long as we have one function.
+  static int stackmap_id = kFirstSafepointIndex;
+
+  llvm::PointerType* ptr_to_function = nullptr;
+
+  if (!record_safepoint) {
+    auto return_type = Types::tagged;
+    auto param_type = Types::tagged;
+    std::vector<llvm::Type*> param_types(params.size(), param_type);
+    llvm::FunctionType* function_type = llvm::FunctionType::get(
+        return_type, param_types, is_var_arg);
+    ptr_to_function = function_type->getPointerTo();
+  } else {
+    ptr_to_function = Types::ptr_i8; // patchpoint takes i8* target.
+  }
 
   auto casted = __ CreateBitOrPointerCast(callable_value, ptr_to_function);
-  llvm::CallInst* call_inst = __ CreateCall(casted, params);
-  call_inst->setCallingConv(calling_conv);
+  llvm::CallInst* call_inst = nullptr;
 
+  if (!record_safepoint) {
+    call_inst = __ CreateCall(casted, params);
+  } else {
+    DCHECK(call_instr);
+    auto live_values = GetSafepointValues(call_instr);
+    live_values.clear();
+    call_inst = CallPatchPoint(stackmap_id++, casted, params, live_values);
+  }
+
+  call_inst->setCallingConv(calling_conv);
   return call_inst;
 }
 
@@ -1022,17 +1040,13 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   }
   pending_pushed_args_.Clear();
 
-  llvm::Function* patchpoint = llvm::Intrinsic::getDeclaration(
-      module_.get(), llvm::Intrinsic::experimental_patchpoint_i64);
   int64_t pp_id = ++last_reloc_index_offset_ + kFirstRelocIndex;
-  auto llvm_pp_id = __ getInt64(pp_id);
-  auto nop_size = __ getInt32(5); // call relative i32 takes 5 bytes: `e8` + i32
-  auto num_args = __ getInt32(args.size());
+
   auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
-  std::vector<llvm::Value*>  patchpoint_args =
-    { llvm_pp_id, nop_size, llvm_null, num_args };
-  patchpoint_args.insert(patchpoint_args.end(), args.begin(), args.end());
-  auto call_inst = __ CreateCall(patchpoint, patchpoint_args);
+  auto nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
+  std::vector<llvm::Value*> empty_live_values;
+  auto call_inst = CallPatchPoint(pp_id, llvm_null, args, empty_live_values,
+                                  nop_size);
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
 
   // Map pp_id -> index in code_targets_.
@@ -1536,6 +1550,32 @@ void LLVMChunkBuilder::CallStackMap(int stackmap_id,
   __ CreateCall(stackmap, mapped_values);
 }
 
+// Note: we don't set calling convention here.
+// We return the call instruction so the caller can do it.
+llvm::CallInst* LLVMChunkBuilder::CallPatchPoint(
+    int64_t stackmap_id,
+    llvm::Value* target_function,
+    std::vector<llvm::Value*>& function_args,
+    std::vector<llvm::Value*>& live_values,
+    int covering_nop_size) {
+  llvm::Function* patchpoint = llvm::Intrinsic::getDeclaration(
+      module_.get(), llvm::Intrinsic::experimental_patchpoint_i64);
+
+  auto llvm_patchpoint_id = __ getInt64(stackmap_id);
+  auto nop_size = __ getInt32(covering_nop_size);
+  auto num_args = __ getInt32(function_args.size());
+
+  std::vector<llvm::Value*>  patchpoint_args =
+    { llvm_patchpoint_id, nop_size, target_function, num_args };
+
+  patchpoint_args.insert(patchpoint_args.end(),
+                         function_args.begin(), function_args.end());
+  patchpoint_args.insert(patchpoint_args.end(),
+                         live_values.begin(), live_values.end());
+
+  return __ CreateCall(patchpoint, patchpoint_args);
+}
+
 llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
                                                RelocInfo::Mode rmode) {
   bool extended = false;
@@ -2014,9 +2054,10 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   }
   pending_pushed_args_.Clear();
 
-  auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args);
+  bool record_safepoint = true;
+  auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args,
+                      instr, record_safepoint);
   instr->set_llvm_value(call);
-  MarkAsCall(instr);
 }
 
 void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
