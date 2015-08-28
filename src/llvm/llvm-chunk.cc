@@ -2713,9 +2713,9 @@ void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   llvm::Value* result1 = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
   __ CreateBr(done_block);
   __ SetInsertPoint(load_cache);
-  result = FieldOperand(map_val, Map::kDescriptorsOffset);
-  result = FieldOperand(result, DescriptorArray::kEnumCacheOffset);
-  result = FieldOperand(result, FixedArray::SizeFor(HForInCacheArray::cast(instr)->idx()));
+  result = LoadFieldOperand(map_val, Map::kDescriptorsOffset);
+  result = LoadFieldOperand(result, DescriptorArray::kEnumCacheOffset);
+  result = LoadFieldOperand(result, FixedArray::SizeFor(HForInCacheArray::cast(instr)->idx()));
   llvm::Value* int64_res = __ CreatePtrToInt(result, Types::i64);
   __ CreateBr(done_block);
   __ SetInsertPoint(done_block);
@@ -2787,19 +2787,20 @@ void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val,
 }
 
 void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
-  llvm::Value* cmp = CompareRoot(Use(instr->enumerable()),
+  llvm::Value* enum_val = Use(instr->enumerable());
+  llvm::Value* cmp = CompareRoot(enum_val,
           Heap::kUndefinedValueRootIndex);
   DeoptimizeIf(cmp, true);
 
   llvm::Value* load_r = LoadRoot(Heap::kNullValueRootIndex);
-  llvm::Value* cmp_eq = __ CreateICmpEQ(Use(instr->enumerable()), load_r);
+  llvm::Value* cmp_eq = __ CreateICmpEQ(enum_val, load_r);
   DeoptimizeIf(cmp_eq, true);
 
-  llvm::Value* smi_check = SmiCheck(Use(instr->enumerable()), true);
+  llvm::Value* smi_check = SmiCheck(enum_val, true);
   DeoptimizeIf(smi_check, true);
 
   STATIC_ASSERT(FIRST_JS_PROXY_TYPE == FIRST_SPEC_OBJECT_TYPE);
-  llvm::Value* address = FieldOperand(Use(instr->enumerable()),
+  llvm::Value* address = FieldOperand(enum_val,
           HeapObject::kMapOffset);
   llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
   llvm::Value* map = __ CreateLoad(cast_int);
@@ -2813,20 +2814,19 @@ void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
   llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
   CheckEnumCache(instr, load_r, call_runtime);
   
-  llvm::Value* addr = FieldOperand(Use(instr->enumerable()), HeapObject::kMapOffset);
+  llvm::Value* addr = FieldOperand(enum_val, HeapObject::kMapOffset);
   llvm::Value* int64 = __ CreateBitCast(addr, Types::ptr_i64);
   __ CreateLoad(int64);
   __ CreateBr(use_cache);
 
   __ SetInsertPoint(call_runtime);
   std::vector<llvm::Value*> args;
-  args.push_back(Use(instr->enumerable()));
+  args.push_back(enum_val);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
           Use(instr->context()), args);
   auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
   instr->set_llvm_value(alloc_casted);
-  llvm::Value* tmp = __ CreatePtrToInt(FieldOperand(Use(instr->enumerable()),
-               HeapObject::kMapOffset), Types::i64);
+  llvm::Value* tmp = LoadFieldOperand(enum_val, HeapObject::kMapOffset);
   llvm::Value* cmp_root = CompareRoot(tmp, Heap::kMetaMapRootIndex);
   DeoptimizeIf(cmp_root, true);
   __ CreateBr(use_cache);
@@ -3948,7 +3948,7 @@ void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
   llvm::BasicBlock* is_negative = NewBlock("INTEGER CANDIDATE IS NEGATIVE");
   llvm::BasicBlock* is_positive = NewBlock("INTEGER CANDIDATE IS POSITIVE");
 
-  llvm::Value* zero = __ getInt64(0);
+  llvm::Value* zero = __ getInt32(0);
   llvm::Value* cmp =  __ CreateICmpSLT(Use(instr->value()), zero);
   __ CreateCondBr(cmp, is_negative, is_positive);
   __ SetInsertPoint(is_negative);
