@@ -521,11 +521,11 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::Build() {
+  llvm::LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   chunk_ = new(zone()) LLVMChunk(info(), graph());
   module_ = LLVMGranularity::getInstance().CreateModule();
   module_->setTargetTriple(LLVMGranularity::x64_target_triple);
-  llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(
-      LLVMGranularity::getInstance().context());
+  llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(llvm_context);
   Types::Init(llvm_ir_builder_.get());
   status_ = BUILDING;
 
@@ -556,6 +556,12 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   function_ = llvm::cast<llvm::Function>(
       module_->getOrInsertFunction(module_->getModuleIdentifier(),
                                    function_type));
+
+  llvm::AttributeSet attr_set = function_->getAttributes();
+  // rbp based frame so the runtime can walk the stack as before
+  attr_set.addAttribute(llvm_context, llvm::AttributeSet::FunctionIndex,
+                        "no-frame-pointer-elim", "true");
+  function_->setAttributes(attr_set);
 
   function_->setCallingConv(llvm::CallingConv::X86_64_V8);
 
@@ -1005,7 +1011,7 @@ void LLVMChunkBuilder::DirtyHack(int arg_count) {
   auto inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(), false);
   llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-  __ CreateCall(inline_asm, "");
+  __ CreateCall(inline_asm);
 }
 
 llvm::Value* LLVMChunkBuilder::CallRuntimeViaId(Runtime::FunctionId id) {
@@ -1114,7 +1120,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   std::string asm_string2 = ", %rsp";
   std::string final_strig = asm_string1 + argOffset+asm_string2;
   llvm::InlineAsm* ptr_121 = llvm::InlineAsm::get(FuncTy_3, final_strig, "~{dirflag},~{fpsr},~{flags}",true);
-  llvm::CallInst* void_111 = __ CreateCall(ptr_121, "");
+  llvm::CallInst* void_111 = __ CreateCall(ptr_121);
   void_111->setCallingConv(llvm::CallingConv::C);
   auto llvm_nargs = __ getInt64(arg_count);
   auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
@@ -2156,7 +2162,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
                                                                false);
     llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-    __ CreateCall(inline_asm, "");
+    __ CreateCall(inline_asm);
     llvm::Value* call = CallAddress(code->instruction_start(),
                                     llvm::CallingConv::X86_64_V8_S3, params);
     llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
