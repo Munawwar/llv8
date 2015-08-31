@@ -671,6 +671,7 @@
            '-pthread',
             #FIXME(llvm): libs and ldflags should probably be in different places
            '<!@(<(llvm_config) --ldflags --libs core mcjit interpreter analysis native --system-libs)',  
+           '-lncurses', # FIXME(llvm): it seems we only need this for debug (also get rid later).
         ],
         'cflags_cc!': [ '-Wcast-qual', '-O3' ], #FIXME(llvm): this must be conditional
         'conditions': [
