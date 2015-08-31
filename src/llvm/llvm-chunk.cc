@@ -2788,13 +2788,13 @@ llvm::Value* LLVMChunkBuilder::EnumLength(llvm::Value* map) {
   return dst;
 }
 
-void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val, llvm::BasicBlock* bb) {
+void LLVMChunkBuilder::CheckEnumCache(llvm::Value* enum_val, llvm::Value* val, llvm::BasicBlock* bb) {
   llvm::BasicBlock* next = NewBlock("NEXT");
   llvm::BasicBlock* start = NewBlock("CHECK ENUM C START");
 
   llvm::Value* arr_val = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
-  llvm::Value* load_val = Use(instr->enumerable());
-  llvm::Value* address = FieldOperand(load_val, HeapObject::kMapOffset);
+  //llvm::Value* load_val = Use(instr->enumerable());
+  llvm::Value* address = FieldOperand(enum_val, HeapObject::kMapOffset);
   llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
   llvm::Value* map = __ CreateLoad(cast_int);
   //EnumLength
@@ -2807,11 +2807,15 @@ void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val,
   llvm::Value* cmp = __ CreateICmpEQ(smi_val, cmp_arg);
   __ CreateCondBr(cmp, bb, start);
 
-  __ SetInsertPoint(next);
-  
-  llvm::Value* val_address = FieldOperand(load_val, HeapObject::kMapOffset);
+  llvm::Value* val_address = FieldOperand(enum_val, HeapObject::kMapOffset);
   llvm::Value* cast_int64 = __ CreateBitCast(val_address, Types::ptr_i64);
   llvm::Value* map_1 = __ CreateLoad(cast_int64);
+  
+  __ SetInsertPoint(next);
+  
+  /*llvm::Value* val_address = FieldOperand(enum_val, HeapObject::kMapOffset);
+  llvm::Value* cast_int64 = __ CreateBitCast(val_address, Types::ptr_i64);
+  llvm::Value* map_1 = __ CreateLoad(cast_int64);*/
  
   length_val = EnumLength(map_1);
   llvm::Value* cmp_val = __ CreateICmpNE(length_val , __ getInt32(0));
@@ -2821,12 +2825,12 @@ void LLVMChunkBuilder::CheckEnumCache(HForInPrepareMap* instr, llvm::Value* val,
   llvm::BasicBlock* no_elements = NewBlock("IF NO ELEMENTS");
   llvm::BasicBlock* continue_block = NewBlock("IF ELEMENTS EXIST");
   llvm::BasicBlock* final_block = NewBlock("CHECH ENUM C END");
-  llvm::Value* temp = LoadFieldOperand(load_val, JSObject::kElementsOffset);
+  llvm::Value* temp = LoadFieldOperand(enum_val, JSObject::kElementsOffset);
   llvm::Value* cmp_equal = __ CreateICmpEQ(arr_val, temp);
   __ CreateCondBr(cmp_equal, no_elements, continue_block);
   __ SetInsertPoint(continue_block);
   llvm::Value* r_value = LoadRoot(Heap::kEmptySlowElementDictionaryRootIndex);
-  llvm::Value* cmp_not_equal = __ CreateICmpEQ(r_value, temp);
+  llvm::Value* cmp_not_equal = __ CreateICmpNE(r_value, temp);
   __ CreateCondBr(cmp_not_equal, bb, no_elements);
   __ SetInsertPoint(no_elements);
   llvm::Value* val_addr = FieldOperand(map_1, Map::kPrototypeOffset);
@@ -2864,7 +2868,7 @@ void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
   //llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
   llvm::BasicBlock* call_runtime = NewBlock("CALL RUNTIME");
   llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
-  CheckEnumCache(instr, load_r, call_runtime);
+  CheckEnumCache(enum_val, load_r, call_runtime);
   
   llvm::Value* addr = FieldOperand(enum_val, HeapObject::kMapOffset);
   llvm::Value* int64 = __ CreateBitCast(addr, Types::ptr_i64);
