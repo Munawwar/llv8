@@ -416,6 +416,7 @@ class LLVMChunk FINAL : public LowChunk {
   PpIdToIndexMap& target_index_for_ppid() {
     return target_index_for_ppid_;
   }
+  int GetParameterStackSlot(int index) const;
  private:
   static const int kStackSlotSize = kPointerSize;
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi

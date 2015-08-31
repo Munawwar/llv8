@@ -410,6 +410,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
     // pc offset can be obtained from the stackmap TODO(llvm):
     // but we do not support lazy deopt yet (and for eager it should be -1)
     data->SetPc(deopt_entry_number, Smi::FromInt(-1));
+    data->SetOsrPcOffset(Smi::FromInt(-1));
   }
 
   auto literals_len = deopt_data_->deoptimization_literals().length();
@@ -440,7 +441,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
   data->SetOsrAstId(Smi::FromInt(info()->osr_ast_id().ToInt()));
   // TODO(llvm): OSR entry point
-  data->SetOsrPcOffset(Smi::FromInt(-1));
+  data->SetOsrPcOffset(Smi::FromInt(4));
 
   code->set_deoptimization_data(*data);
 }
@@ -494,6 +495,16 @@ std::vector<RelocInfo> LLVMGranularity::Patch(
   return updated_reloc_infos;
 }
 
+int LLVMChunk::GetParameterStackSlot(int index) const {
+  // The receiver is at index 0, the first parameter at index 1, so we
+  // shift all parameter indexes down by the number of parameters, and
+  // make sure they end up negative so they are distinguishable from
+  // spill slots.
+  int result = index - info()->num_parameters() - 1;
+
+  DCHECK(result < 0);
+  return result;
+}
 LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   DisallowHandleAllocation no_handles;
   DisallowHeapAllocation no_gc;
@@ -4090,27 +4101,28 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
 }
 
 void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
-  UNIMPLEMENTED();
+//  UNIMPLEMENTED();
   int env_index = instr->index();
-  //if (env_index == 0) return;
-  int index = 0;
-  if (instr->environment()->is_parameter_index(env_index)) {
-    index =  env_index - info()->num_parameters() - 1; //chunk()->GetParameterStackSlot(env_index);
-    int num_parameters = info()->num_parameters() + 3;
-    llvm::Function::arg_iterator it = function_->arg_begin();
-    //index = -index;
-    while (--index + num_parameters > 0) ++it;
-    instr->set_llvm_value(it);
+  int spill_index = 0;
+  llvm::Function* frame_address = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::frameaddress);
+   std::vector<llvm::Value*> params;
+   params.push_back(__ getInt32(0));
+   llvm::Value* get_address = __ CreateCall(frame_address, params);
 
+  if (instr->environment()->is_parameter_index(env_index)) {
+    spill_index = chunk()->GetParameterStackSlot(env_index);
   } else {
-    //UNIMPLEMENTED();
-    index = env_index - instr->environment()->first_local_index();
-    if (index > LUnallocated::kMaxFixedSlotIndex) {
-      UNIMPLEMENTED();
-     // Retry(kTooManySpillSlotsNeededForOSR);
-     // spill_index = 0;
+    spill_index = env_index - instr->environment()->first_local_index();
+    if (spill_index > LUnallocated::kMaxFixedSlotIndex) {
+       UNIMPLEMENTED();
     }
   }
+  llvm::Value* osr_val_addr = __ CreateGEP(get_address, __ getInt64(spill_index));
+  llvm::Value* casted_addr = __ CreateBitCast(osr_val_addr, Types::ptr_i64);
+  llvm::Value* result = __ CreateLoad(casted_addr);
+  instr->set_llvm_value(result);
+
 
 }
 

@@ -1005,6 +1005,7 @@ void LCodeGen::DoCallStub(LCallStub* instr) {
 
 
 void LCodeGen::DoUnknownOSRValue(LUnknownOSRValue* instr) {
+ // __ int3();
   GenerateOsrPrologue();
 }
 

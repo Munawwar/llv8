@@ -1901,13 +1901,14 @@ void Builtins::Generate_OnStackReplacement(MacroAssembler* masm) {
 
   // Load deoptimization data from the code object.
   __ movp(rbx, Operand(rax, Code::kDeoptimizationDataOffset - kHeapObjectTag));
-
+   __ int3();
   // Load the OSR entrypoint offset from the deoptimization data.
   __ SmiToInteger32(rbx, Operand(rbx, FixedArray::OffsetOfElementAt(
       DeoptimizationInputData::kOsrPcOffsetIndex) - kHeapObjectTag));
-
+//   __ int3();
   // Compute the target address = code_obj + header_size + osr_offset
-  __ leap(rax, Operand(rax, rbx, times_1, Code::kHeaderSize - kHeapObjectTag));
+ __ leap(rax, Operand(rax, rbx, times_1, Code::kHeaderSize - kHeapObjectTag));
+//_ leap(rax, FieldOperand(rax, Code::kHeaderSize));
 
   // Overwrite the return address on the stack.
   __ movq(StackOperandForReturnAddress(0), rax);

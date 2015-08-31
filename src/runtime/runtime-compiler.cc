@@ -280,8 +280,8 @@ RUNTIME_FUNCTION(Runtime_CompileForOnStackReplacement) {
     DeoptimizationInputData* data =
         DeoptimizationInputData::cast(result->deoptimization_data());
 
-    if (data->OsrPcOffset()->value() >= 0) {
-      DCHECK(BailoutId(data->OsrAstId()->value()) == ast_id);
+    if (data->OsrPcOffset()->value() >= 0 || result->is_llvmed()) {
+      // DCHECK(BailoutId(data->OsrAstId()->value()) == ast_id);
       if (FLAG_trace_osr) {
         PrintF("[OSR - Entry at AST id %d, offset %d in optimized code]\n",
                ast_id.ToInt(), data->OsrPcOffset()->value());
