@@ -2872,6 +2872,7 @@ void FullCodeGenerator::EmitCall(Call* expr, CallICState::CallType call_type) {
   Handle<Code> ic = CodeFactory::CallIC(isolate(), arg_count, call_type).code();
   __ Move(rdx, SmiFromSlot(expr->CallFeedbackICSlot()));
   __ movp(rdi, Operand(rsp, (arg_count + 1) * kPointerSize));
+  // __ movp (rbx, Immediate(0));
   // Don't assign a type feedback id to the IC, since type feedback is provided
   // by the vector above.
   CallIC(ic);

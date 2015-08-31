@@ -1901,7 +1901,7 @@ void Builtins::Generate_OnStackReplacement(MacroAssembler* masm) {
 
   // Load deoptimization data from the code object.
   __ movp(rbx, Operand(rax, Code::kDeoptimizationDataOffset - kHeapObjectTag));
-   __ int3();
+   //__ int3();
   // Load the OSR entrypoint offset from the deoptimization data.
   __ SmiToInteger32(rbx, Operand(rbx, FixedArray::OffsetOfElementAt(
       DeoptimizationInputData::kOsrPcOffsetIndex) - kHeapObjectTag));

@@ -441,7 +441,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
   data->SetOsrAstId(Smi::FromInt(info()->osr_ast_id().ToInt()));
   // TODO(llvm): OSR entry point
-  data->SetOsrPcOffset(Smi::FromInt(4));
+  data->SetOsrPcOffset(Smi::FromInt(6));
 
   code->set_deoptimization_data(*data);
 }
