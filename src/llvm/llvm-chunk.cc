@@ -4010,7 +4010,7 @@ void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
   __ CreateBr(is_positive);
   __ SetInsertPoint(is_positive);
   llvm::Value* val = Use(instr->value());
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
   phi->addIncoming(neg_val, is_negative);
   phi->addIncoming(val, is_positive);
   instr->set_llvm_value(phi);
@@ -4022,14 +4022,14 @@ void LLVMChunkBuilder::DoSmiMathAbs(HUnaryMathOperation* instr) {
 
   llvm::BasicBlock* insert_block = __ GetInsertBlock();
   llvm::Value* value = Use(instr->value());
-  llvm::Value* cmp =  __ CreateICmpSLT(Use(instr->value()), __ getInt32(0));
+  llvm::Value* cmp =  __ CreateICmpSLT(Use(instr->value()), __ getInt64(0));
   __ CreateCondBr(cmp, is_negative, return_block);
   __ SetInsertPoint(is_negative);
   llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
   DeoptimizeIf(cmp, true);
   __ CreateBr(return_block);
   __ SetInsertPoint(return_block);
-  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(neg_val, is_negative);
   phi->addIncoming(value, insert_block);
   instr->set_llvm_value(phi);
