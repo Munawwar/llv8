@@ -2772,8 +2772,8 @@ void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   __ CreateBr(done_block);
   __ SetInsertPoint(done_block);
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
-  phi->addIncoming(result1, load_cache);
-  phi->addIncoming(int64_res, done_block1);
+  phi->addIncoming(result1, done_block1);
+  phi->addIncoming(int64_res, load_cache);
   llvm::Value* cond = SmiCheck(phi, true);
   DeoptimizeIf(cond, true);
   instr->set_llvm_value(phi);
@@ -2805,18 +2805,13 @@ void LLVMChunkBuilder::CheckEnumCache(llvm::Value* enum_val, llvm::Value* val, l
   //Cmp
   llvm::Value* cmp_arg = __ getInt64(kInvalidEnumCacheSentinel);
   llvm::Value* cmp = __ CreateICmpEQ(smi_val, cmp_arg);
-  __ CreateCondBr(cmp, bb, start);
-
   llvm::Value* val_address = FieldOperand(enum_val, HeapObject::kMapOffset);
   llvm::Value* cast_int64 = __ CreateBitCast(val_address, Types::ptr_i64);
   llvm::Value* map_1 = __ CreateLoad(cast_int64);
-  
+  __ CreateCondBr(cmp, bb, start);
+
   __ SetInsertPoint(next);
   
-  /*llvm::Value* val_address = FieldOperand(enum_val, HeapObject::kMapOffset);
-  llvm::Value* cast_int64 = __ CreateBitCast(val_address, Types::ptr_i64);
-  llvm::Value* map_1 = __ CreateLoad(cast_int64);*/
- 
   length_val = EnumLength(map_1);
   llvm::Value* cmp_val = __ CreateICmpNE(length_val , __ getInt32(0));
   __ CreateCondBr(cmp_val, bb, start);
@@ -2865,9 +2860,13 @@ void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
          __ getInt64(static_cast<int8_t>(LAST_JS_PROXY_TYPE)));
   DeoptimizeIf(cmp_below_eq, true);
 
-  //llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
   llvm::BasicBlock* call_runtime = NewBlock("CALL RUNTIME");
   llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
+  std::vector<llvm::Value*> args;
+  args.push_back(enum_val);
+  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
+          Use(instr->context()), args);
+  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
   CheckEnumCache(enum_val, load_r, call_runtime);
   
   llvm::Value* addr = FieldOperand(enum_val, HeapObject::kMapOffset);
@@ -2876,11 +2875,6 @@ void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
   __ CreateBr(use_cache);
 
   __ SetInsertPoint(call_runtime);
-  std::vector<llvm::Value*> args;
-  args.push_back(enum_val);
-  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
-          Use(instr->context()), args);
-  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
   instr->set_llvm_value(alloc_casted);
   llvm::Value* tmp = LoadFieldOperand(enum_val, HeapObject::kMapOffset);
   llvm::Value* cmp_root = CompareRoot(tmp, Heap::kMetaMapRootIndex);
@@ -3707,16 +3701,16 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   } 
   instr->set_llvm_value(store);
   if (instr->NeedsWriteBarrier()) {
-    //Must be fixed
+    //Must be FIXED !!!
     llvm::Value* value = Use(instr->value());
     llvm::Value* key_l = Use(instr->key());
-    key_l = __ CreateLoad(gep_0);
+    llvm::Value* casted_adderss = __ CreateBitCast(gep_0,
+                                                   Types::ptr_i64);
+    key_l = __ CreateLoad(casted_adderss);
     /*auto new_map = Move(Use(instr->map()), RelocInfo::EMBEDDED_OBJECT);
     auto store_addr = FieldOperand(gep_0, HeapObject::kMapOffset);
     auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_i64);
     __ CreateStore(new_map, casted_store_addr);*/
-    key_l = __ CreateIntToPtr(key_l, Types::ptr_i8);
-    key_l = __ CreatePtrToInt(key_l, Types::i64);
     RecordWriteForMap(key_l, value); 
     //UNIMPLEMENTED();
   }
