@@ -5,6 +5,7 @@
 #include <cstdio>
 #include "src/code-factory.h"
 #include "src/disassembler.h"
+#include "src/hydrogen-osr.h"
 #include "llvm-chunk.h"
 #include "llvm-passes.h"
 #include <llvm/IR/InlineAsm.h>
@@ -539,7 +540,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   // First param is context (v8, js context) which goes to rsi,
   // second param is the callee's JSFunction object (rdi),
   // third param is Parameter 0 which is I am not sure what
-  int num_parameters = info()->num_parameters() + 3;
+  int num_parameters = info()->num_parameters() + 4;
 
   std::vector<llvm::Type*> params(num_parameters, nullptr);
   for (auto i = 0; i < num_parameters; i++) {
@@ -1328,7 +1329,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
-    CreateVolatileZero();
+   // CreateVolatileZero();
     block->UpdateEnvironment(graph_->start_environment());
     argument_count_ = 0;
   } else if (block->predecessors()->length() == 1) {
@@ -1489,12 +1490,12 @@ void LLVMChunkBuilder::DoParameter(HParameter* instr) {
   std::cerr << "Parameter #" << index << std::endl;
 #endif
 
-  int num_parameters = info()->num_parameters() + 3;
+  int num_parameters = info()->num_parameters() + 4;
   llvm::Function::arg_iterator it = function_->arg_begin();
   // First off, skip first 2 parameters: context (rsi)
   // and callee's JSFunction object (rdi).
   // Now, I couldn't find a way to tweak the calling convention through LLVM
-  // in a way that parameters are passed left-to-right on the stack.
+  // in a way that param/eters are passed left-to-right on the stack.
   // So for now they are passed right-to-left, as in cdecl.
   // And therefore we do the magic here.
   index = -index;
@@ -1965,6 +1966,19 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   Representation r = value->representation();
   HType type = value->type();
   USE(type);
+  if (instr->SuccessorAt(1)->is_osr_entry()) { //FIXME: There is a better solution for this
+    llvm::Value* zero = __ getInt64(0);
+    llvm::Function::arg_iterator it = function_->arg_begin();
+    int i = 0;
+    while (++i < 3) ++it; //TODO: better solution
+    llvm::Value* osr_value  = it;
+    llvm::Value* compare = __ CreateICmpEQ(osr_value, zero);
+    llvm::BranchInst* branch = __ CreateCondBr(compare,
+                                               true_target, false_target);
+    instr->set_llvm_value(branch);
+    return;
+
+  }
   if (r.IsInteger32()) {
     llvm::Value* zero = __ getInt32(0);
     llvm::Value* compare = __ CreateICmpNE(Use(value), zero);
@@ -3463,6 +3477,16 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
 }
 
 void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
+  int arg_count = graph()->osr()->UnoptimizedFrameSlots();
+  std::string arg_offset = std::to_string(arg_count * kPointerSize);
+  std::string asm_string1 = "add $$";
+  std::string asm_string2 = ", %rsp";
+  std::string final_strig = asm_string1 + arg_offset + asm_string2;
+  auto inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(), false);
+  llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
+      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
+  __ CreateCall(inline_asm, "");
+
   //UNIMPLEMENTED();
 }
 
@@ -4110,8 +4134,13 @@ void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
 
   if (instr->environment()->is_parameter_index(env_index)) {
     spill_index = chunk()->GetParameterStackSlot(env_index);
+    spill_index--;
+    spill_index *= -8;
   } else {
     spill_index = env_index - instr->environment()->first_local_index();
+    spill_index = - spill_index; //FIXME WTF?
+    spill_index -= 3; //FIXME:WTF? Nonsense
+    spill_index *= 8;
     if (spill_index > LUnallocated::kMaxFixedSlotIndex) {
        UNIMPLEMENTED();
     }

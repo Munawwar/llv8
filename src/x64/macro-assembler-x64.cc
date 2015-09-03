@@ -3479,6 +3479,7 @@ void MacroAssembler::InvokeCode(Register code,
       call_wrapper.AfterCall();
     } else {
       DCHECK(flag == JUMP_FUNCTION);
+      movp(rbx, Immediate(0)); //Not a Osr Entry
       jmp(code);
     }
     bind(&done);

@@ -94,10 +94,17 @@ static void GenerateTailCallToSharedCode(MacroAssembler* masm) {
 }
 
 
-static void GenerateTailCallToReturnedCode(MacroAssembler* masm) {
+static void GenerateTailCallToReturnedCodeOpt(MacroAssembler* masm) {
   __ leap(rax, FieldOperand(rax, Code::kHeaderSize));
+  __ movp(rbx, Immediate(0));
   __ jmp(rax);
 }
+static void GenerateTailCallToReturnedCode(MacroAssembler* masm) {
+  __ leap(rax, FieldOperand(rax, Code::kHeaderSize));
+  __ movp(rbx, Immediate(0));
+  __ jmp(rax);
+}
+
 
 
 void Builtins::Generate_InOptimizationQueue(MacroAssembler* masm) {
@@ -844,7 +851,7 @@ static void CallCompileOptimized(MacroAssembler* masm,
 
 void Builtins::Generate_CompileOptimized(MacroAssembler* masm) {
   CallCompileOptimized(masm, false);
-  GenerateTailCallToReturnedCode(masm);
+  GenerateTailCallToReturnedCodeOpt(masm);
 }
 
 
@@ -1901,18 +1908,16 @@ void Builtins::Generate_OnStackReplacement(MacroAssembler* masm) {
 
   // Load deoptimization data from the code object.
   __ movp(rbx, Operand(rax, Code::kDeoptimizationDataOffset - kHeapObjectTag));
-   //__ int3();
   // Load the OSR entrypoint offset from the deoptimization data.
   __ SmiToInteger32(rbx, Operand(rbx, FixedArray::OffsetOfElementAt(
       DeoptimizationInputData::kOsrPcOffsetIndex) - kHeapObjectTag));
-//   __ int3();
   // Compute the target address = code_obj + header_size + osr_offset
- __ leap(rax, Operand(rax, rbx, times_1, Code::kHeaderSize - kHeapObjectTag));
-//_ leap(rax, FieldOperand(rax, Code::kHeaderSize));
+  __ leap(rax, Operand(rax, rbx, times_1, Code::kHeaderSize - kHeapObjectTag));
 
   // Overwrite the return address on the stack.
   __ movq(StackOperandForReturnAddress(0), rax);
 
+  __ movq(rbx, Immediate(1)); //Is Osr Entry
   // And "return" to the OSR entry point of the function.
   __ ret(0);
 }

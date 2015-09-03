@@ -169,8 +169,6 @@ void RuntimeProfiler::OptimizeNow() {
     if (shared_code->kind() != Code::FUNCTION) continue;
     if (function->IsInOptimizationQueue()) continue;
 
-    SmartArrayPointer<char> name = shared->DebugName()->ToCString();
-    PrintF("name=%s\n", name.get());
     if (FLAG_always_osr) {
       AttemptOnStackReplacement(function, Code::kMaxLoopNestingMarker);
       // Fall through and do a normal optimized compile as well.
