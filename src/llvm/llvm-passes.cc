@@ -12,51 +12,22 @@
 namespace v8 {
 namespace internal {
 
+// FunctionPasses may overload three virtual methods to do their work.
+// All of these methods should return true if they modified the program,
+// or false if they didn’t.
+class NormalizePhisPass : public llvm::FunctionPass {
+ public:
+  NormalizePhisPass();
+  bool runOnFunction(llvm::Function& function) override;
+  void getAnalysisUsage(llvm::AnalysisUsage& analysis_usage) const override;
+
+//  bool doInitialization(Module& module) override { return false; };
+  static char ID;
+};
+
 char NormalizePhisPass::ID = 0;
 
-LLV8_INITIALIZE_PASS_BEGIN(NormalizePhisPass, "normalize-phis",
-                      "Make phi functions LLVM-compliant", false, false)
-LLV8_INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-LLV8_INITIALIZE_PASS_END(NormalizePhisPass, "normalize-phis",
-                         "Make phi functions LLVM-compliant", false, false)
-
-//static void* initializeNormalizePhisPassPassOnce(llvm::PassRegistry &Registry) {
-//  initializeDominatorTreeWrapperPassPass(Registry);
-//
-//  llvm::PassInfo *PI = new llvm::PassInfo("Normalize phis", "normalize-phis", &NormalizePhisPass::ID,
-//      llvm::PassInfo::NormalCtor_t(llvm::callDefaultCtor<NormalizePhisPass>), false, false);
-//  Registry.registerPass(*PI, true);
-//  return PI;
-//}
-//
-//void initializeNormalizePhisPassPass(llvm::PassRegistry &Registry) {
-//  static volatile llvm::sys::cas_flag initialized = 0;
-//  llvm::sys::cas_flag old_val = llvm::sys::CompareAndSwap(&initialized, 1, 0);
-//  if (old_val == 0) {
-//    initializeNormalizePhisPassPassOnce(Registry);
-//    llvm::sys::MemoryFence();
-//    initialized = 2;
-//  } else {
-//    llvm::sys::cas_flag tmp = initialized;
-//    llvm::sys::MemoryFence();
-//    while (tmp != 2) {
-//      tmp = initialized;
-//      llvm::sys::MemoryFence();
-//    }
-//  }
-//}
-
-// TODO(llvm): the above 2 functions are handwritten expansion of llvm
-// INITIALIZE_PASS_DEPENDENCY and INITIALIZE_PASS_END macros.
-// (See for example llvm/lib/Transforms/IPO/LoopExtractor.cpp)
-// The commented line below should to the same work but for some reason it doesn't.
-
-//static llvm::RegisterPass<NormalizePhisPass> register_normalize_phis("normalizePhis", "Normalize phis", true, true);
-
-NormalizePhisPass::NormalizePhisPass()
-   : llvm::FunctionPass(ID) {
- initializeNormalizePhisPassPass(*llvm::PassRegistry::getPassRegistry());
-}
+NormalizePhisPass::NormalizePhisPass() : FunctionPass(ID) {}
 
 bool NormalizePhisPass::runOnFunction(llvm::Function& function) {
   auto debug = false;
@@ -130,9 +101,16 @@ bool NormalizePhisPass::runOnFunction(llvm::Function& function) {
   return changed;
 }
 
-void NormalizePhisPass::getAnalysisUsage(llvm::AnalysisUsage& analysis_usage) const {
-  analysis_usage.setPreservesAll();
+void NormalizePhisPass::getAnalysisUsage(
+    llvm::AnalysisUsage& analysis_usage) const {
   analysis_usage.addRequired<llvm::DominatorTreeWrapperPass>();
+  analysis_usage.setPreservesAll();
+}
+
+llvm::FunctionPass* createNormalizePhisPass() {
+  llvm::initializeDominatorTreeWrapperPassPass(
+      *llvm::PassRegistry::getPassRegistry());
+  return new NormalizePhisPass();
 }
 
 } }  // namespace v8::internal

@@ -177,9 +177,9 @@ class LLVMGranularity FINAL {
         memory_manager_ref_(nullptr),
         err_str_() {
     llvm::InitializeNativeTarget();
-    LLVMInitializeX86Disassembler();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
+    llvm::InitializeNativeTargetDisassembler();
     pass_manager_builder_.OptLevel = 3; // -O3
     SetUpDisassembler();
   }
