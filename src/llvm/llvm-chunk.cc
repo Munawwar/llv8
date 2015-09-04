@@ -451,13 +451,44 @@ std::vector<RelocInfo> LLVMGranularity::Patch(
     Address start, Address end, LLVMRelocationData::RelocMap& reloc_map) {
   std::vector<RelocInfo> updated_reloc_infos;
 
+  // TODO(llvm):
+  // This dumb duplication from Disass() looks like it has to be refactored.
+  // But this Patch() technique itself is not a production quality solution
+  // so it should be gone and is not worth refactoring.
+  auto triple = x64_target_triple;
+  std::string err;
+  const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple,
+                                                                  err);
+  DCHECK(target);
+  std::unique_ptr<llvm::MCRegisterInfo> mri(target->createMCRegInfo(triple));
+  DCHECK(mri);
+  std::unique_ptr<llvm::MCAsmInfo> mai(target->createMCAsmInfo(*mri, triple));
+  DCHECK(mai);
+  std::unique_ptr<llvm::MCInstrInfo> mii(target->createMCInstrInfo());
+  DCHECK(mii);
+  std::string feature_str;
+  const llvm::StringRef cpu = "";
+  std::unique_ptr<llvm::MCSubtargetInfo> sti(
+      target->createMCSubtargetInfo(triple, cpu, feature_str));
+  DCHECK(sti);
+  auto intel_syntax = 1;
+  inst_printer_ = std::unique_ptr<llvm::MCInstPrinter>(
+      target->createMCInstPrinter(llvm::Triple(llvm::Triple::normalize(triple)),
+                                  intel_syntax, *mai, *mii, *mri));
+  inst_printer_->setPrintImmHex(true);
+  DCHECK(inst_printer_);
+  llvm::MCContext mc_context(mai.get(), mri.get(), nullptr);
+  std::unique_ptr<llvm::MCDisassembler> disasm(
+      target->createMCDisassembler(*sti, mc_context));
+  DCHECK(disasm);
+
   auto pos = start;
   while (pos < end) {
     llvm::MCInst inst;
     uint64_t size;
     auto address = 0;
 
-    llvm::MCDisassembler::DecodeStatus s = disasm_->getInstruction(
+    llvm::MCDisassembler::DecodeStatus s = disasm->getInstruction(
         inst /* out */, size /* out */, llvm::ArrayRef<uint8_t>(pos, end),
         address, llvm::nulls(), llvm::nulls());
 

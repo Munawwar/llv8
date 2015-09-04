@@ -130,14 +130,43 @@ class LLVMGranularity FINAL {
     std::cerr << err_str_ << std::endl;
   }
 
+  // TODO(llvm): move to a separate file
   void Disass(Address start, Address end) {
+    auto triple = x64_target_triple;
+    std::string err;
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple,
+                                                                    err);
+    DCHECK(target);
+    std::unique_ptr<llvm::MCRegisterInfo> mri(target->createMCRegInfo(triple));
+    DCHECK(mri);
+    std::unique_ptr<llvm::MCAsmInfo> mai(target->createMCAsmInfo(*mri, triple));
+    DCHECK(mai);
+    std::unique_ptr<llvm::MCInstrInfo> mii(target->createMCInstrInfo());
+    DCHECK(mii);
+    std::string feature_str;
+    const llvm::StringRef cpu = "";
+    std::unique_ptr<llvm::MCSubtargetInfo> sti(
+        target->createMCSubtargetInfo(triple, cpu, feature_str));
+    DCHECK(sti);
+    auto intel_syntax = 1;
+    inst_printer_ = std::unique_ptr<llvm::MCInstPrinter>(
+        target->createMCInstPrinter(llvm::Triple(llvm::Triple::normalize(triple)),
+                                    intel_syntax, *mai, *mii, *mri));
+    inst_printer_->setPrintImmHex(true);
+    DCHECK(inst_printer_);
+    llvm::MCContext mc_context(mai.get(), mri.get(), nullptr);
+    std::unique_ptr<llvm::MCDisassembler> disasm(
+        target->createMCDisassembler(*sti, mc_context));
+    DCHECK(disasm);
+
+
     auto pos = start;
     while (pos < end) {
       llvm::MCInst inst;
       uint64_t size;
       auto address = 0;
 
-      llvm::MCDisassembler::DecodeStatus s = disasm_->getInstruction(
+      llvm::MCDisassembler::DecodeStatus s = disasm->getInstruction(
           inst /* out */, size /* out */, llvm::ArrayRef<uint8_t>(pos, end),
           address, llvm::nulls(), llvm::nulls());
       if (s == llvm::MCDisassembler::Fail) {
@@ -146,7 +175,7 @@ class LLVMGranularity FINAL {
         break;
       }
       llvm::errs() << pos << "\t";
-      inst_printer_->printInst(&inst, llvm::errs(), "", *sti_);
+      inst_printer_->printInst(&inst, llvm::errs(), "", *sti);
       llvm::errs() << "\n";
       pos += size;
     }
@@ -159,9 +188,7 @@ class LLVMGranularity FINAL {
   LLVMContext context_;
   llvm::PassManagerBuilder pass_manager_builder_;
   std::unique_ptr<llvm::ExecutionEngine> engine_;
-  std::unique_ptr<llvm::MCDisassembler> disasm_;
   std::unique_ptr<llvm::MCInstPrinter> inst_printer_;
-  std::unique_ptr<llvm::MCSubtargetInfo> sti_;
   int count_;
   MCJITMemoryManager* memory_manager_ref_; // non-owning ptr
   std::string err_str_;
@@ -170,9 +197,7 @@ class LLVMGranularity FINAL {
       : context_(),
         pass_manager_builder_(),
         engine_(nullptr),
-        disasm_(nullptr),
         inst_printer_(nullptr),
-        sti_(nullptr),
         count_(0),
         memory_manager_ref_(nullptr),
         err_str_() {
@@ -181,39 +206,6 @@ class LLVMGranularity FINAL {
     llvm::InitializeNativeTargetAsmParser();
     llvm::InitializeNativeTargetDisassembler();
     pass_manager_builder_.OptLevel = 3; // -O3
-    SetUpDisassembler();
-  }
-
-  void SetUpDisassembler() {
-    auto triple = x64_target_triple;
-    std::string err;
-    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple,
-                                                                    err);
-    DCHECK(target);
-    std::unique_ptr<llvm::MCRegisterInfo> mri(target->createMCRegInfo(triple));
-    DCHECK(mri);
-    std::unique_ptr<llvm::MCAsmInfo> mai(target->createMCAsmInfo(*mri.get(),
-                                                                 triple));
-    DCHECK(mai);
-    std::unique_ptr<llvm::MCInstrInfo> mii(target->createMCInstrInfo());
-    DCHECK(mii);
-    std::string feature_str;
-    const llvm::StringRef cpu = "";
-    sti_ = std::unique_ptr<llvm::MCSubtargetInfo>(
-        target->createMCSubtargetInfo(triple, cpu, feature_str));
-    DCHECK(sti_);
-    auto intel_syntax = 1;
-    inst_printer_ = std::unique_ptr<llvm::MCInstPrinter>(
-        target->createMCInstPrinter(llvm::Triple(llvm::Triple::normalize(triple)),
-                                    intel_syntax, *mai, *mii, *mri));
-    inst_printer_->setPrintImmHex(true);
-    DCHECK(inst_printer_);
-    std::unique_ptr<llvm::MCObjectFileInfo> mofi(new llvm::MCObjectFileInfo());
-    DCHECK(mofi);
-    llvm::MCContext mc_context(mai.get(), mri.get(), mofi.get());
-    disasm_ = std::unique_ptr<llvm::MCDisassembler> (
-        target->createMCDisassembler(*sti_, mc_context));
-    DCHECK(disasm_);
   }
 
   std::string GenerateName() {
