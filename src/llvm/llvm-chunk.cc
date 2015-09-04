@@ -3521,7 +3521,7 @@ void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
   auto inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(), false);
   llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-  __ CreateCall(inline_asm, "");
+  __ CreateCall(inline_asm);
 
   //UNIMPLEMENTED();
 }
