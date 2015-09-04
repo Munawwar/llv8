@@ -2079,7 +2079,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   }
   pending_pushed_args_.Clear();
 
-  bool record_safepoint = true;
+  bool record_safepoint = false; // FIXME(llvm): temporary
   auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args,
                       instr, record_safepoint);
   instr->set_llvm_value(call);
