@@ -1187,10 +1187,6 @@ Representation HBranch::observed_input_representation(int index) {
 
 bool HBranch::KnownSuccessorBlock(HBasicBlock** block) {
   HValue* value = this->value();
-  if (SecondSuccessor()->is_osr_entry()) { //FIXME: There is a better solution for this
-    *block = NULL;
-    return false;
-  }
   if (value->EmitAtUses()) {
     DCHECK(value->IsConstant());
     DCHECK(!value->representation().IsDouble());

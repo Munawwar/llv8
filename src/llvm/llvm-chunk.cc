@@ -1365,7 +1365,22 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
-   // CreateVolatileZero();
+    //If function contains OSR entry, it's first instruction must be osr_branch
+    if (graph_->has_osr()) { 
+      HBasicBlock* osr_block = graph_->osr()->osr_entry();
+      llvm::BasicBlock* not_osr_target = NewBlock("NO_OSR_CONTINUE");
+      llvm::BasicBlock* osr_target = Use(osr_block);
+      llvm::Value* zero = __ getInt64(0);
+      llvm::Function::arg_iterator it = function_->arg_begin();
+      int i = 0;
+      while (++i < 3) ++it;
+      llvm::Value* osr_value  = it;
+      llvm::Value* compare = __ CreateICmpEQ(osr_value, zero);
+      __ CreateCondBr(compare, not_osr_target, osr_target);
+      __ SetInsertPoint(not_osr_target);
+      //instr->set_llvm_value(branch);
+    }
+    // CreateVolatileZero();
     block->UpdateEnvironment(graph_->start_environment());
     argument_count_ = 0;
   } else if (block->predecessors()->length() == 1) {
@@ -2002,19 +2017,6 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   Representation r = value->representation();
   HType type = value->type();
   USE(type);
-  if (instr->SuccessorAt(1)->is_osr_entry()) { //FIXME: There is a better solution for this
-    llvm::Value* zero = __ getInt64(0);
-    llvm::Function::arg_iterator it = function_->arg_begin();
-    int i = 0;
-    while (++i < 3) ++it; //TODO: better solution
-    llvm::Value* osr_value  = it;
-    llvm::Value* compare = __ CreateICmpEQ(osr_value, zero);
-    llvm::BranchInst* branch = __ CreateCondBr(compare,
-                                               true_target, false_target);
-    instr->set_llvm_value(branch);
-    return;
-
-  }
   if (r.IsInteger32()) {
     llvm::Value* zero = __ getInt32(0);
     llvm::Value* compare = __ CreateICmpNE(Use(value), zero);
@@ -2102,13 +2104,14 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
                                          JSFunction::kContextOffset,
                                          "target_context");
 
-  auto argument_count = instr->argument_count() + 2; // rsi, rdi
+  auto argument_count = instr->argument_count() + 3; // rsi, rdi, rbx
 
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   args[0] = target_context;
   args[1] = function_object;
-  DCHECK(pending_pushed_args_.length() + 2 == argument_count);
+  args[2] = __ getInt64(0);
+  DCHECK(pending_pushed_args_.length() + 3 == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
   for (int i = 0; i < pending_pushed_args_.length(); i++) {
     args[argument_count - 1 - i] = pending_pushed_args_[i];

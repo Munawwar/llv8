@@ -1916,7 +1916,6 @@ void Builtins::Generate_OnStackReplacement(MacroAssembler* masm) {
 
   // Overwrite the return address on the stack.
   __ movq(StackOperandForReturnAddress(0), rax);
-
   __ movq(rbx, Immediate(1)); //Is Osr Entry
   // And "return" to the OSR entry point of the function.
   __ ret(0);

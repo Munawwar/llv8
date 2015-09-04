@@ -38,6 +38,10 @@ class HOsrBuilder : public ZoneObject {
   int UnoptimizedFrameSlots() const {
     return unoptimized_frame_slots_;
   }
+ 
+  HBasicBlock* osr_entry() {
+    return osr_entry_;
+  }
 
   bool HasOsrEntryAt(IterationStatement* statement);
 
