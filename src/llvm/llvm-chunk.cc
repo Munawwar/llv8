@@ -582,8 +582,9 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
 
   llvm::AttributeSet attr_set = function_->getAttributes();
   // rbp based frame so the runtime can walk the stack as before
-  attr_set.addAttribute(llvm_context, llvm::AttributeSet::FunctionIndex,
-                        "no-frame-pointer-elim", "true");
+  attr_set = attr_set.addAttribute(llvm_context,
+                                   llvm::AttributeSet::FunctionIndex,
+                                   "no-frame-pointer-elim", "true");
   function_->setAttributes(attr_set);
 
   function_->setCallingConv(llvm::CallingConv::X86_64_V8);
