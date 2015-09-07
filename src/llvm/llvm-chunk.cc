@@ -94,7 +94,7 @@ Handle<Code> LLVMChunk::Codegen() {
   // has been fully processed by llv8.
   LLVMGranularity::getInstance().memory_manager_ref()->DropStackmaps();
 #ifdef DEBUG
-  std::cout << "Instruction start: "
+  std::cerr << "Instruction start: "
       << reinterpret_cast<void*>(code->instruction_start()) << std::endl;
 #endif
 
