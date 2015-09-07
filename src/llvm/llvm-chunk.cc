@@ -570,20 +570,12 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
 
   // First param is context (v8, js context) which goes to rsi,
   // second param is the callee's JSFunction object (rdi),
-  // third param is Parameter 0 which is I am not sure what
+  // third param is Parameter 0 which is `this`.
   int num_parameters = info()->num_parameters() + 4;
 
-  std::vector<llvm::Type*> params(num_parameters, nullptr);
-  for (auto i = 0; i < num_parameters; i++) {
-    // For now everything is Int64. Probably it is even right for x64.
-    // So in that case we are going to do come casts AFAIK
-    params[i] = Types::i64;
-  }
+  std::vector<llvm::Type*> params(num_parameters, Types::tagged);
   llvm::FunctionType* function_type = llvm::FunctionType::get(
-      Types::i64, params, false);
-
-  // TODO(llvm): return type for void JS functions?
-  // I think it's all right, because undefined is a tagged value
+      Types::tagged, params, false);
   function_ = llvm::cast<llvm::Function>(
       module_->getOrInsertFunction(module_->getModuleIdentifier(),
                                    function_type));
