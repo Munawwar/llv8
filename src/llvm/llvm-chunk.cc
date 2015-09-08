@@ -580,6 +580,10 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
       module_->getOrInsertFunction(module_->getModuleIdentifier(),
                                    function_type));
 
+  if (graph_->has_osr()) {
+    graph_->osr()->osr_entry();
+    function_ -> osr_reserve = graph()->osr()->UnoptimizedFrameSlots();
+  }
   llvm::AttributeSet attr_set = function_->getAttributes();
   // rbp based frame so the runtime can walk the stack as before
   attr_set = attr_set.addAttribute(llvm_context,
@@ -3191,7 +3195,7 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     UNIMPLEMENTED();
   }
 
-  if (instr->representation().IsDouble()){
+  if (instr->representation().IsDouble()) {
     llvm::Value* address = FieldOperand(Use(instr->object()), offset);
     llvm::Value* cast_double = __ CreateBitCast(address, Types::ptr_float64);
     llvm::Value* result = __ CreateLoad(cast_double);
