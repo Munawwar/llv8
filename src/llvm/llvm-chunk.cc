@@ -580,10 +580,9 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
       module_->getOrInsertFunction(module_->getModuleIdentifier(),
                                    function_type));
 
-  if (graph_->has_osr()) {
-    graph_->osr()->osr_entry();
-    function_ -> osr_reserve = graph()->osr()->UnoptimizedFrameSlots();
-  }
+  //if (graph_->has_osr()) { // TODO: Delete this comment
+  //  function_ -> osr_reserve = 0; //graph()->osr()->UnoptimizedFrameSlots();
+  // }
   llvm::AttributeSet attr_set = function_->getAttributes();
   // rbp based frame so the runtime can walk the stack as before
   attr_set = attr_set.addAttribute(llvm_context,
@@ -1364,6 +1363,12 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   if (block->IsStartBlock()) {
     //If function contains OSR entry, it's first instruction must be osr_branch
     if (graph_->has_osr()) { 
+      // We need to move llvm spill index by UnoptimizedFrameSlots count
+      // in order to preserve Full-Codegen local values
+      for (int i = 0; i < graph_->osr()->UnoptimizedFrameSlots(); ++i) { 
+         auto alloc = __ CreateAlloca(Types::i64);
+         __ CreateLoad(alloc, true);
+      }
       HBasicBlock* osr_block = graph_->osr()->osr_entry();
       llvm::BasicBlock* not_osr_target = NewBlock("NO_OSR_CONTINUE");
       llvm::BasicBlock* osr_target = Use(osr_block);
@@ -1372,10 +1377,10 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
       int i = 0;
       while (++i < 3) ++it;
       llvm::Value* osr_value  = it;
+      // Branch to OSR block
       llvm::Value* compare = __ CreateICmpEQ(osr_value, zero);
       __ CreateCondBr(compare, not_osr_target, osr_target);
       __ SetInsertPoint(not_osr_target);
-      //instr->set_llvm_value(branch);
     }
     // CreateVolatileZero();
     block->UpdateEnvironment(graph_->start_environment());
