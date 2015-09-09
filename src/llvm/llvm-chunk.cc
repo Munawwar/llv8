@@ -1363,11 +1363,12 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   if (block->IsStartBlock()) {
     //If function contains OSR entry, it's first instruction must be osr_branch
     if (graph_->has_osr()) { 
+      osr_preserved_values_.Clear();
       // We need to move llvm spill index by UnoptimizedFrameSlots count
       // in order to preserve Full-Codegen local values
       for (int i = 0; i < graph_->osr()->UnoptimizedFrameSlots(); ++i) { 
          auto alloc = __ CreateAlloca(Types::i64);
-         __ CreateLoad(alloc, true);
+         osr_preserved_values_.Add(alloc, info()->zone());
       }
       HBasicBlock* osr_block = graph_->osr()->osr_entry();
       llvm::BasicBlock* not_osr_target = NewBlock("NO_OSR_CONTINUE");
@@ -4164,34 +4165,30 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
 }
 
 void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
-//  UNIMPLEMENTED();
   int env_index = instr->index();
   int spill_index = 0;
-  llvm::Function* frame_address = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::frameaddress);
-   std::vector<llvm::Value*> params;
-   params.push_back(__ getInt32(0));
-   llvm::Value* get_address = __ CreateCall(frame_address, params);
-
   if (instr->environment()->is_parameter_index(env_index)) {
     spill_index = chunk()->GetParameterStackSlot(env_index);
-    spill_index--;
-    spill_index *= -8;
+    spill_index = -spill_index;
+    llvm::Function::arg_iterator it = function_->arg_begin();
+    int i = 0;
+    while (++i < 3 + spill_index) ++it;
+    llvm::Value* result = it;
+    instr->set_llvm_value(result);
   } else {
     spill_index = env_index - instr->environment()->first_local_index();
-    spill_index = - spill_index; //FIXME WTF?
-    spill_index -= 3; //FIXME:WTF? Nonsense
-    spill_index *= 8;
     if (spill_index > LUnallocated::kMaxFixedSlotIndex) {
-       UNIMPLEMENTED();
+      UNIMPLEMENTED();
     }
+    if (spill_index >=0) {
+      bool is_volatile = true;
+      llvm::Value* result = __ CreateLoad(osr_preserved_values_[spill_index], is_volatile);
+      instr->set_llvm_value(result);
+    } else {
+      //TODO: Handle this case  
+    }
+    
   }
-  llvm::Value* osr_val_addr = __ CreateGEP(get_address, __ getInt64(spill_index));
-  llvm::Value* casted_addr = __ CreateBitCast(osr_val_addr, Types::ptr_i64);
-  llvm::Value* result = __ CreateLoad(casted_addr);
-  instr->set_llvm_value(result);
-
-
 }
 
 void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {

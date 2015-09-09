@@ -458,6 +458,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
         deopt_data_(llvm::make_unique<LLVMDeoptData>(info->zone())),
         reloc_data_(nullptr),
         pending_pushed_args_(4, info->zone()),
+        osr_preserved_values_(4, info->zone()),
         emit_debug_code_(FLAG_debug_code),
         volatile_zero_address_(nullptr),
         last_reloc_index_offset_(-1) {
@@ -630,6 +631,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   std::unique_ptr<LLVMDeoptData> deopt_data_;
   LLVMRelocationData* reloc_data_;
   ZoneList<llvm::Value*> pending_pushed_args_;
+  ZoneList<llvm::Value*> osr_preserved_values_;
   bool emit_debug_code_;
   llvm::Value* volatile_zero_address_;
   int last_reloc_index_offset_;
