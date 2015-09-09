@@ -2189,6 +2189,8 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
       params.push_back(Use(instr->OperandAt(i)));
     params.push_back(arity_val);
     params.push_back(load_root);
+    for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+      params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
     std::string arg_offset = std::to_string(2 * 8);
     std::string asm_string1 = "sub $$";
@@ -3194,7 +3196,6 @@ void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
-
   HObjectAccess access = instr->access();
   int offset = access.offset();
   if (access.IsExternalMemory()) {
@@ -3768,18 +3769,72 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   instr->set_llvm_value(store);
   if (instr->NeedsWriteBarrier()) {
     //Must be FIXED !!!
+    llvm::Value* elem = Use(instr->elements());
     llvm::Value* value = Use(instr->value());
     llvm::Value* key_l = Use(instr->key());
     llvm::Value* casted_adderss = __ CreateBitCast(gep_0,
                                                    Types::ptr_i64);
     key_l = __ CreateLoad(casted_adderss);
-    /*auto new_map = Move(Use(instr->map()), RelocInfo::EMBEDDED_OBJECT);
-    auto store_addr = FieldOperand(gep_0, HeapObject::kMapOffset);
-    auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_i64);
-    __ CreateStore(new_map, casted_store_addr);*/
-    RecordWriteForMap(key_l, value); 
+    RecordWrite(elem, key_l, value, instr->PointersToHereCheckForValue());
     //UNIMPLEMENTED();
   }
+}
+
+void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
+                                   llvm::Value* value, PointersToHereCheck ptr_check) {
+  if (!FLAG_incremental_marking) {
+    return;
+  }
+
+  if (emit_debug_code()) {
+    Assert(Compare(value, LoadFieldOperand(key_reg, 0)));
+  }
+  llvm::BasicBlock* current_block = NewBlock("RECORD WRITE SMI CHECKED");
+  auto stub_block = NewBlock("AFTER CHECK_PAGE_FLAG");
+  llvm::BasicBlock* done = NewBlock("END OF RECORD WRITE");
+
+  if (INLINE_SMI_CHECK) {
+    // Skip barrier if writing a smi.
+    llvm::Value* smi_cond = SmiCheck(value, false);//JumpIfSmi(value, &done);
+    __ CreateCondBr(smi_cond, done, current_block);
+    __ SetInsertPoint(current_block);
+  }
+  ptr_check = kPointersToHereAreAlwaysInteresting;
+  if(ptr_check != kPointersToHereAreAlwaysInteresting) {
+    auto equal = CheckPageFlag(value,
+                             MemoryChunk::kPointersToHereAreInterestingMask);
+    __ CreateCondBr(equal, done, current_block);
+    __ SetInsertPoint(current_block);
+  }
+
+  auto equal = CheckPageFlag(object,
+                             MemoryChunk::kPointersToHereAreInterestingMask);
+  __ CreateCondBr(equal, done, stub_block);
+
+  __ SetInsertPoint(stub_block);
+  Register object_reg = rbx;
+  Register map_reg = rcx;
+  Register dst_reg = rdx;
+  RecordWriteStub stub(isolate(), object_reg, map_reg, dst_reg,
+                       OMIT_REMEMBERED_SET, kSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap_alloc;
+    code = stub.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+  std::vector<llvm::Value*> params = { object, key_reg, value };
+  CallAddress(code->instruction_start(),
+              llvm::CallingConv::X86_64_V8_RWS,
+              params);
+  __ CreateBr(done);
+
+  __ SetInsertPoint(done);
+
+  // Count number of write barriers in generated code.
+  isolate()->counters()->write_barriers_static()->Increment();
+  IncrementCounter(isolate()->counters()->write_barriers_dynamic(), 1);
 }
 
 void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
