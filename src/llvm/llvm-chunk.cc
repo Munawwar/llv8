@@ -4157,7 +4157,12 @@ void LLVMChunkBuilder::DoSmiMathAbs(HUnaryMathOperation* instr) {
 void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
   Representation r = instr->representation();
   if (r.IsDouble()) {
-    UNIMPLEMENTED();
+    llvm::Function* fabs_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::fabs, Types::float64);
+    std::vector<llvm::Value*> params;
+    params.push_back(Use(instr->value()));
+    llvm::Value* f_abs = __ CreateCall(fabs_intrinsic, params);
+    instr->set_llvm_value(f_abs);
   } else if (r.IsInteger32()) {
     DoIntegerMathAbs(instr);
   } else if (r.IsSmi()) {
