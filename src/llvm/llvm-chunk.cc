@@ -745,8 +745,8 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
     VisitInstruction(instr);
   }
   DCHECK(value->llvm_value());
-  DCHECK_EQ(value->llvm_value()->getType(),
-            GetLLVMType(value->representation()));
+  //DCHECK_EQ(value->llvm_value()->getType(),
+    //        GetLLVMType(value->representation()));
   return value->llvm_value();
 }
 
@@ -3328,7 +3328,7 @@ void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
-  llvm::PHINode* phi = __ CreatePHI(Types::i32, 3);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 4);
   phi->addIncoming(output_reg, negative_sign);
   phi->addIncoming(output_reg_p, positive_sign);
   phi->addIncoming(result, check_overflow);
@@ -4188,6 +4188,77 @@ void LLVMChunkBuilder::DoMathSqrt(HUnaryMathOperation* instr) {
    instr->set_llvm_value(sqrt);
 }
 
+void LLVMChunkBuilder::DoMathRound(HUnaryMathOperation* instr) {
+  llvm::Value* llvm_double_one_half = llvm::ConstantFP::get(Types::float64, 0.5);
+  llvm::Value* llvm_double_minus_one_half = llvm::ConstantFP::get(Types::float64, -0.5);
+  llvm::Value* input_reg = Use(instr->value());
+  llvm::Value* input_temp = nullptr;
+  llvm::Value* xmm_scratch = nullptr;
+  llvm::BasicBlock* round_to_zero = NewBlock("Round to zero");
+  llvm::BasicBlock* round_to_one = NewBlock("Round to one");
+  llvm::BasicBlock* below_one_half = NewBlock("Below one half");
+  llvm::BasicBlock* above_one_half = NewBlock("Above one half");
+  llvm::BasicBlock* not_equal = NewBlock("Not equal");
+  llvm::BasicBlock* round_result = NewBlock("Jump to final Round result block");
+  /*if (DeoptEveryNTimes()){
+    UNIMPLEMENTED();
+  }*/
+  llvm::Value* cmp = __ CreateFCmpOGT(llvm_double_one_half, input_reg);
+  __ CreateCondBr(cmp, below_one_half, above_one_half);
+
+  __ SetInsertPoint(above_one_half);
+  xmm_scratch = __ CreateFAdd(llvm_double_one_half, input_reg);
+  llvm::Value* output_reg1 = __ CreateFPToSI(xmm_scratch, Types::i32);
+  //DeoptimizeIF
+  auto type = instr->representation().IsSmi() ? Types::i64 : Types::i32;
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+        llvm::Intrinsic::ssub_with_overflow, type);
+  llvm::Value* params[] = { output_reg1, __ getInt32(0x1) };
+  llvm::Value* call = __ CreateCall(intrinsic, params);
+  llvm::Value* overflow = __ CreateExtractValue(call, 1);
+  DeoptimizeIf(overflow);
+  __ CreateBr(round_result);
+
+  __ SetInsertPoint(below_one_half);
+  cmp = __ CreateFCmpOLE(llvm_double_minus_one_half, input_reg);
+  __ CreateCondBr(cmp, round_to_zero, round_to_one);
+
+  __ SetInsertPoint(round_to_one);
+  input_temp = __ CreateFSub(input_reg, llvm_double_minus_one_half);
+  llvm::Value* output_reg2 = __ CreateFPToSI(input_temp, Types::i32);
+  auto instr_type = instr->representation().IsSmi() ? Types::i64 : Types::i32;
+  llvm::Function* ssub_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+        llvm::Intrinsic::ssub_with_overflow, instr_type);
+  llvm::Value* parameters[] = { output_reg2, __ getInt32(0x1) };
+  llvm::Value* call_intrinsic = __ CreateCall(ssub_intrinsic, parameters);
+  llvm::Value* cmp_overflow = __ CreateExtractValue(call_intrinsic, 1);
+  DeoptimizeIf(cmp_overflow);
+  xmm_scratch = __ CreateSIToFP(output_reg2, Types::float64);
+  cmp = __ CreateFCmpOEQ(xmm_scratch, input_reg);
+  __ CreateCondBr(cmp, round_result, not_equal);
+
+  __ SetInsertPoint(not_equal);
+  llvm::Value* output_reg3 = __ CreateNSWSub(output_reg2, __ getInt32(1));
+  __ CreateBr(round_result);
+
+  __ SetInsertPoint(round_to_zero);
+  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+    //UNIMPLEMENTED();
+    llvm::Value* cmp_zero = __ CreateFCmpOLT(input_reg, __ CreateSIToFP(__ getInt64(0), Types::float64));
+    DeoptimizeIf(cmp_zero);
+  }
+  llvm::Value* output_reg4 = __ getInt32(6);
+  __ CreateBr(round_result);
+
+  __ SetInsertPoint(round_result);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 4);
+  phi->addIncoming(output_reg1, above_one_half);
+  phi->addIncoming(output_reg2, round_to_one);
+  phi->addIncoming(output_reg3, not_equal);
+  phi->addIncoming(output_reg4, round_to_zero);
+  instr->set_llvm_value(phi);
+}
+
 void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
   switch (instr->op()) {
     case kMathAbs:
@@ -4200,8 +4271,11 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
       DoMathFloor(instr);
       break;
     }
-    case kMathRound:
-      UNIMPLEMENTED();
+    case kMathRound: {
+     // UNIMPLEMENTED();
+     DoMathRound(instr);
+     break;
+    }
     case kMathFround:
       UNIMPLEMENTED();
     case kMathLog:
