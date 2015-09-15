@@ -2203,7 +2203,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     __ CreateCall(inline_asm);
     llvm::Value* call = CallAddress(code->instruction_start(),
                                     llvm::CallingConv::X86_64_V8_S3, params);
-    llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
+    llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
     instr->set_llvm_value(return_val);
   }
 }
@@ -3283,7 +3283,25 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
+  DCHECK(instr->object()->representation().IsTagged());
+  
+  Handle<Object> handle_value = instr->name(); 
+  auto value = MoveHeapObject(handle_value);
+  USE(value);
+  if (FLAG_vector_ics) {
     UNIMPLEMENTED();
+  }
+  AllowHandleAllocation allow_handles; 
+  Handle<Code> ic = CodeFactory::LoadICInOptimizedCode(
+                        isolate(), NOT_CONTEXTUAL,
+                        instr->initialization_state()).code();
+  // TODO(llvm): RecordSafepointWithLazyDeopt (and reloc info) + MarkAsCall
+  std::vector<llvm::Value*> no_params;
+  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::C,
+                            no_params);
+  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
+  instr->set_llvm_value(return_val);
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
