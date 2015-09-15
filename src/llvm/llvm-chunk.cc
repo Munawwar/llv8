@@ -3345,9 +3345,9 @@ void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
   llvm::BasicBlock* return_block = NewBlock("MIN MAX RETURN");
   HMathMinMax::Operation operation = instr->operation();
   llvm::BasicBlock* insert_block = __ GetInsertBlock();
+  bool cond_for_min = (operation == HMathMinMax::kMathMin);
 
   if (instr->representation().IsSmiOrInteger32()) {
-    bool cond_for_min = (operation == HMathMinMax::kMathMin);
     if (instr->right()->IsConstant()) {
       DCHECK(SmiValuesAre32Bits()
         ? !instr->representation().IsSmi()
@@ -3381,7 +3381,23 @@ void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
     phi->addIncoming(left, insert_block);
     instr->set_llvm_value(phi);
   } else {
-    UNIMPLEMENTED();
+    if (cond_for_min) {
+      llvm::Function* fmin_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::minnum, Types::float64);
+    std::vector<llvm::Value*> params;
+    params.push_back(left);
+    params.push_back(right);
+    llvm::Value* fmin = __ CreateCall(fmin_intrinsic, params);
+    instr->set_llvm_value(fmin);
+    } else {
+      llvm::Function* fmax_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::maxnum, Types::float64);
+    std::vector<llvm::Value*> params;
+    params.push_back(left);
+    params.push_back(right);
+    llvm::Value* fmax = __ CreateCall(fmax_intrinsic, params);
+    instr->set_llvm_value(fmax);
+    }
   }
 }
 
