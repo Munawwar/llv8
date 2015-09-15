@@ -2627,7 +2627,19 @@ void LLVMChunkBuilder::DoCheckSmi(HCheckSmi* instr) {
 }
 
 void LLVMChunkBuilder::DoCheckValue(HCheckValue* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* reg = Use(instr->value());
+  Handle<Object> source = instr->object().handle();
+  llvm::Value* cmp = nullptr;
+  if (source->IsSmi()) {
+    Smi* smi = Smi::cast(*source);
+    intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
+    llvm::Value* value = __ getInt64(intptr_value);
+    cmp = __ CreateICmpNE(reg, value);
+  } else {
+    auto obj = MoveHeapObject(instr->object().handle());
+    cmp = __ CreateICmpNE(reg, obj);
+  }
+  DeoptimizeIf(cmp);
 }
 
 void LLVMChunkBuilder::DoClampToUint8(HClampToUint8* instr) {
