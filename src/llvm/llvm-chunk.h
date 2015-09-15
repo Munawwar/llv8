@@ -383,7 +383,8 @@ class LLVMChunk FINAL : public LowChunk {
       reloc_data_(nullptr),
       deopt_data_(nullptr),
       masm_(nullptr, nullptr, 0),
-      target_index_for_ppid_() {}
+      target_index_for_ppid_(),
+      inlined_closures_(1, info->zone()) {}
 
   using PpIdToIndexMap = std::map<int64_t, uint32_t>;
 
@@ -404,6 +405,10 @@ class LLVMChunk FINAL : public LowChunk {
   Assembler& masm() { return masm_; }
   PpIdToIndexMap& target_index_for_ppid() {
     return target_index_for_ppid_;
+  }
+
+  void AddInlinedClosure(Handle<JSFunction> closure) {
+    inlined_closures_.Add(closure, zone());
   }
   int GetParameterStackSlot(int index) const;
  private:
@@ -443,6 +448,7 @@ class LLVMChunk FINAL : public LowChunk {
   // (this map allocates keys on the heap and doesn't die).
   // Map patchpointId -> index in masm_.code_targets_
   std::map<int64_t, uint32_t> target_index_for_ppid_;
+  ZoneList<Handle<JSFunction> > inlined_closures_;
 };
 
 class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {

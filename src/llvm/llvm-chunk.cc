@@ -2811,7 +2811,23 @@ void LLVMChunkBuilder::DoDummyUse(HDummyUse* instr) {
 }
 
 void LLVMChunkBuilder::DoEnterInlined(HEnterInlined* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  HEnvironment* outer = current_block_->last_environment();
+  outer->set_ast_id(instr->ReturnId());
+  HConstant* undefined = graph()->GetConstantUndefined();
+  HEnvironment* inner = outer->CopyForInlining(instr->closure(),
+                                               instr->arguments_count(),
+                                               instr->function(),
+                                               undefined,
+                                               instr->inlining_kind());
+  // Only replay binding of arguments object if it wasn't removed from graph.
+  if (instr->arguments_var() != NULL && instr->arguments_object()->IsLinked()) {
+    inner->Bind(instr->arguments_var(), instr->arguments_object());
+  }
+  inner->BindContext(instr->closure_context());
+  inner->set_entry(instr);
+  current_block_->UpdateEnvironment(inner);
+  chunk()->AddInlinedClosure(instr->closure());
 }
 
 void LLVMChunkBuilder::DoEnvironmentMarker(HEnvironmentMarker* instr) {
@@ -3017,7 +3033,19 @@ void LLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr
 }
 
 void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  HEnvironment* env = current_block_->last_environment();
+
+  if (env->entry()->arguments_pushed()) {
+    UNIMPLEMENTED();
+    /*int argument_count = env->arguments_environment()->parameter_count();
+    pop = new(zone()) LDrop(argument_count);
+    DCHECK(instr->argument_delta() == -argument_count);*/
+  }
+
+  HEnvironment* outer = current_block_->last_environment()->
+      DiscardInlined(false);
+  current_block_->UpdateEnvironment(outer);
 }
 
 void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
