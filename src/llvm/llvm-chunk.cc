@@ -2666,7 +2666,10 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(
                                                    is_unsigned,
                                                    is_double);
   if (r.IsSmi()) {
-    UNIMPLEMENTED();
+    llvm::Value* compare = __ CreateICmp(pred, Use(left), Use(right));
+    llvm::Value* branch = __ CreateCondBr(compare,
+        Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    instr->set_llvm_value(branch);
   } else if (r.IsInteger32()) {
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
