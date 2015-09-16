@@ -2803,7 +2803,15 @@ void LLVMChunkBuilder::DoDiv(HDiv* instr) {
 }
 
 void LLVMChunkBuilder::DoDoubleBits(HDoubleBits* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* value = Use(instr->value());
+  if (instr->bits() == HDoubleBits::HIGH) {
+    llvm::Value* tmp = __ CreateBitCast(value, Types::i64);
+    value = __ CreateLShr(tmp, __ getInt64(32));
+    value = __ CreateTrunc(value, Types::i32);
+  } else {
+    UNIMPLEMENTED();
+  }
+  instr->set_llvm_value(value);
 }
 
 void LLVMChunkBuilder::DoDummyUse(HDummyUse* instr) {
