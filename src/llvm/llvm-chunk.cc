@@ -3057,7 +3057,20 @@ void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* value = Use(instr->value());
+  llvm::Value* address = nullptr ;
+  llvm::Value* result = nullptr;
+  
+  llvm::Value* int_ptr = __ CreateIntToPtr(value, Types::ptr_i8);
+  auto off = Context::kHeaderSize + instr->slot_index() * kPointerSize - kHeapObjectTag;
+  llvm::Value* offset = __ getInt32(off);
+  address = __ CreateGEP(int_ptr, offset);
+  address = __ CreateBitCast(address, Types::ptr_i64);
+  result = __ CreateLoad(address);
+  if (instr->RequiresHoleCheck()) {
+    UNIMPLEMENTED();
+  }
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
