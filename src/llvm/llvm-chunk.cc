@@ -3347,7 +3347,7 @@ void LLVMChunkBuilder::DoMathFloorOfDiv(HMathFloorOfDiv* instr) {
 void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
   llvm::Value* value = Use(instr->value());
   llvm::Value* output_reg = nullptr;
-  llvm::Value* output_reg_s = nullptr;
+  llvm::Value* output_reg_s = __ getInt32(0);
   llvm::Value* output_reg_p = nullptr;
   // Let's assume we don't support this feature
   //if (CpuFeatures::IsSupported(SSE4_1))
@@ -3371,12 +3371,11 @@ void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
     __ SetInsertPoint(sign);
     llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
         llvm::Intrinsic::x86_sse2_movmsk_pd);
-    llvm::Value* input_val = __ CreateSIToFP(value, Types::float64);
-    llvm::Value* param_vect = __ CreateVectorSplat(2, input_val);
+    llvm::Value* param_vect = __ CreateVectorSplat(2, value);
     llvm::Value* movms = __ CreateCall(intrinsic, param_vect);
     llvm::Value* not_zero = __ CreateICmpNE(movms, __ getInt32(0));
     DeoptimizeIf(not_zero);
-    output_reg_s = movms;
+    output_reg_s = __ getInt32(0);
     __ CreateBr(done);
   } else __ CreateBr(positive_sign);
   __ SetInsertPoint(positive_sign);
