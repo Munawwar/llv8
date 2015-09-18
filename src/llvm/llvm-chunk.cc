@@ -892,9 +892,14 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
 
 llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
                                            llvm::CallingConv::ID calling_conv,
-                                           std::vector<llvm::Value*>& params) {
+                                           std::vector<llvm::Value*>& params, llvm::Value* val_addr) {
   // TODO(llvm): reimplement via CallVal. See what's up with tagged first
-  llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
+  llvm::Value* target_adderss = nullptr;
+  if (val_addr != nullptr) {
+    target_adderss = val_addr;
+  } else {
+    target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
+  }
   bool is_var_arg = false;
 
   // Tagged return type won't hurt even if in fact it's void
@@ -3017,7 +3022,43 @@ void LLVMChunkBuilder::DoInstanceOfKnownGlobal(HInstanceOfKnownGlobal* instr) {
 }
 
 void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
-  UNIMPLEMENTED();
+  Handle<JSFunction> known_function = instr->known_function();
+  if (known_function.is_null()) {
+    UNIMPLEMENTED();
+  } else {
+    bool dont_adapt_arguments =
+        instr->formal_parameter_count() == SharedFunctionInfo::kDontAdaptArgumentsSentinel;
+    bool can_invoke_directly =
+        dont_adapt_arguments || instr->formal_parameter_count() == (instr->argument_count()-1);
+    if (can_invoke_directly) {
+      llvm::Value* context = LoadFieldOperand(Use(instr->function()), JSFunction::kContextOffset);
+
+      if (dont_adapt_arguments) {
+        UNIMPLEMENTED();
+      }
+
+      // InvokeF
+      if (instr->known_function().is_identical_to(info()->closure())) {
+        UNIMPLEMENTED();
+      } else {
+        std::vector<llvm::Value*> params;
+        params.push_back(context);
+        params.push_back(Use(instr->function()));
+        for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+          params.push_back(pending_pushed_args_[i]);
+        pending_pushed_args_.Clear();
+        // callingConv 
+        llvm::Value* call = CallAddress(NULL,
+                                  llvm::CallingConv::X86_64_V8_S4, params,
+                                  LoadFieldOperand(Use(instr->function()),JSFunction::kCodeEntryOffset));
+        llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
+        instr->set_llvm_value(return_val);
+      }
+      //TODO: Implement SafePoint with lazy deopt
+    } else {
+      UNIMPLEMENTED();
+    }
+  }
 }
 
 void LLVMChunkBuilder::DoIsConstructCallAndBranch(HIsConstructCallAndBranch* instr) {
