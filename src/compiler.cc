@@ -549,9 +549,13 @@ OptimizedCompileJob::Status OptimizedCompileJob::OptimizeGraph() {
 
   if (graph_->Optimize(&bailout_reason)) {
     if (!graph_->info()->closure().is_null() &&
-        graph_->info()->closure()->PassesFilter(FLAG_llvm_filter)) {
-      chunk_ = LLVMChunk::NewChunk(graph_);
+      graph_->info()->closure()->PassesFilter(FLAG_llvm_filter)) {
+      // We cant build llvm chunk here if concurrent recompilation is enabled
+      // It must be moved to GenerateCode() function
+      //chunk_ = LLVMChunk::NewChunk(graph_);
       // TODO(llvm): add logging
+      // FIXME(llvm): We actualy need to handle non succeeded cases
+      return SetLastStatus(SUCCEEDED);
     } else {
       chunk_ = LChunk::NewChunk(graph_);
     }
@@ -582,13 +586,19 @@ OptimizedCompileJob::Status OptimizedCompileJob::GenerateCode() {
   DisallowJavascriptExecution no_js(isolate());
   {  // Scope for timer.
     Timer timer(this, &time_taken_to_codegen_);
-    DCHECK(chunk_ != NULL);
+    // DCHECK(chunk_ != NULL);
     DCHECK(graph_ != NULL);
     // Deferred handles reference objects that were accessible during
     // graph creation.  To make sure that we don't encounter inconsistencies
     // between graph creation and code generation, we disallow accessing
     // objects through deferred handles during the latter, with exceptions.
     DisallowDeferredHandleDereference no_deferred_handle_deref;
+    if (!graph_->info()->closure().is_null() &&
+        graph_->info()->closure()->PassesFilter(FLAG_llvm_filter)) {
+      chunk_ = LLVMChunk::NewChunk(graph_);
+    }
+    // FIXME(llvm). chunk can be null, we need to abort if so.
+    DCHECK(chunk_ != NULL);
     Handle<Code> optimized_code = chunk_->Codegen();
     if (optimized_code.is_null()) {
       if (info()->bailout_reason() == kNoReason) {

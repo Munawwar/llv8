@@ -541,13 +541,12 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   DisallowHandleAllocation no_handles;
   DisallowHeapAllocation no_gc;
   graph->DisallowAddingNewValues();
-//  int values = graph->GetMaximumValueID();
+  // int values = graph->GetMaximumValueID();
   CompilationInfo* info = graph->info();
 
   LLVMChunkBuilder builder(info, graph);
   LLVMChunk* chunk = builder.Build().NormalizePhis().Optimize().Create();
   if (chunk == NULL) return NULL;
-
   return chunk;
 }
 
@@ -560,17 +559,18 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   Types::Init(llvm_ir_builder_.get());
   status_ = BUILDING;
 
-//  // If compiling for OSR, reserve space for the unoptimized frame,
-//  // which will be subsumed into this frame.
-//  if (graph()->has_osr()) {
-//    for (int i = graph()->osr()->UnoptimizedFrameSlots(); i > 0; i--) {
-//      chunk()->GetNextSpillIndex(GENERAL_REGISTERS);
-//    }
-//  }
+  // If compiling for OSR, reserve space for the unoptimized frame,
+  // which will be subsumed into this frame.
+  //if (graph()->has_osr()) {
+  //  for (int i = graph()->osr()->UnoptimizedFrameSlots(); i > 0; i--) {
+  //    chunk()->GetNextSpillIndex(GENERAL_REGISTERS);
+  //  }
+  //}
 
   // First param is context (v8, js context) which goes to rsi,
   // second param is the callee's JSFunction object (rdi),
-  // third param is Parameter 0 which is `this`.
+  // third param is Parameter 0 which is `this`, 
+  // forth parame is rbx for detecting osr entry
   int num_parameters = info()->num_parameters() + 4;
 
   std::vector<llvm::Type*> params(num_parameters, Types::tagged);
@@ -580,9 +580,6 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
       module_->getOrInsertFunction(module_->getModuleIdentifier(),
                                    function_type));
 
-  //if (graph_->has_osr()) { // TODO: Delete this comment
-  //  function_ -> osr_reserve = 0; //graph()->osr()->UnoptimizedFrameSlots();
-  // }
   llvm::AttributeSet attr_set = function_->getAttributes();
   // rbp based frame so the runtime can walk the stack as before
   attr_set = attr_set.addAttribute(llvm_context,
