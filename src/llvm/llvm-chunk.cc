@@ -4414,6 +4414,15 @@ void LLVMChunkBuilder::DoMathLog(HUnaryMathOperation* instr) {
   instr->set_llvm_value(log);
 }
 
+void LLVMChunkBuilder::DoMathExp(HUnaryMathOperation* instr) {
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::exp, Types::float64);
+  std::vector<llvm::Value*> params;
+  params.push_back(Use(instr->value()));
+  llvm::Value* exp = __ CreateCall(intrinsic, params);
+  instr->set_llvm_value(exp);
+}
+
 void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
   switch (instr->op()) {
     case kMathAbs:
@@ -4438,8 +4447,11 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
       DoMathLog(instr);
       break;
     }
-    case kMathExp:
-      UNIMPLEMENTED();
+    case kMathExp: {
+      //UNIMPLEMENTED();
+      DoMathExp(instr);
+      break;
+    }
     case kMathSqrt: {
       DoMathSqrt(instr);
       break;
