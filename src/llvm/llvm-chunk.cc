@@ -3346,10 +3346,12 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
 
 void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
   DCHECK(instr->object()->representation().IsTagged());
-  
-  Handle<Object> handle_value = instr->name(); 
-  auto value = MoveHeapObject(handle_value);
-  USE(value);
+
+  llvm::Value* obj = Use(instr->object());
+  llvm::Value* context = Use(instr->context());
+
+  Handle<Object> handle_name = instr->name(); 
+  auto name = MoveHeapObject(handle_name);
   if (FLAG_vector_ics) {
     UNIMPLEMENTED();
   }
@@ -3357,13 +3359,17 @@ void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
   Handle<Code> ic = CodeFactory::LoadICInOptimizedCode(
                         isolate(), NOT_CONTEXTUAL,
                         instr->initialization_state()).code();
+
   // TODO(llvm): RecordSafepointWithLazyDeopt (and reloc info) + MarkAsCall
-  std::vector<llvm::Value*> no_params;
-  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::C,
-                            no_params);
+
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(obj);
+  params.push_back(name);
+  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S5,
+                            params);
   llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
   instr->set_llvm_value(return_val);
-  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
