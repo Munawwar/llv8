@@ -2737,7 +2737,21 @@ void LLVMChunkBuilder::DoCompareMinusZeroAndBranch(HCompareMinusZeroAndBranch* i
 }
 
 void LLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* instr) {
-  UNIMPLEMENTED();
+  //TODO: Test this case. charCodeAt function
+  llvm::Value* cmp = nullptr;
+  if (instr->right()->IsConstant()) {
+    HConstant* constant = HConstant::cast(instr->right());
+    Handle<Object> handle_value = constant->handle(isolate());
+    llvm::Value* obj = MoveHeapObject(handle_value);
+    cmp = __ CreateICmpEQ(Use(instr->left()), obj);
+  } else {
+    cmp = __ CreateICmpEQ(Use(instr->left()), Use(instr->right()));
+  }
+  llvm::BranchInst* branch = __ CreateCondBr(cmp,
+         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+  instr->set_llvm_value(branch);
+
+  // UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
@@ -3078,7 +3092,13 @@ void LLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr) {
+  // UNIMPLEMENTED();
+   if (!instr->value()->type().IsHeapObject()) {
+    //__ JumpIfSmi(input, instr->FalseLabel(chunk()));
+    UNIMPLEMENTED();
+  } 
   UNIMPLEMENTED();
+
 }
 
 void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
