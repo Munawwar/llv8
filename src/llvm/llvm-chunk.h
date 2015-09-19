@@ -626,6 +626,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void DoModByPowerOf2I(HMod* instr);
   void DoModByConstI(HMod* instr);
   void DoMathFloor(HUnaryMathOperation* instr);
+  void DoMathLog(HUnaryMathOperation* instr);
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;

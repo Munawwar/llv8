@@ -4405,6 +4405,15 @@ void LLVMChunkBuilder::DoMathRound(HUnaryMathOperation* instr) {
   instr->set_llvm_value(phi);
 }
 
+void LLVMChunkBuilder::DoMathLog(HUnaryMathOperation* instr) {
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::log, Types::float64);
+  std::vector<llvm::Value*> params;
+  params.push_back(Use(instr->value()));
+  llvm::Value* log = __ CreateCall(intrinsic, params);
+  instr->set_llvm_value(log);
+}
+
 void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
   switch (instr->op()) {
     case kMathAbs:
@@ -4419,13 +4428,16 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
     }
     case kMathRound: {
      // UNIMPLEMENTED();
-     DoMathRound(instr);
-     break;
+      DoMathRound(instr);
+      break;
     }
     case kMathFround:
       UNIMPLEMENTED();
-    case kMathLog:
-      UNIMPLEMENTED();
+    case kMathLog: {
+      //UNIMPLEMENTED();
+      DoMathLog(instr);
+      break;
+    }
     case kMathExp:
       UNIMPLEMENTED();
     case kMathSqrt: {
