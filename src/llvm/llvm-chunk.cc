@@ -1163,9 +1163,6 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   llvm::ArrayRef<llvm::Value*> args (actualParams);
   llvm::CallInst* call_inst = __ CreateCall(casted, args );
   call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
-  // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
-  // It will also fix arguments offset mismatch problem in runtime functions
-  // return value has type i8*
   return call_inst;
 
 }
@@ -3097,12 +3094,15 @@ void LLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr) {
-  // UNIMPLEMENTED();
    if (!instr->value()->type().IsHeapObject()) {
-    //__ JumpIfSmi(input, instr->FalseLabel(chunk()));
-    UNIMPLEMENTED();
-  } 
-  UNIMPLEMENTED();
+     llvm::Value* smi_cond = SmiCheck(Use(instr->value()), false); 
+      __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1))); 
+   }
+   llvm::Value* map = LoadFieldOperand(Use(instr->value()), HeapObject::kMapOffset); 
+   llvm::Value* bitFiledOffset = LoadFieldOperand(map, Map::kBitFieldOffset);
+   llvm::Value* test = __ CreateICmp(llvm::CmpInst::ICMP_EQ, bitFiledOffset, __ getInt64(1 << Map::kIsUndetectable));
+   llvm::Value* result = __ CreateCondBr(test, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+   instr->set_llvm_value(result);
 
 }
 
@@ -4118,18 +4118,18 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
 
 void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   std::vector<llvm::Value*> args;
-  llvm::Value* str = Integer32ToSmi(instr->string());
-  args.push_back(str);
   //TODO : implement non constant case
   if(instr->index()->IsConstant()) {
     llvm::Value* const_index = Integer32ToSmi(instr->index());
     args.push_back(const_index);
   } else {
-    UNIMPLEMENTED(); 
+    llvm::Value* arg_index = Integer32ToSmi(instr->index());
+    args.push_back(arg_index);
   }
+  args.push_back(Use(instr->string()));
   llvm::Value* alloc = CallRuntimeFromDeferred(
       Runtime::kStringCharCodeAtRT, Use(instr->context()), args);
-  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
+  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i32);
   instr->set_llvm_value(alloc_casted);
 }
 
