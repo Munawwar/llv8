@@ -225,8 +225,10 @@ struct Types FINAL : public AllStatic {
    static llvm::Type* float64;
 
    static llvm::PointerType* ptr_i8;
+   static llvm::PointerType* ptr_i16;
    static llvm::PointerType* ptr_i32;
    static llvm::PointerType* ptr_i64;
+   static llvm::PointerType* ptr_float32;
    static llvm::PointerType* ptr_float64;
 
   static void Init(llvm::IRBuilder<>* ir_builder) {
@@ -237,8 +239,10 @@ struct Types FINAL : public AllStatic {
 
     auto address_space = 0;
     ptr_i8 = ir_builder->getInt8PtrTy();
+    ptr_i16 = llvm::PointerType::get(ir_builder->getHalfTy(), address_space);
     ptr_i32 = llvm::PointerType::get(ir_builder->getInt32Ty(), address_space);
     ptr_i64 = llvm::PointerType::get(ir_builder->getInt64Ty(), address_space);
+    ptr_float32 = llvm::PointerType::get(ir_builder->getFloatTy(), address_space);
     ptr_float64 = llvm::PointerType::get(ir_builder->getDoubleTy(),
                                          address_space);
     // TODO(llvm): we should probably switch to i8*
@@ -606,6 +610,8 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void DoDummyUse(HInstruction* instr);
   void DoStoreKeyedFixedArray(HStoreKeyed* value);
   void DoLoadKeyedFixedArray(HLoadKeyed* value);
+  void DoLoadKeyedExternalArray(HLoadKeyed* value);
+  void DoStoreKeyedExternalArray(HStoreKeyed* value);
   void DoLoadKeyedFixedDoubleArray(HLoadKeyed* value);
   void DoStoreKeyedFixedDoubleArray(HStoreKeyed* value); 
   void Retry(BailoutReason reason);
