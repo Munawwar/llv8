@@ -2958,7 +2958,21 @@ void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoCompareMinusZeroAndBranch(HCompareMinusZeroAndBranch* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  Representation rep = instr->value()->representation();
+
+  if (rep.IsDouble()) {
+    llvm::Value* zero = llvm::ConstantFP::get(Types::float64, 0);
+    llvm::Value* not_zero = __ CreateFCmpONE(Use(instr->value()), zero);
+    llvm::BasicBlock* is_zero = NewBlock("Instruction value is zero");
+    __ CreateCondBr(not_zero, Use(instr->SuccessorAt(1)), is_zero);
+    __ SetInsertPoint(is_zero);
+    llvm::Value* cmp = __ CreateFCmpONE(Use(instr->value()), zero);
+    llvm::BranchInst* branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    instr->set_llvm_value(branch);
+  } else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* instr) {
