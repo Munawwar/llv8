@@ -3088,7 +3088,12 @@ void LLVMChunkBuilder::DoIsStringAndBranch(HIsStringAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  llvm::Value* input = Use(instr->value());
+  llvm::Value* is_smi = SmiCheck(input, true);
+  llvm::BranchInst* branch = __ CreateCondBr(is_smi,
+         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+  instr->set_llvm_value(branch);
 }
 
 void LLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr) {
