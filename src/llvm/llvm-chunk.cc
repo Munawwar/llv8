@@ -3108,6 +3108,7 @@ void LLVMChunkBuilder::DoInstanceOfKnownGlobal(HInstanceOfKnownGlobal* instr) {
 }
 
 void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
+  //TODO: Not tested
   Handle<JSFunction> known_function = instr->known_function();
   if (known_function.is_null()) {
     UNIMPLEMENTED();
