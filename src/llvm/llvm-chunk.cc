@@ -2129,7 +2129,43 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 }
 
 void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
-  UNIMPLEMENTED();
+  int arity = instr->argument_count() - 1;
+  CallFunctionFlags flags = instr->function_flags();
+  llvm::Value* context = Use(instr->context());
+  llvm::Value* function = Use(instr->function());
+  llvm::Value* return_val = nullptr;
+  llvm::Value* result = nullptr;
+
+  if (instr->HasVectorAndSlot()) {
+    AllowDeferredHandleDereference vector_structure_check;
+    Handle<TypeFeedbackVector> feedback_vector = instr->feedback_vector();
+    int index = feedback_vector->GetIndex(instr->slot());
+
+    CallICState::CallType call_type =
+        (flags & CALL_AS_METHOD) ? CallICState::METHOD : CallICState::FUNCTION;
+
+    Handle<Code> ic =
+        CodeFactory::CallICInOptimizedCode(isolate(), arity, call_type).code();
+    llvm::Value* vector = MoveHeapObject(feedback_vector);
+    std::vector<llvm::Value*> params;
+    params.push_back(context);
+    params.push_back(function);
+    params.push_back(vector);
+    params.push_back(__ getInt64(index));
+    result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S6,
+                             params);
+    return_val = __ CreatePtrToInt(result, Types::i64);
+  } else {
+    CallFunctionStub stub(isolate(), arity, flags);
+    AllowHandleAllocation allow_handles;
+    std::vector<llvm::Value*> params;
+    params.push_back(context);
+    params.push_back(function);
+    result = CallAddress(stub.GetCode()->instruction_start(), llvm::CallingConv::X86_64_V8,
+                             params);
+    return_val = __ CreatePtrToInt(result, Types::i64);
+  }
+  instr->set_llvm_value(return_val);
 }
 
 void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
@@ -4728,7 +4764,7 @@ void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
 }
 
 void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
