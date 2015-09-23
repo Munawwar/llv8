@@ -2129,6 +2129,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 }
 
 void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
+  //TODO: Not tested
   int arity = instr->argument_count() - 1;
   CallFunctionFlags flags = instr->function_flags();
   llvm::Value* context = Use(instr->context());
@@ -3046,8 +3047,11 @@ void LLVMChunkBuilder::DoHasCachedArrayIndexAndBranch(HHasCachedArrayIndexAndBra
 }
 
 void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* instr) {
+  //FIXME: Possibly incorrect implementation
+  //Do we need "done, near" blocks?
+  UNIMPLEMENTED();
   llvm::Value* input = Use(instr->value());
-  llvm::BasicBlock* done = NewBlock("END OF RECORD WRITE");
+  llvm::BasicBlock* done = NewBlock("END OF RECORD WRITE"); //TODO: Change the names to reflect node
   llvm::BasicBlock* near = NewBlock("Near");
   InstanceType from = instr->from();
   InstanceType to = instr->to();
@@ -3075,6 +3079,7 @@ void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* ins
   __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
   __ SetInsertPoint(done);
 
+  //FIXME: WTF??
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(input, near);
   phi->addIncoming(map, done);
@@ -3289,11 +3294,12 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
+  // TODO: Not tested
   HValue* key = instr->key();
   ElementsKind kind = instr->elements_kind();
   int shift_size = ElementsKindToShiftSize(kind);
   uint32_t inst_offset = instr->base_offset();
-  llvm::Value* gep_0 = nullptr;
+  llvm::Value* gep_0 = nullptr; //FIXME: Change the name
   llvm::Value* casted_address = nullptr;
   llvm::Value* load = nullptr;
   
@@ -3309,7 +3315,7 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
      llvm::Value* scale = nullptr;
      llvm::Value* offset = nullptr;
      if (key->representation().IsInteger32()) {
-       scale = __ getInt32(8);
+       scale = __ getInt32(8); //TODO ScaleFactor
        offset = __ getInt32(inst_offset);
      } else {
        scale = __ getInt64(8);
@@ -3993,10 +3999,11 @@ void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
+  //TODO: Not tested
   ElementsKind elements_kind = instr->elements_kind();
   int shift_size = ElementsKindToShiftSize(elements_kind);
   uint32_t inst_offset = instr->base_offset();
-  llvm::Value* gep_0 = nullptr;
+  llvm::Value* gep_0 = nullptr; //TODO: Change mame
   llvm::Value* casted_address = nullptr;
   llvm::Value* store = nullptr;
   HValue* key = instr->key();
@@ -4022,7 +4029,7 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
        scale = __ getInt32(8);
        offset = __ getInt32(inst_offset);
      } else {
-       scale = __ getInt64(8);
+       scale = __ getInt64(8); //TODO: Scale_factor
        offset = __ getInt64(inst_offset);
      }
      llvm::Value* mul = __ CreateMul(lkey, scale);
