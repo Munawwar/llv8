@@ -3010,7 +3010,39 @@ void LLVMChunkBuilder::DoHasCachedArrayIndexAndBranch(HHasCachedArrayIndexAndBra
 }
 
 void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* input = Use(instr->value());
+  llvm::BasicBlock* done = NewBlock("END OF RECORD WRITE");
+  llvm::BasicBlock* near = NewBlock("Near");
+  InstanceType from = instr->from();
+  InstanceType to = instr->to();
+  llvm::CmpInst::Predicate P = llvm::CmpInst::ICMP_EQ;
+ 
+  if (!instr->value()->type().IsHeapObject()) {
+    llvm::Value* smi_cond = SmiCheck(input);
+    __ CreateCondBr(smi_cond, done, near);
+    __ SetInsertPoint(near);
+  }
+  
+  llvm::Value* map = LoadFieldOperand(input, HeapObject::kMapOffset);
+  auto imm = static_cast<int8_t>((from == FIRST_TYPE ? to : from));  
+  DCHECK(from == to || to == LAST_TYPE);
+
+  if (from == to) {
+    P = llvm::CmpInst::ICMP_EQ;
+  } else if (to == LAST_TYPE) {
+    P = llvm::CmpInst::ICMP_UGE;
+  } else if (from == FIRST_TYPE) {
+    P = llvm::CmpInst::ICMP_ULE;
+  }
+
+  llvm::Value* cmp = __ CreateICmp(P, LoadFieldOperand(map, Map::kInstanceTypeOffset), __ getInt64(imm));
+  __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+  __ SetInsertPoint(done);
+
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(input, near);
+  phi->addIncoming(map, done);
+  instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::DoInnerAllocatedObject(HInnerAllocatedObject* instr) {
