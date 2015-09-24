@@ -3047,19 +3047,16 @@ void LLVMChunkBuilder::DoHasCachedArrayIndexAndBranch(HHasCachedArrayIndexAndBra
 }
 
 void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* instr) {
-  //FIXME: Possibly incorrect implementation
-  //Do we need "done, near" blocks?
-  UNIMPLEMENTED();
   llvm::Value* input = Use(instr->value());
-  llvm::BasicBlock* done = NewBlock("END OF RECORD WRITE"); //TODO: Change the names to reflect node
-  llvm::BasicBlock* near = NewBlock("Near");
+  llvm::BasicBlock* near = NewBlock("HasInstanceTypeAndBranch Near");
   InstanceType from = instr->from();
   InstanceType to = instr->to();
-  llvm::CmpInst::Predicate P = llvm::CmpInst::ICMP_EQ;
+  llvm::CmpInst::Predicate cond = llvm::CmpInst::ICMP_EQ;
+  llvm::BranchInst* branch = nullptr;
  
   if (!instr->value()->type().IsHeapObject()) {
     llvm::Value* smi_cond = SmiCheck(input);
-    __ CreateCondBr(smi_cond, done, near);
+    branch = __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), near);
     __ SetInsertPoint(near);
   }
   
@@ -3068,22 +3065,17 @@ void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* ins
   DCHECK(from == to || to == LAST_TYPE);
 
   if (from == to) {
-    P = llvm::CmpInst::ICMP_EQ;
+    cond = llvm::CmpInst::ICMP_EQ;
   } else if (to == LAST_TYPE) {
-    P = llvm::CmpInst::ICMP_UGE;
+    cond = llvm::CmpInst::ICMP_UGE;
   } else if (from == FIRST_TYPE) {
-    P = llvm::CmpInst::ICMP_ULE;
+    cond = llvm::CmpInst::ICMP_ULE;
   }
 
-  llvm::Value* cmp = __ CreateICmp(P, LoadFieldOperand(map, Map::kInstanceTypeOffset), __ getInt64(imm));
-  __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-  __ SetInsertPoint(done);
+  llvm::Value* cmp = __ CreateICmp(cond, LoadFieldOperand(map, Map::kInstanceTypeOffset), __ getInt64(imm));
+  branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
 
-  //FIXME: WTF??
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
-  phi->addIncoming(input, near);
-  phi->addIncoming(map, done);
-  instr->set_llvm_value(phi);
+  instr->set_llvm_value(branch);
 }
 
 void LLVMChunkBuilder::DoInnerAllocatedObject(HInnerAllocatedObject* instr) {
