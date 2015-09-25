@@ -4526,7 +4526,41 @@ void LLVMChunkBuilder::DoTypeof(HTypeof* instr) {
 }
 
 void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* input = Use(instr->value());
+  Factory* factory = isolate()->factory();
+
+  Handle<String> type_name = instr->type_literal();
+  if (String::Equals(type_name, factory->number_string())) {
+    UNIMPLEMENTED();
+  } else if (String::Equals(type_name, factory->string_string())) {
+    llvm::BasicBlock* not_smi = NewBlock("DoTypeofIsAndBranch NotSmi");
+    llvm::BasicBlock* continue_ = NewBlock("DoTypeofIsAndBranch continue");
+    llvm::Value* smi_cond = SmiCheck(input);
+    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
+    __ SetInsertPoint(not_smi);
+
+    llvm::Value* map = LoadFieldOperand(input, HeapObject::kMapOffset);
+    auto imm = static_cast<int8_t>(FIRST_NONSTRING_TYPE);
+    llvm::Value* cond = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset), __ getInt64(imm));
+    __ CreateCondBr(cond, Use(instr->SuccessorAt(1)), continue_);
+    __ SetInsertPoint(continue_);
+    llvm::Value* test = __ CreateAnd(LoadFieldOperand(input, Map::kBitFieldOffset), __ getInt64(1 << Map::kIsUndetectable));
+    llvm::Value* cond_zero = __ CreateICmpEQ(test, __ getInt64(0));
+    llvm::BranchInst* branch = __ CreateCondBr(cond_zero, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(0)));
+    instr->set_llvm_value(branch);
+  } else if (String::Equals(type_name, factory->symbol_string())) {
+    UNIMPLEMENTED();
+  } else if (String::Equals(type_name, factory->boolean_string())) {
+    UNIMPLEMENTED();
+  } else if (String::Equals(type_name, factory->undefined_string())) {
+    UNIMPLEMENTED();
+  } else if (String::Equals(type_name, factory->function_string())) {
+    UNIMPLEMENTED();
+  } else if (String::Equals(type_name, factory->object_string())) {
+    UNIMPLEMENTED();
+  } else {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
