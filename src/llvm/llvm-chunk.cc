@@ -4616,16 +4616,17 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   llvm::Value* input = Use(instr->value());
   Factory* factory = isolate()->factory();
   llvm::BasicBlock* not_smi = NewBlock("DoTypeofIsAndBranch NotSmi");
-  //llvm::BranchInst* branch = nullptr;
+  llvm::BranchInst* branch = nullptr;
   Handle<String> type_name = instr->type_literal();
   if (String::Equals(type_name, factory->number_string())) {
     llvm::Value* smi_cond = SmiCheck(input);
-    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(0)), not_smi);
+    branch = __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(0)), not_smi);
     __ SetInsertPoint(not_smi);
 
     llvm::Value* root = LoadFieldOperand(input, HeapObject::kMapOffset);
     llvm::Value* cmp_root = CompareRoot(root, Heap::kHeapNumberMapRootIndex);
-    __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    branch = __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    instr->set_llvm_value(branch);
   } else if (String::Equals(type_name, factory->string_string())) {
     llvm::BasicBlock* continue_ = NewBlock("DoTypeofIsAndBranch continue");
     llvm::Value* smi_cond = SmiCheck(input);
@@ -4640,7 +4641,8 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
     llvm::Value* test = __ CreateAnd(LoadFieldOperand(input, Map::kBitFieldOffset), 
                                      __ getInt64(1 << Map::kIsUndetectable));
     llvm::Value* cond_zero = __ CreateICmpEQ(test, __ getInt64(0));
-    __ CreateCondBr(cond_zero, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    branch = __ CreateCondBr(cond_zero, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+    instr->set_llvm_value(branch);
   } else if (String::Equals(type_name, factory->symbol_string())) {
     UNIMPLEMENTED();
   } else if (String::Equals(type_name, factory->boolean_string())) {
