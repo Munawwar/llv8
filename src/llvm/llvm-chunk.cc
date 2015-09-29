@@ -2714,33 +2714,41 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
     __ CreateCondBr(cmp, Use(instr->SuccessorAt(1)), continue_);
     __ SetInsertPoint(continue_);
   }
-
+  
   llvm::BasicBlock* loop = NewBlock("DoClassOfTestAndBranch loop");
-  llvm::BasicBlock* done = NewBlock("DoClassOfTestAndBranch done");
   llvm::BasicBlock* near = NewBlock("DoClassOfTestAndBranch loop near");
   llvm::BasicBlock* equal = NewBlock("DoClassOfTestAndBranch loop type equal");
-  llvm::BasicBlock* insert_block = __ GetInsertBlock();
+  llvm::BasicBlock* done = NewBlock("DoClassOfTestAndBranch done");
 
   llvm::Value* map = LoadFieldOperand(temp, Map::kConstructorOrBackPointerOffset);
+
+  __ CreateBr(loop);
   __ SetInsertPoint(loop);
+  llvm::Value* zero = __ getInt64(0);
   llvm::Value* map_is_smi = SmiCheck(map);
   __ CreateCondBr(map_is_smi, done, near);
   __ SetInsertPoint(near);
+
   llvm::Value* other_map = LoadFieldOperand(map, HeapObject::kMapOffset);
   llvm::Value* scratch = LoadFieldOperand(other_map, Map::kInstanceTypeOffset);
-  llvm::Value* type_cmp = __ CreateICmpNE(scratch,__ getInt64(static_cast<int8_t>(MAP_TYPE)));
+  llvm::Value* type_cmp = __ CreateICmpNE(scratch, __ getInt64(static_cast<int8_t>(MAP_TYPE)));
   __ CreateCondBr(type_cmp, done, equal);
   __ SetInsertPoint(equal);
-  map = LoadFieldOperand(map, Map::kConstructorOrBackPointerOffset);
+
+  llvm::Value*  new_map = LoadFieldOperand(map, Map::kConstructorOrBackPointerOffset);
+  USE(new_map);
   __ CreateBr(loop);
   __ SetInsertPoint(done);
-  
+
+  llvm::PHINode* phi_instance = __ CreatePHI(Types::i64, 2);
+  phi_instance->addIncoming(zero, loop);
+  phi_instance->addIncoming(scratch, near);
+
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
-  phi->addIncoming(map, insert_block);
+  phi->addIncoming(map, loop);
   phi->addIncoming(other_map, near);
-  
-  
-  llvm::Value* CmpInstance = __ CreateICmpNE(LoadFieldOperand(scratch, Map::kInstanceTypeOffset),
+    
+  llvm::Value* CmpInstance = __ CreateICmpNE(LoadFieldOperand(phi_instance, Map::kInstanceTypeOffset),
                                             __ getInt64(static_cast<int8_t>(JS_FUNCTION_TYPE)));
   llvm::BasicBlock* InstanceNear = NewBlock("DoClassOfTestAndBranch near CmpInstance");
   if (String::Equals(class_name, isolate()->factory()->Object_string())) {
@@ -3637,7 +3645,8 @@ void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* load_r = LoadRoot(instr->index());
+  instr->set_llvm_value(load_r);
 }
 
 void LLVMChunkBuilder::DoMapEnumLength(HMapEnumLength* instr) {
@@ -4607,19 +4616,18 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   llvm::Value* input = Use(instr->value());
   Factory* factory = isolate()->factory();
   llvm::BasicBlock* not_smi = NewBlock("DoTypeofIsAndBranch NotSmi");
-  llvm::BasicBlock* continue_ = NewBlock("DoTypeofIsAndBranch continue");
-  llvm::BranchInst* branch = nullptr;
+  //llvm::BranchInst* branch = nullptr;
   Handle<String> type_name = instr->type_literal();
   if (String::Equals(type_name, factory->number_string())) {
     llvm::Value* smi_cond = SmiCheck(input);
-    branch = __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(0)), not_smi);
+    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(0)), not_smi);
     __ SetInsertPoint(not_smi);
 
     llvm::Value* root = LoadFieldOperand(input, HeapObject::kMapOffset);
     llvm::Value* cmp_root = CompareRoot(root, Heap::kHeapNumberMapRootIndex);
-    branch = __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-    instr->set_llvm_value(branch);
+    __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
   } else if (String::Equals(type_name, factory->string_string())) {
+    llvm::BasicBlock* continue_ = NewBlock("DoTypeofIsAndBranch continue");
     llvm::Value* smi_cond = SmiCheck(input);
     __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
     __ SetInsertPoint(not_smi);
@@ -4632,8 +4640,7 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
     llvm::Value* test = __ CreateAnd(LoadFieldOperand(input, Map::kBitFieldOffset), 
                                      __ getInt64(1 << Map::kIsUndetectable));
     llvm::Value* cond_zero = __ CreateICmpEQ(test, __ getInt64(0));
-    branch = __ CreateCondBr(cond_zero, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-    instr->set_llvm_value(branch);
+    __ CreateCondBr(cond_zero, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
   } else if (String::Equals(type_name, factory->symbol_string())) {
     UNIMPLEMENTED();
   } else if (String::Equals(type_name, factory->boolean_string())) {
