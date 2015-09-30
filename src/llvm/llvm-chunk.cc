@@ -2204,6 +2204,8 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
     params.push_back(Use(instr->OperandAt(i)));
   params.push_back(arity_val);
   params.push_back(load_r);
+  for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+      params.push_back(pending_pushed_args_[i]);
   pending_pushed_args_.Clear();
   llvm::Value* call = CallAddress(code->instruction_start(),
                                   llvm::CallingConv::X86_64_V8_S3, params);
