@@ -2933,7 +2933,7 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
     UNIMPLEMENTED();
   }
   // we don't support lazy yet, since we have no test cases
-  //DCHECK(type == Deoptimizer::EAGER);
+  DCHECK(type == Deoptimizer::EAGER);
   auto reason = instr->reason();
   USE(reason);
   bool negate_condition = false;
