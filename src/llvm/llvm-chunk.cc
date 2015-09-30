@@ -691,7 +691,12 @@ std::vector<llvm::Value*> LLVMChunkBuilder::GetSafepointValues(
 void LLVMChunkBuilder::DoDummyUse(HInstruction* instr) {
   Representation r = instr->representation();
   llvm::Type* type = GetLLVMType(r);
-  auto dummy_constant = __ getInt64(0xdead);
+  llvm::Value* dummy_constant = nullptr;
+  if (r.IsInteger32()) {
+    dummy_constant = __ getInt32(0xdead);
+  } else {
+    dummy_constant = __ getInt64(0xdead);
+  }
   auto casted_dummy_constant = __ CreateBitOrPointerCast(dummy_constant, type);
   for (int i = 1; i < instr->OperandCount(); ++i) {
     if (instr->OperandAt(i)->IsControlInstruction()) continue;
@@ -2153,6 +2158,9 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     params.push_back(function);
     params.push_back(vector);
     params.push_back(__ getInt64(index));
+    for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+      params.push_back(pending_pushed_args_[i]);
+    pending_pushed_args_.Clear();
     result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S6,
                              params);
     return_val = __ CreatePtrToInt(result, Types::i64);
@@ -2162,6 +2170,9 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     std::vector<llvm::Value*> params;
     params.push_back(context);
     params.push_back(function);
+    for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+      params.push_back(pending_pushed_args_[i]);
+    pending_pushed_args_.Clear();
     result = CallAddress(stub.GetCode()->instruction_start(), llvm::CallingConv::X86_64_V8,
                              params);
     return_val = __ CreatePtrToInt(result, Types::i64);
@@ -2170,6 +2181,8 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
 }
 
 void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
+  // TODO: not tested
+  // FIXME: don't we need pending_push_args ?
   int arity = instr->argument_count()-1;
   llvm::Value* arity_val = __ getInt64(arity);
   if (arity == 0) {
@@ -2643,6 +2656,7 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
     llvm::Value* and_result = __ CreateAnd(casted, __ getInt64(kSmiTagMask));
     llvm::Value* compare_result = __ CreateICmpEQ(and_result, __ getInt64(0));
     DeoptimizeIf(compare_result, deopt_on_equal, success);
+    pending_pushed_args_.Clear();
     // Don't let the success BB go stray (__ SetInsertPoint).
     
   } else {
@@ -2910,7 +2924,7 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
     UNIMPLEMENTED();
   }
   // we don't support lazy yet, since we have no test cases
-  DCHECK(type == Deoptimizer::EAGER);
+  //DCHECK(type == Deoptimizer::EAGER);
   auto reason = instr->reason();
   USE(reason);
   bool negate_condition = false;
