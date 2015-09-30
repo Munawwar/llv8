@@ -2033,9 +2033,16 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
                                                true_target, false_target);
     instr->set_llvm_value(branch);
   } else if (r.IsTagged()) {
-    if (type.IsBoolean() || type.IsSmi() || type.IsJSArray()
-        || type.IsHeapNumber() || type.IsString()) UNIMPLEMENTED();
-    else {
+    llvm::Value* value = Use(instr->value());
+    if (type.IsBoolean()) {
+      DCHECK(!info()->IsStub());
+      llvm::Value* cmp_root = CompareRoot(value, Heap::kTrueValueRootIndex);
+      llvm::BranchInst* branch =  __ CreateCondBr(cmp_root, true_target, false_target);
+      instr->set_llvm_value(branch);
+    } else if (type.IsSmi() || type.IsJSArray()
+              || type.IsHeapNumber() || type.IsString()) {
+      UNIMPLEMENTED();
+    } else {
       ToBooleanStub::Types expected = instr->expected_input_types();
       BranchTagged(instr, expected, true_target, false_target);
     }
@@ -3257,7 +3264,7 @@ void LLVMChunkBuilder::DoIsStringAndBranch(HIsStringAndBranch* instr) {
 void LLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
   //UNIMPLEMENTED();
   llvm::Value* input = Use(instr->value());
-  llvm::Value* is_smi = SmiCheck(input, true);
+  llvm::Value* is_smi = SmiCheck(input);
   llvm::BranchInst* branch = __ CreateCondBr(is_smi,
          Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
   instr->set_llvm_value(branch);
