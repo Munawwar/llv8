@@ -2232,8 +2232,49 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
   if (arity == 0) {
     UNIMPLEMENTED();
   } else if (arity == 1) {
+    llvm::BasicBlock* done = NewBlock("CALL NEW ARRAY END");
     if (IsFastPackedElementsKind(kind)) {
-      UNIMPLEMENTED();
+      llvm::BasicBlock* packed_case = NewBlock("CALL NEW ARRAY PACKED CASE");
+      llvm::BasicBlock* packed_continue = NewBlock("PACKED CASE CONTINUE");
+      llvm::Value* first_arg = pending_pushed_args_[0];
+      llvm::Value* cmp_eq = __ CreateICmpEQ(first_arg, __ getInt64(0));
+      __ CreateCondBr(cmp_eq, packed_case, packed_continue);
+      __ SetInsertPoint(packed_continue);
+      ElementsKind holey_kind = GetHoleyElementsKind(kind);
+      ArraySingleArgumentConstructorStub stub(isolate(),
+                                              holey_kind,
+                                              override_mode);
+      Handle<Code> code = Handle<Code>::null();
+      {
+        AllowHandleAllocation allow_handles;
+        AllowHeapAllocation allow_heap;
+        code = stub.GetCode();
+        // FIXME(llvm,gc): respect reloc info mode...
+      }
+      std::vector<llvm::Value*> params;
+      params.push_back(GetContext());
+      for (int i = 1; i < instr->OperandCount(); ++i)
+        params.push_back(Use(instr->OperandAt(i)));
+      params.push_back(arity_val);
+      params.push_back(load_root);
+      for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+        params.push_back(pending_pushed_args_[i]);
+      pending_pushed_args_.Clear();
+      std::string arg_offset = std::to_string(2 * 8);
+      std::string asm_string1 = "sub $$";
+      std::string asm_string2 = ", %rsp";
+      std::string final_strig = asm_string1 + arg_offset + asm_string2;
+      llvm::FunctionType* inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(),
+                                                               false);
+      llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
+      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
+      __ CreateCall(inline_asm);
+      llvm::Value* call = CallAddress(code->instruction_start(),
+                                    llvm::CallingConv::X86_64_V8_S3, params);
+      llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
+      instr->set_llvm_value(return_val);
+      __ CreateBr(done);
+      __ SetInsertPoint(packed_case);
     }
     ArraySingleArgumentConstructorStub stub(isolate(), kind, override_mode);
     Handle<Code> code = Handle<Code>::null();
@@ -2265,6 +2306,8 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
                                     llvm::CallingConv::X86_64_V8_S3, params);
     llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
     instr->set_llvm_value(return_val);
+    __ CreateBr(done);
+    __ SetInsertPoint(done);
   }
 }
 
