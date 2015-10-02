@@ -630,8 +630,13 @@ void LLVMChunkBuilder::ResolvePhis(HBasicBlock* block) {
     for (int j = 0; j < phi->OperandCount(); ++j) {
       HValue* operand = phi->OperandAt(j);
       auto llvm_phi = static_cast<llvm::PHINode*>(phi->llvm_value());
+      if (operand->EmitAtUses() && operand->llvm_value() == nullptr) {
+        // We need this, otherwise will insert Use(operand) in the last block
+        __ SetInsertPoint(operand->block()->llvm_end_basic_block());
+      }
       llvm_phi->addIncoming(Use(operand),
                             operand->block()->llvm_end_basic_block());
+      
     }
   }
 }
@@ -967,6 +972,7 @@ llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
       Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
       llvm::Value* value = Move(new_cell, RelocInfo::CELL);
       llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
+      
       return  __ CreateLoad(ptr);
     } else {
       return Move(object, RelocInfo::EMBEDDED_OBJECT);
@@ -1676,7 +1682,14 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
                                                      asm_string,
                                                      constraints,
                                                      has_side_effects);
-  return __ CreateCall(inline_asm, __ getInt64(intptr_value));
+  llvm::BasicBlock* current_block = __ GetInsertBlock();
+  auto last_instr = current_block-> getTerminator();
+  // if block has terminator we must insert before instruction it
+  if (!last_instr) 
+    return __ CreateCall(inline_asm, __ getInt64(intptr_value));
+  auto call = llvm::CallInst::Create(inline_asm, __ getInt64(intptr_value), "realoc", last_instr);
+  //call->insertBefore(last_instr);
+  return call;
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
@@ -2991,7 +3004,7 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
     UNIMPLEMENTED();
   }
   // we don't support lazy yet, since we have no test cases
-  DCHECK(type == Deoptimizer::EAGER);
+  // DCHECK(type == Deoptimizer::EAGER);
   auto reason = instr->reason();
   USE(reason);
   bool negate_condition = false;
