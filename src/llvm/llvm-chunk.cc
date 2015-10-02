@@ -2671,6 +2671,12 @@ void LLVMChunkBuilder::AddStabilityDependency(Handle<Map> map) {
   // TODO(llvm): stability_dependencies_ unused yet
 }
 
+void LLVMChunkBuilder::AddDeprecationDependency(Handle<Map> map) {
+  if (!map->is_stable()) return Retry(kMapBecameDeprecated);
+  chunk()->AddDeprecationDependency(map);
+  // TODO(llvm): stability_dependencies_ unused yet
+}
+
 void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
   if (instr->IsStabilityCheck()) {
     const UniqueSet<Map>* maps = instr->maps();
@@ -2952,6 +2958,14 @@ void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
 
 void LLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
   UNIMPLEMENTED();
+  llvm::Value* result = Use(instr->hi());
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+      llvm::Intrinsic::x86_mmx_psll_q, Types::float64);
+  llvm::Value* params[] = { result, __ getInt32(32) };
+  llvm::Value* call = __ CreateCall(intrinsic, params);
+  llvm::Value* scratch = Use(instr->lo());
+  result = __ CreateOr(call, scratch);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoDateField(HDateField* instr) {
@@ -4440,7 +4454,16 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   }
 
   if (instr->has_transition()) {
-    UNIMPLEMENTED();
+    //UNIMPLEMENTED();
+    Handle<Map> transition = instr->transition_map();
+    AddDeprecationDependency(transition);
+    if (!instr->NeedsWriteBarrierForMap()) {
+      llvm::Value* store_address = FieldOperand(Use(instr->object()),HeapObject::kMapOffset);
+      llvm::Value* address = __ getInt64(reinterpret_cast<uint64_t>(transition.location()));
+      __ CreateStore(store_address, address);
+    } else {
+      UNIMPLEMENTED();
+    }
   }
 
   // Do the store.

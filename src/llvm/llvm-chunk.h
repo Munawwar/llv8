@@ -616,6 +616,7 @@ class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
   void DoStoreKeyedFixedDoubleArray(HStoreKeyed* value); 
   void Retry(BailoutReason reason);
   void AddStabilityDependency(Handle<Map> map);
+  void AddDeprecationDependency(Handle<Map> map);
   void CallStackMap(int stackmap_id, llvm::Value* value);
   void CallStackMap(int stackmap_id, std::vector<llvm::Value*>& values);
   llvm::CallInst* CallPatchPoint(int64_t stackmap_id,

@@ -31,6 +31,13 @@ class LowChunk : public ZoneObject {
       stability_dependencies_.insert(map);
     }
 
+    void AddDeprecationDependency(Handle<Map> map) {
+      DCHECK(map->is_deprecated());
+      if (!map->CanBeDeprecated()) return;
+      DCHECK(!info()->IsStub());
+      deprecation_dependencies_.insert(map);
+    }
+
   protected:
     using MapLess = std::less<Handle<Map> >;
     using MapAllocator = zone_allocator<Handle<Map> >;
@@ -39,6 +46,7 @@ class LowChunk : public ZoneObject {
     LowChunk(CompilationInfo* info, HGraph* graph);
 
     MapSet stability_dependencies_;
+    MapSet deprecation_dependencies_;
 
   private:
     CompilationInfo* info_;
