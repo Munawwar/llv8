@@ -11187,9 +11187,11 @@ HValue* HGraphBuilder::BuildBinaryOperation(
         break;
       case Token::BIT_OR: {
         HValue *operand, *shift_amount;
+        bool is_llvm = !graph()->info()->closure().is_null() &&
+             graph()->info()->closure()->PassesFilter(FLAG_llvm_filter);
         if (left_type->Is(Type::Signed32()) &&
             right_type->Is(Type::Signed32()) &&
-            MatchRotateRight(left, right, &operand, &shift_amount)) {
+            MatchRotateRight(left, right, &operand, &shift_amount) && !is_llvm) {
           instr = AddUncasted<HRor>(operand, shift_amount, strength);
         } else {
           instr = AddUncasted<HBitwise>(op, left, right, strength);
