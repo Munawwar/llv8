@@ -2117,8 +2117,7 @@ void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
 }
 
 void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
-  // Don't know what this is yet.
-  if (instr->pass_argument_count()) UNIMPLEMENTED();
+
   // Code that follows relies on this assumption
   // (well, maybe it's not, we haven't seen a test case yet)
   if (!instr->function()->IsConstant()) UNIMPLEMENTED();
@@ -2133,14 +2132,20 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
                                          JSFunction::kContextOffset,
                                          "target_context");
 
-  auto argument_count = instr->argument_count() + 3; // rsi, rdi, rbx
+  int actual_arg_count = 3;
+  if (instr->pass_argument_count())
+    actual_arg_count = 4; //rax
+  auto argument_count = instr->argument_count() + actual_arg_count; // rsi, rdi, rbx
 
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   args[0] = target_context;
   args[1] = function_object;
   args[2] = __ getInt64(0);
-  DCHECK(pending_pushed_args_.length() + 3 == argument_count);
+  if (instr->pass_argument_count()) {
+    args[3] = __ getInt64(instr->argument_count());
+  }
+  DCHECK(pending_pushed_args_.length() + actual_arg_count == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
   for (int i = 0; i < pending_pushed_args_.length(); i++) {
     args[argument_count - 1 - i] = pending_pushed_args_[i];
