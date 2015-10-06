@@ -3676,9 +3676,9 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     instr->set_llvm_value(result);
     return;
   }
-
-  if(!access.IsInobject()) {
-    UNIMPLEMENTED();
+  llvm::Value* obj_arg = Use(instr->object());
+  if (!access.IsInobject()) {
+    obj_arg = LoadFieldOperand(obj_arg, JSObject::kPropertiesOffset);
   }
 
   Representation representation = access.representation();
@@ -3696,7 +3696,7 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     representation = Representation::Integer32();
   }
  
-  llvm::Value* obj = FieldOperand(Use(instr->object()), offset);
+  llvm::Value* obj = FieldOperand(obj_arg, offset);
   if (instr->representation().IsInteger32()) {
     llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i32);
     llvm::Value* res = __ CreateLoad(casted_address);
@@ -4431,8 +4431,8 @@ void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
 void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   Representation representation = instr->representation();
 
-   HObjectAccess access = instr->access();
-   int offset = access.offset() - 1;
+  HObjectAccess access = instr->access();
+  int offset = access.offset() - 1;
 
   if (access.IsExternalMemory()) { 
     UNIMPLEMENTED();
@@ -4462,9 +4462,9 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   }
 
   // Do the store.
-  // Register write_register = object;
+  llvm::Value* obj_arg = Use(instr->object());
   if (!access.IsInobject()) {
-    UNIMPLEMENTED();
+    obj_arg = LoadFieldOperand(obj_arg, JSObject::kPropertiesOffset);
   }
 
   if (representation.IsSmi() && SmiValuesAre32Bits() &&
@@ -4479,7 +4479,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   } else {
     HValue* hValue = instr->value();
     if (hValue->representation().IsInteger32()) {
-      llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
+      llvm::Value* store_address = ConstructAddress(obj_arg, offset);
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
                                                      Types::ptr_i32);
       llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i32);
