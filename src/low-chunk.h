@@ -32,7 +32,7 @@ class LowChunk : public ZoneObject {
     }
 
     void AddDeprecationDependency(Handle<Map> map) {
-      DCHECK(map->is_deprecated());
+      DCHECK(!map->is_deprecated());
       if (!map->CanBeDeprecated()) return;
       DCHECK(!info()->IsStub());
       deprecation_dependencies_.Add(map, zone());

@@ -6,6 +6,7 @@
 #include "src/code-factory.h"
 #include "src/disassembler.h"
 #include "src/hydrogen-osr.h"
+#include "src/ic/ic.h"
 #include "llvm-chunk.h"
 #include "llvm-passes.h"
 #include <llvm/IR/InlineAsm.h>
@@ -2700,7 +2701,7 @@ void LLVMChunkBuilder::AddStabilityDependency(Handle<Map> map) {
 }
 
 void LLVMChunkBuilder::AddDeprecationDependency(Handle<Map> map) {
-  if (!map->is_stable()) return Retry(kMapBecameDeprecated);
+  if (map->is_deprecated()) return Retry(kMapBecameDeprecated);
   chunk()->AddDeprecationDependency(map);
   // TODO(llvm): stability_dependencies_ unused yet
 }
@@ -4444,15 +4445,19 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   }
 
   if (instr->has_transition()) {
-    //UNIMPLEMENTED();
     Handle<Map> transition = instr->transition_map();
     AddDeprecationDependency(transition);
     if (!instr->NeedsWriteBarrierForMap()) {
+      UNIMPLEMENTED();
+      // TODO : Maybe MoveHeapObj
       llvm::Value* store_address = FieldOperand(Use(instr->object()),HeapObject::kMapOffset);
       llvm::Value* address = __ getInt64(reinterpret_cast<uint64_t>(transition.location()));
       __ CreateStore(store_address, address);
     } else {
-      UNIMPLEMENTED();
+      llvm::Value* scratch = MoveHeapObject(transition);
+      llvm::Value* obj = LoadFieldOperand(Use(instr->object()), HeapObject::kMapOffset);
+      obj = scratch;
+      RecordWriteForMap(obj, scratch);
     }
   }
 
@@ -4505,7 +4510,30 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
-  UNIMPLEMENTED();
+  //UNIMPLEMENTED();
+  // Calling convention change
+  llvm::Value* context = Use(instr->context());
+  llvm::Value* object = Use(instr->object());
+  llvm::Value* value = Use(instr->value());
+  //Handle<String> str = instr->name();
+  llvm::Value* name_reg = MoveHeapObject(instr->name());
+  AllowHandleAllocation allow_handles_allocation;
+  Handle<Code> ic =
+      StoreIC::initialize_stub(isolate(), instr->language_mode(),
+                               instr->initialization_state());
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(object);
+  params.push_back(value);
+  params.push_back(name_reg);
+  //params.push_back(value);
+  for (int i = pending_pushed_args_.length() - 1; i >= 0; i--)
+    params.push_back(pending_pushed_args_[i]);
+  pending_pushed_args_.Clear();
+  llvm::Value* call = CallAddress(ic->instruction_start(),
+                                  llvm::CallingConv::X86_64_V8_S4, params);
+  llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
+  instr->set_llvm_value(return_val);
 }
 
 void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
