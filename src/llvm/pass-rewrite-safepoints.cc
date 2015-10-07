@@ -14,9 +14,9 @@ namespace internal {
 // All of these methods should return true if they modified the program,
 // or false if they didn’t.
 
-class RewriteSafepointsPass : public llvm::FunctionPass {
+class AppendLivePointersToSafepointsPass : public llvm::FunctionPass {
  public:
-  RewriteSafepointsPass(std::set<llvm::Value*>&);
+  AppendLivePointersToSafepointsPass(std::set<llvm::Value*>&);
   bool runOnFunction(llvm::Function& function) override;
   void getAnalysisUsage(llvm::AnalysisUsage& analysis_usage) const override;
 
@@ -27,9 +27,10 @@ class RewriteSafepointsPass : public llvm::FunctionPass {
   ValueSet& gc_collected_pointers_;
 };
 
-char RewriteSafepointsPass::ID = 0;
+char AppendLivePointersToSafepointsPass::ID = 0;
 
-RewriteSafepointsPass::RewriteSafepointsPass(ValueSet& pointers)
+AppendLivePointersToSafepointsPass::AppendLivePointersToSafepointsPass(
+    ValueSet& pointers)
     : FunctionPass(ID),
       gc_collected_pointers_(pointers) {}
 
@@ -419,7 +420,7 @@ static bool InsertParsePoints(
   return !records.empty();
 }
 
-bool RewriteSafepointsPass::runOnFunction(llvm::Function& function) {
+bool AppendLivePointersToSafepointsPass::runOnFunction(llvm::Function& function) {
   // FIXME(llvm):
   // 1. First make sure there are no unreachable safepoints.
   // We should either run DCE before this pass or delete them ourselves
@@ -440,16 +441,17 @@ bool RewriteSafepointsPass::runOnFunction(llvm::Function& function) {
                            gc_collected_pointers_);
 }
 
-void RewriteSafepointsPass::getAnalysisUsage(
+void AppendLivePointersToSafepointsPass::getAnalysisUsage(
     llvm::AnalysisUsage& analysis_usage) const {
   analysis_usage.addRequired<llvm::DominatorTreeWrapperPass>();
 //  analysis_usage.addRequired<llvm::TargetTransformInfoWrapperPass>();
 }
 
-llvm::FunctionPass* createRewriteSafepointsPass(ValueSet& pointers) {
+llvm::FunctionPass* createAppendLivePointersToSafepointsPass(
+    ValueSet& pointers) {
   llvm::initializeDominatorTreeWrapperPassPass(
       *llvm::PassRegistry::getPassRegistry());
-  return new RewriteSafepointsPass(pointers);
+  return new AppendLivePointersToSafepointsPass(pointers);
 }
 
 } } // v8::internal

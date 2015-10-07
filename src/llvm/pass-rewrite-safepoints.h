@@ -13,7 +13,7 @@ namespace internal {
 
 using ValueSet = std::set<llvm::Value*>;
 
-llvm::FunctionPass* createRewriteSafepointsPass(ValueSet&);
+llvm::FunctionPass* createAppendLivePointersToSafepointsPass(ValueSet&);
 
 // These structs are borrowed from
 // llvm/lib/Transforms/Scalar/RewriteStatepointsForGC.cpp.

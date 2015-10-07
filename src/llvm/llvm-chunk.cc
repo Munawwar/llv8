@@ -8,7 +8,7 @@
 #include "src/hydrogen-osr.h"
 #include "src/ic/ic.h"
 #include "llvm-chunk.h"
-#include "llvm-passes.h"
+#include "pass-normalize-phis.h"
 #include <llvm/IR/InlineAsm.h>
 #include "llvm-stackmaps.h"
 
@@ -1378,10 +1378,10 @@ LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::RewriteStatePoints() {
-  PassInfoPrinter("RewriteStatePoints", module_.get());
+  PassInfoPrinter("AppendLivePointersToSafepoints", module_.get());
 
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  pass_manager.add(createRewriteSafepointsPass(pointers_));
+  pass_manager.add(createAppendLivePointersToSafepointsPass(pointers_));
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
