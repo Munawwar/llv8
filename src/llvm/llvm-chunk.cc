@@ -651,7 +651,7 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
     case Representation::Kind::kDouble:
       return Types::float64;
     default:
-      UNIMPLEMENTED();
+      //UNIMPLEMENTED(); //3d-cube->DrawQube flows here
       return nullptr;
   }
 }
@@ -700,7 +700,9 @@ void LLVMChunkBuilder::DoDummyUse(HInstruction* instr) {
   } else {
     dummy_constant = __ getInt64(0xdead);
   }
-  auto casted_dummy_constant = __ CreateBitOrPointerCast(dummy_constant, type);
+  auto casted_dummy_constant = dummy_constant;
+  if (type)
+    casted_dummy_constant = __ CreateBitOrPointerCast(dummy_constant, type);
   for (int i = 1; i < instr->OperandCount(); ++i) {
     if (instr->OperandAt(i)->IsControlInstruction()) continue;
     Use(instr->OperandAt(i)); // Visit all operands and dummy-use them as well.
@@ -1955,12 +1957,17 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     auto is_null = CompareRoot(value, Heap::kNullValueRootIndex);
     __ CreateCondBr(is_null, false_target, check_blocks[++cur_block]);
   }
+  // TODO: Test (till the end) 3d-cube.js DrawQube
   if (expected.Contains(ToBooleanStub::SMI)) {
-    UNIMPLEMENTED();
+    __ SetInsertPoint(check_blocks[cur_block]);
     // Smis: 0 -> false, all other -> true.
-//    __ Cmp(reg, Smi::FromInt(0));
-//    __ j(equal, instr->FalseLabel(chunk()));
-//    __ JumpIfSmi(reg, instr->TrueLabel(chunk()));
+    llvm::BasicBlock* not_zero = NewBlock("BranchTagged Smi Non Zero");
+    auto cmp_zero = __ CreateICmpEQ(value, __ getInt64(0));
+    __ CreateCondBr(cmp_zero, false_target, not_zero);
+    __ SetInsertPoint(not_zero);
+    llvm::Value* smi_cond = SmiCheck(value, false);
+    __ CreateCondBr(smi_cond, true_target, check_blocks[++cur_block]);
+ 
   } else if (expected.NeedsMap()) {
     UNIMPLEMENTED();
     // If we need a map later and have a Smi -> deopt.
@@ -1968,56 +1975,65 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
 //    DeoptimizeIf(zero, instr, Deoptimizer::kSmi);
   }
 
+  llvm::Value* map = nullptr;
   if (expected.NeedsMap()) {
-    UNIMPLEMENTED();
-//    __ movp(map, FieldOperand(reg, HeapObject::kMapOffset));
-//
-//    if (expected.CanBeUndetectable()) {
-//      // Undetectable -> false.
-//      __ testb(FieldOperand(map, Map::kBitFieldOffset),
-//               Immediate(1 << Map::kIsUndetectable));
-//      __ j(not_zero, instr->FalseLabel(chunk()));
-//    }
+    __ SetInsertPoint(check_blocks[cur_block]);
+    map = LoadFieldOperand(value, HeapObject::kMapOffset);
+    if (expected.CanBeUndetectable()) {
+      auto map_bit_offset = LoadFieldOperand(map, Map::kBitFieldOffset);
+      auto map_detach = __ getInt64(1 << Map::kIsUndetectable);
+      auto test = __ CreateAnd(map_bit_offset, map_detach);
+      auto cmp_zero = __ CreateICmpEQ(test, __ getInt64(0));
+      __ CreateCondBr(cmp_zero, check_blocks[++cur_block], false_target);
+    }
   }
 
   if (expected.Contains(ToBooleanStub::SPEC_OBJECT)) {
-    UNIMPLEMENTED();
-//    // spec object -> true.
-//    __ CmpInstanceType(map, FIRST_SPEC_OBJECT_TYPE);
-//    __ j(above_equal, instr->TrueLabel(chunk()));
+    // spec object -> true.
+    DCHECK(map); //FIXME: map can be null here
+    __ SetInsertPoint(check_blocks[cur_block]);
+    llvm::Value* cmp_instance = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset),
+                                            __ getInt64(static_cast<int8_t>(FIRST_SPEC_OBJECT_TYPE)));
+    __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);    
   }
 
   if (expected.Contains(ToBooleanStub::STRING)) {
-    UNIMPLEMENTED();
     // String value -> false iff empty.
-//    Label not_string;
-//    __ CmpInstanceType(map, FIRST_NONSTRING_TYPE);
-//    __ j(above_equal, &not_string, Label::kNear);
-//    __ cmpp(FieldOperand(reg, String::kLengthOffset), Immediate(0));
-//    __ j(not_zero, instr->TrueLabel(chunk()));
-//    __ jmp(instr->FalseLabel(chunk()));
-//    __ bind(&not_string);
+    DCHECK(map); //FIXME: map can be null here
+    __ SetInsertPoint(check_blocks[cur_block]);
+    llvm::BasicBlock* is_string_bb = NewBlock("BranchTagged ToBoolString IsString");
+    llvm::Value* cmp_instance = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset),
+                                            __ getInt64(static_cast<int8_t>(FIRST_NONSTRING_TYPE)));
+     __ CreateCondBr(cmp_instance, check_blocks[++cur_block], is_string_bb);
+     __ SetInsertPoint(is_string_bb);
+     auto str_length = LoadFieldOperand(value, String::kLengthOffset);
+     auto cmp_length = __ CreateICmpEQ(str_length, __ getInt64(0));
+     __ CreateCondBr(cmp_length, false_target, true_target);
   }
 
   if (expected.Contains(ToBooleanStub::SYMBOL)) {
-    UNIMPLEMENTED();
-//    // Symbol value -> true.
-//    __ CmpInstanceType(map, SYMBOL_TYPE);
-//    __ j(equal, instr->TrueLabel(chunk()));
+    // Symbol value -> true.
+    DCHECK(map); //FIXME: map can be null here
+    llvm::Value* cmp_instance = __ CreateICmpEQ(LoadFieldOperand(map, Map::kInstanceTypeOffset),
+                                            __ getInt64(static_cast<int8_t>(SYMBOL_TYPE)));
+    __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);
   }
 
   if (expected.Contains(ToBooleanStub::HEAP_NUMBER)) {
-    UNIMPLEMENTED();
-//    // heap number -> false iff +0, -0, or NaN.
-//    Label not_heap_number;
-//    __ CompareRoot(map, Heap::kHeapNumberMapRootIndex);
-//    __ j(not_equal, &not_heap_number, Label::kNear);
-//    XMMRegister xmm_scratch = double_scratch0();
-//    __ xorps(xmm_scratch, xmm_scratch);
-//    __ ucomisd(xmm_scratch, FieldOperand(reg, HeapNumber::kValueOffset));
-//    __ j(zero, instr->FalseLabel(chunk()));
-//    __ jmp(instr->TrueLabel(chunk()));
-//    __ bind(&not_heap_number);
+    // heap number -> false iff +0, -0, or NaN.
+    DCHECK(map); //FIXME: map can be null here
+    llvm::BasicBlock* is_heap_bb = NewBlock("BranchTagged ToBoolString IsHeapNumber");
+    auto cmp_root = CompareRoot(map, Heap::kHeapNumberMapRootIndex, llvm::CmpInst::ICMP_NE); 
+    __ CreateCondBr(cmp_root, merge_block, is_heap_bb);
+    __ SetInsertPoint(is_heap_bb);
+    llvm::Value* zero_val = llvm::ConstantFP::get(Types::float64, 0);    
+    auto value_addr = FieldOperand(value, HeapNumber::kValueOffset);
+    llvm::Value* value_as_double_addr = __ CreateBitCast(value_addr,
+                                                         Types::ptr_float64);
+    auto load_val = __ CreateLoad(value_as_double_addr);
+
+    llvm::Value* compare = __ CreateFCmpOEQ(load_val, zero_val);
+    __ CreateCondBr(compare, false_target, true_target);  
   }
 
   __ SetInsertPoint(merge_block) ; // TODO(llvm): not sure
