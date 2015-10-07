@@ -650,6 +650,12 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   void DoMathFloor(HUnaryMathOperation* instr);
   void DoMathLog(HUnaryMathOperation* instr);
   void DoMathExp(HUnaryMathOperation* instr);
+  llvm::Value* ExternalOperand(ExternalReference offset);
+  int64_t RootRegisterDelta(ExternalReference offset);
+  void PrepareCallCFunction(int num_arguments);
+  int ArgumentStackSlotsForCFunctionCall(int num_arguments);
+  llvm::Value* CallCFunction(ExternalReference function, std::vector<llvm::Value*>, int num_arguments);
+  llvm::Value* LoadAddress(ExternalReference);
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;

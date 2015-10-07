@@ -3012,8 +3012,176 @@ void LLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
   instr->set_llvm_value(result);
 }
 
+int64_t LLVMChunkBuilder::RootRegisterDelta(ExternalReference other) {
+  if (//predictable_code_size() &&
+      (other.address() < reinterpret_cast<Address>(isolate()) ||
+       other.address() >= reinterpret_cast<Address>(isolate() + 1))) {
+    return -1;
+  }
+  Address roots_register_value = kRootRegisterBias +
+      reinterpret_cast<Address>(isolate()->heap()->roots_array_start());
+
+  int64_t delta = -1;
+  if (kPointerSize == kInt64Size) {
+    delta = other.address() - roots_register_value;
+  } else {
+    uint64_t o = static_cast<uint32_t>(
+        reinterpret_cast<intptr_t>(other.address()));
+    uint64_t r = static_cast<uint32_t>(
+        reinterpret_cast<intptr_t>(roots_register_value));
+    delta = o + r;
+  }
+  return delta;
+}
+
+llvm::Value* LLVMChunkBuilder::ExternalOperand(ExternalReference target) {
+  //if (root_array_available_ && oserializer_enabled()) {
+    int64_t delta = RootRegisterDelta(target);
+    Address root_array_start_address =
+          ExternalReference::roots_array_start(isolate()).address();
+    auto int64_address =
+        __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
+    auto load_address = ConstructAddress(int64_address, delta);
+    auto casted_address = __ CreateBitCast(load_address, Types::ptr_i64);
+    llvm::Value* object = __ CreateLoad(casted_address);
+    return object;
+  //}
+}
+
+void LLVMChunkBuilder::PrepareCallCFunction(int num_arguments) {
+  int frame_alignment = base::OS::ActivationFrameAlignment();
+  DCHECK(frame_alignment != 0);
+  DCHECK(num_arguments >= 0);
+  int argument_slots_on_stack =
+      ArgumentStackSlotsForCFunctionCall(num_arguments);
+  // Reading from rsp
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  llvm::Function* read_from_rsp = llvm::Intrinsic::getDeclaration(module_.get(),
+      llvm::Intrinsic::read_register, { Types::i64 });
+  auto metadata =
+    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
+  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
+      llvm_context, metadata);
+  auto rsp_value = __ CreateCall(read_from_rsp, val);
+  //TODO Try to move rsp value
+  auto sub_v = __ CreateNSWSub(rsp_value, __ getInt64((argument_slots_on_stack + 1) * kRegisterSize));
+  auto and_v = __ CreateAnd(sub_v, __ getInt64(-frame_alignment));
+  auto address = ConstructAddress(and_v, argument_slots_on_stack * kRegisterSize);
+  auto casted_address = __ CreateBitCast(address, Types::ptr_i64);
+  __ CreateStore(rsp_value, casted_address);
+}
+
+int LLVMChunkBuilder::ArgumentStackSlotsForCFunctionCall(int num_arguments) {
+  DCHECK(num_arguments >= 0);
+  const int kRegisterPassedArguments = 6;
+  if (num_arguments < kRegisterPassedArguments) return 0;
+  return num_arguments - kRegisterPassedArguments;
+}
+
+llvm::Value* LLVMChunkBuilder::LoadAddress(ExternalReference source) {
+  const int64_t kInvalidRootRegisterDelta = -1;
+  llvm::Value* object = nullptr;
+  //if (root_array_available_ && !serializer_enabled()) {
+    int64_t delta = RootRegisterDelta(source);
+    if (delta != kInvalidRootRegisterDelta && is_int32(delta)) {
+      Address root_array_start_address =
+          ExternalReference::roots_array_start(isolate()).address();
+      auto int64_address =
+          __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
+      object = LoadFieldOperand(int64_address, static_cast<int32_t>(delta));
+      return object;
+    } else {
+    llvm::Value* address = __ getInt64(reinterpret_cast<uint64_t>(ExternalReference::get_date_field_function(isolate()).address()));
+    auto constructed_address = ConstructAddress(address, 0);
+    object = __ CreateLoad(constructed_address);
+    return object;}
+}
+
+llvm::Value* LLVMChunkBuilder::CallCFunction(ExternalReference function,
+                                       std::vector<llvm::Value*> params,
+                                       int num_arguments) {
+  if (emit_debug_code()) {
+    UNIMPLEMENTED();
+  }
+  llvm::Value* obj = LoadAddress(function);
+  llvm::Value* call = CallAddress(NULL,
+                                  llvm::CallingConv::X86_64_V8_S3, params,
+                                  obj);
+  DCHECK(base::OS::ActivationFrameAlignment() != 0);
+  DCHECK(num_arguments >= 0);
+  int argument_slots_on_stack = ArgumentStackSlotsForCFunctionCall(num_arguments);
+  LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
+  llvm::Function* intrinsic_read = llvm::Intrinsic::getDeclaration(module_.get(),
+      llvm::Intrinsic::read_register, { Types::i64 });
+  auto metadata =
+    llvm::MDNode::get(llvm_context, llvm::MDString::get(llvm_context, "rsp"));
+  llvm::MetadataAsValue* val = llvm::MetadataAsValue::get(
+      llvm_context, metadata);
+  llvm::Value* rsp_value = __ CreateCall(intrinsic_read, val);
+  llvm::Value* address = ConstructAddress(rsp_value, argument_slots_on_stack * kRegisterSize);
+  llvm::Value* casted_address = __ CreateBitCast(address, Types::ptr_i64);
+  llvm::Value* object = __ CreateLoad(casted_address);
+  //Write into rsp
+  std::vector<llvm::Value*> parameter = {val, object};
+  llvm::Function* intrinsic_write = llvm::Intrinsic::getDeclaration(module_.get(),
+      llvm::Intrinsic::write_register, { Types::i64 });
+  __ CreateCall(intrinsic_write, parameter);
+ return call;
+}
+
 void LLVMChunkBuilder::DoDateField(HDateField* instr) {
-  UNIMPLEMENTED();
+  llvm::BasicBlock* date_field_equal = nullptr;
+  llvm::BasicBlock* date_field_runtime = NewBlock("Runtime");
+  llvm::BasicBlock* DateFieldResult = NewBlock("Result block of DateField");
+  llvm::Value* date_field_result_equal = nullptr;
+  Smi* index = instr->index();
+  llvm::Value* is_smi = SmiCheck(Use(instr->value()), false);
+  DeoptimizeIf(is_smi);
+
+  llvm::Value* map = FieldOperand(Use(instr->value()),
+          HeapObject::kMapOffset);
+  llvm::Value* cast_int = __ CreateBitCast(map, Types::ptr_i64);
+  llvm::Value* address = __ CreateLoad(cast_int);
+  llvm::Value* DateObject = LoadFieldOperand(address, Map::kMapOffset);
+  llvm::Value* not_equal = __ CreateICmpNE(DateObject,
+         __ getInt64(static_cast<int8_t>(JS_DATE_TYPE)));
+  DeoptimizeIf(not_equal, true);
+
+  if (index->value() == 0) {
+    llvm::Value* map = LoadFieldOperand(Use(instr->value()), JSDate::kValueOffset);
+    instr->set_llvm_value(map);
+  } else {
+    if (index->value() < JSDate::kFirstUncachedField) {
+      date_field_equal = NewBlock("equal");
+      ExternalReference stamp = ExternalReference::date_cache_stamp(isolate());
+      llvm::Value* stamp_object = ExternalOperand(stamp);
+      llvm::Value* object = LoadFieldOperand(Use(instr->value()), JSDate::kCacheStampOffset);
+      llvm::Value* not_equal = __ CreateICmp(llvm::CmpInst::ICMP_NE, stamp_object, object);
+      __ CreateCondBr(not_equal, date_field_runtime, date_field_equal);
+      __ SetInsertPoint(date_field_equal);
+      date_field_result_equal = LoadFieldOperand(Use(instr->value()), JSDate::kValueOffset +
+                                                                   kPointerSize * index->value());
+      __ CreateBr(DateFieldResult);
+    }
+    __ SetInsertPoint(date_field_runtime);
+    PrepareCallCFunction(2);
+    llvm::Value* param_one = Use(instr->value());
+    intptr_t intptr_value = reinterpret_cast<intptr_t>(index);
+    llvm::Value* param_two = __ getInt64(intptr_value);
+    std::vector<llvm::Value*> params = { param_one, param_two };
+    llvm::Value* result = CallCFunction(ExternalReference::get_date_field_function(isolate()), params, 2);
+    llvm::Value* date_field_result_runtime = __ CreatePtrToInt(result, Types::i64);
+    __ CreateBr(DateFieldResult);
+    __ SetInsertPoint(DateFieldResult);
+    if (date_field_equal) {
+       llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+       phi->addIncoming(date_field_result_equal, date_field_equal);
+       phi->addIncoming(date_field_result_runtime, date_field_runtime);
+       instr->set_llvm_value(phi);
+    } else {
+       instr->set_llvm_value(date_field_result_runtime);
+    }
+  }
 }
 
 void LLVMChunkBuilder::DoDebugBreak(HDebugBreak* instr) {
