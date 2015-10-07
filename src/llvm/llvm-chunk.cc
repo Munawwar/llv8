@@ -556,6 +556,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   module_ = LLVMGranularity::getInstance().CreateModule();
   module_->setTargetTriple(LLVMGranularity::x64_target_triple);
   llvm_ir_builder_ = llvm::make_unique<llvm::IRBuilder<>>(llvm_context);
+  pointers_.clear();
   Types::Init(llvm_ir_builder_.get());
   status_ = BUILDING;
 
@@ -788,6 +789,8 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
   DCHECK(value->llvm_value());
   //DCHECK_EQ(value->llvm_value()->getType(),
     //        GetLLVMType(value->representation()));
+  if (HasTaggedValue(value))
+    pointers_.insert(value->llvm_value());
   return value->llvm_value();
 }
 
@@ -1331,6 +1334,47 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   return *this;
 }
 
+LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
+#ifdef DEBUG
+  // FIXME(llvm): make it beautiful (e.g. a nice RAII thing).
+  std::cerr << "===========vvv Module BEFORE Statepoint placementvvv===========" << std::endl;
+  llvm::errs() << *(module_.get());
+  std::cerr << "===========^^^Module BEFORE Statepoint placement^^^===========" << std::endl;
+#endif
+  llvm::legacy::FunctionPassManager pass_manager(module_.get());
+  pass_manager.add(llvm::createPlaceSafepointsPass());
+  pass_manager.doInitialization();
+  pass_manager.run(*function_);
+  pass_manager.doFinalization();
+#ifdef DEBUG
+  std::cerr << "===========vvv Module AFTER Statepoint placementvvv===========" << std::endl;
+  llvm::errs() << *(module_.get());
+  std::cerr << "===========^^^Module AFTER Statepoint placement^^^===========" << std::endl;
+#endif
+  return *this;
+}
+
+LLVMChunkBuilder& LLVMChunkBuilder::RewriteStatePoints() {
+#ifdef DEBUG
+  // FIXME(llvm): make it beautiful (e.g. a nice RAII thing).
+  std::cerr << "===========vvv Module BEFORE Statepoint REWRvvv===========" << std::endl;
+  llvm::errs() << *(module_.get());
+  std::cerr << "===========^^^Module BEFORE Statepoint REWR^^^===========" << std::endl;
+#endif
+  llvm::legacy::FunctionPassManager pass_manager(module_.get());
+  pass_manager.add(createRewriteSafepointsPass(pointers_));
+  pass_manager.doInitialization();
+  pass_manager.run(*function_);
+  pass_manager.doFinalization();
+#ifdef DEBUG
+  std::cerr << "===========vvv Module AFTER Statepoint REWRvvv===========" << std::endl;
+  llvm::errs() << *(module_.get());
+  std::cerr << "===========^^^Module AFTER Statepoint REWR^^^===========" << std::endl;
+#endif
+  return *this;
+}
+
+
 LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   DCHECK(module_);
 #ifdef DEBUG
@@ -1350,6 +1394,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   return *this;
 }
 
+// FIXME(llvm): obsolete.
 void LLVMChunkBuilder::CreateVolatileZero() {
   volatile_zero_address_ = __ CreateAlloca(Types::i64);
   bool is_volatile = true;

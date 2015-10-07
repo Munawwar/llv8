@@ -13,6 +13,7 @@
 #include "src/x64/lithium-codegen-x64.h"
 #include "src/lithium.h"
 #include "llvm-stackmaps.h"
+#include "pass-rewrite-safepoints.h"
 #include "mcjit-memory-manager.h"
 #include "src/base/division-by-constant.h"
 
@@ -485,7 +486,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
         osr_preserved_values_(4, info->zone()),
         emit_debug_code_(FLAG_debug_code),
         volatile_zero_address_(nullptr),
-        last_reloc_index_offset_(-1) {
+        last_reloc_index_offset_(-1),
+        pointers_() {
     reloc_data_ = new(zone()) LLVMRelocationData();
   }
   ~LLVMChunkBuilder() {}
@@ -679,6 +681,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   bool emit_debug_code_;
   llvm::Value* volatile_zero_address_;
   int last_reloc_index_offset_;
+  // TODO(llvm): choose more appropriate data structure (maybe in the zone).
+  std::set<llvm::Value*> pointers_;
   enum ScaleFactor {
     times_1 = 0,
     times_2 = 1,

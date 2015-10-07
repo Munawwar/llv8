@@ -14,7 +14,13 @@
 #include <iostream>
 
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Analysis/Passes.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetOperations.h"
+#include "llvm/CodeGen/GCStrategy.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/ExecutionEngine/GenericValue.h"

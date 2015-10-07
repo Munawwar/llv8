@@ -869,6 +869,8 @@
         '../../src/llvm/llvm-stackmaps.h',
         '../../src/llvm/mcjit-memory-manager.cc',
         '../../src/llvm/mcjit-memory-manager.h',
+        '../../src/llvm/pass-rewrite-safepoints.cc',
+        '../../src/llvm/pass-rewrite-safepoints.h',
         '../../src/log-inl.h',
         '../../src/log-utils.cc',
         '../../src/log-utils.h',
