@@ -1321,12 +1321,44 @@ bool LLVMChunkBuilder::HasTaggedValue(HValue* value) {
       value->representation().IsTagged() && !value->type().IsSmi();
 }
 
-LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
-#ifdef DEBUG
-  std::cerr << "===========vvv Module BEFORE normalizationvvv===========" << std::endl;
-  llvm::errs() << *(module_.get());
-  std::cerr << "===========^^^ Module BEFORE normalization^^^===========" << std::endl;
+class PassInfoPrinter {
+ public:
+  PassInfoPrinter(const char* name, llvm::Module* module)
+     : name_(name),
+       module_(module) {
+#if DEBUG
+    if (!only_after) {
+      llvm::errs() << filler << "vvv Module BEFORE " << name_ <<" vvv"
+          << filler << "\n";
+      llvm::errs() << *module_;
+      llvm::errs() << filler << "^^^ Module BEFORE " << name_ <<" ^^^"
+          << filler << "\n";
+      only_after = true;
+    }
 #endif
+  }
+  ~PassInfoPrinter() {
+#if DEBUG
+    llvm::errs() << filler << "vvv Module  AFTER " << name_ <<" vvv"
+        << filler << "\n";
+    llvm::errs() << *module_;
+    llvm::errs() << filler << "^^^ Module  AFTER " << name_ <<" ^^^"
+        << filler << "\n";
+#endif
+  }
+ private:
+  static bool only_after;
+  static const char* filler;
+  const char* name_;
+  llvm::Module* module_;
+};
+
+const char* PassInfoPrinter::filler = "====================";
+bool PassInfoPrinter::only_after = false;
+
+LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
+  PassInfoPrinter("normalization", module_.get());
+
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   if (FLAG_phi_normalize) pass_manager.add(createNormalizePhisPass());
   pass_manager.doInitialization();
@@ -1335,42 +1367,24 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
-#ifdef DEBUG
-  // FIXME(llvm): make it beautiful (e.g. a nice RAII thing).
-  std::cerr << "===========vvv Module BEFORE Statepoint placementvvv===========" << std::endl;
-  llvm::errs() << *(module_.get());
-  std::cerr << "===========^^^Module BEFORE Statepoint placement^^^===========" << std::endl;
-#endif
+  PassInfoPrinter("PlaceStatePoints", module_.get());
+
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   pass_manager.add(llvm::createPlaceSafepointsPass());
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
-#ifdef DEBUG
-  std::cerr << "===========vvv Module AFTER Statepoint placementvvv===========" << std::endl;
-  llvm::errs() << *(module_.get());
-  std::cerr << "===========^^^Module AFTER Statepoint placement^^^===========" << std::endl;
-#endif
   return *this;
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::RewriteStatePoints() {
-#ifdef DEBUG
-  // FIXME(llvm): make it beautiful (e.g. a nice RAII thing).
-  std::cerr << "===========vvv Module BEFORE Statepoint REWRvvv===========" << std::endl;
-  llvm::errs() << *(module_.get());
-  std::cerr << "===========^^^Module BEFORE Statepoint REWR^^^===========" << std::endl;
-#endif
+  PassInfoPrinter("RewriteStatePoints", module_.get());
+
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   pass_manager.add(createRewriteSafepointsPass(pointers_));
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
-#ifdef DEBUG
-  std::cerr << "===========vvv Module AFTER Statepoint REWRvvv===========" << std::endl;
-  llvm::errs() << *(module_.get());
-  std::cerr << "===========^^^Module AFTER Statepoint REWR^^^===========" << std::endl;
-#endif
   return *this;
 }
 
@@ -1379,18 +1393,11 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
   DCHECK(module_);
 #ifdef DEBUG
   llvm::verifyFunction(*function_, &llvm::errs());
-
-  std::cerr << "===========vvv Module BEFORE optimization vvv===========" << std::endl;
-  llvm::errs() << *(module_.get());
-  std::cerr << "===========^^^ Module BEFORE optimization ^^^===========" << std::endl;
 #endif
+  PassInfoPrinter("optimization", module_.get());
+
   LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
   LLVMGranularity::getInstance().OptimizeModule(module_.get());
-#ifdef DEBUG
-  std::cerr << "===========vvv Module AFTER optimization vvv============" << std::endl;
-  llvm::errs() << *(module_.get());
-  std::cerr << "===========^^^ Module AFTER optimization ^^^============" << std::endl;
-#endif
   return *this;
 }
 
