@@ -1357,7 +1357,7 @@ const char* PassInfoPrinter::filler = "====================";
 bool PassInfoPrinter::only_after = false;
 
 LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
-  PassInfoPrinter("normalization", module_.get());
+  PassInfoPrinter printer("normalization", module_.get());
 
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   if (FLAG_phi_normalize) pass_manager.add(createNormalizePhisPass());
@@ -1367,7 +1367,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
-  PassInfoPrinter("PlaceStatePoints", module_.get());
+  PassInfoPrinter printer("PlaceStatePoints", module_.get());
 
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   pass_manager.add(llvm::createPlaceSafepointsPass());
@@ -1378,7 +1378,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::RewriteStatePoints() {
-  PassInfoPrinter("AppendLivePointersToSafepoints", module_.get());
+  PassInfoPrinter printer("AppendLivePointersToSafepoints", module_.get());
 
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   pass_manager.add(createAppendLivePointersToSafepointsPass(pointers_));
@@ -1394,7 +1394,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Optimize() {
 #ifdef DEBUG
   llvm::verifyFunction(*function_, &llvm::errs());
 #endif
-  PassInfoPrinter("optimization", module_.get());
+  PassInfoPrinter printer("optimization", module_.get());
 
   LLVMGranularity::getInstance().OptimizeFunciton(module_.get(), function_);
   LLVMGranularity::getInstance().OptimizeModule(module_.get());
