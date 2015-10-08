@@ -388,10 +388,11 @@ static bool InsertParsePoints(
   for (llvm::CallSite callsite : to_update) {
     // We generate only calls, so we expect nothing but calls.
     DCHECK(!callsite.isInvoke());
-    auto vm_state_iterator = llvm::Statepoint(callsite).vm_state_args();
+    DCHECK(llvm::isStatepoint(callsite));
+    llvm::Statepoint statepoint = llvm::Statepoint(callsite);
     // We expect 'deopt args' of the safepoint instructions to be empty. Because
     // if it wasn't we'd have to ensure their liveness across the safepoint.
-    DCHECK(vm_state_iterator.begin() == vm_state_iterator.end());
+    DCHECK_EQ(statepoint.vm_state_begin(), statepoint.vm_state_end());
   }
 
   llvm::SmallVector<struct PartiallyConstructedSafepointRecord, 64> records;
@@ -428,13 +429,15 @@ bool AppendLivePointersToSafepointsPass::runOnFunction(llvm::Function& function)
   // 2. Same for single entry phi nodes.
 
   llvm::DominatorTree& dom_tree =
-      getAnalysis<llvm::DominatorTreeWrapperPass>(function).getDomTree();
+      getAnalysis<llvm::DominatorTreeWrapperPass>().getDomTree();
 
   // Gather all safepoints [which need to be rewritten].
   llvm::SmallVector<llvm::CallSite, 64> parse_point_needed;
   for (llvm::Instruction& instr : llvm::instructions(function)) {
-    DCHECK(dom_tree.isReachableFromEntry(instr.getParent()));
-    parse_point_needed.push_back(llvm::CallSite(&instr));
+    if (llvm::isStatepoint(instr)) {
+      DCHECK(dom_tree.isReachableFromEntry(instr.getParent()));
+      parse_point_needed.push_back(llvm::CallSite(&instr));
+    }
   }
 
   return InsertParsePoints(function, dom_tree, parse_point_needed,
