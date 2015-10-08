@@ -2206,6 +2206,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
   } else {
     CallFunctionStub stub(isolate(), arity, flags);
     AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap;
     std::vector<llvm::Value*> params;
     params.push_back(context);
     params.push_back(function);
@@ -3648,7 +3649,36 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
-  UNIMPLEMENTED();
+  //llvm::BasicBlock* insert_block = __ GetInsertBlock();
+  llvm::BasicBlock* Myblock = NewBlock("LoadGlobalGeneric");
+  __ CreateBr(Myblock);
+  __ SetInsertPoint(Myblock);
+  llvm::Value* context = Use(instr->context());
+  llvm::Value* global_object = Use(instr->global_object());
+  llvm::Value* name = MoveHeapObject(instr->name());
+//  llvm::Value* vector = nullptr;
+  bool for_typeof = instr->for_typeof();
+  
+  if (instr->HasVectorAndSlot()) {
+    UNIMPLEMENTED();
+  }
+  
+  if (FLAG_vector_ics) {
+    UNIMPLEMENTED();
+  }
+
+  ContextualMode mode = for_typeof ? NOT_CONTEXTUAL : CONTEXTUAL;
+  AllowHandleAllocation allow_handles;
+  Handle<Code> ic =
+        CodeFactory::LoadICInOptimizedCode(isolate(), mode, PREMONOMORPHIC).code();
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(global_object);
+  params.push_back(name);
+  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S5,
+                            params);
+  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
+  instr->set_llvm_value(return_val);
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
