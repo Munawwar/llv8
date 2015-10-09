@@ -310,7 +310,9 @@ int LLVMDeoptData::DefineDeoptimizationLiteral(Handle<Object> literal) {
 
 void* LLVMDeoptData::GetKey(int32_t patchpoint_id) {
   DCHECK(patchpoint_id >= 0);
-  return reinterpret_cast<void*>(patchpoint_id);
+  auto new_int = new(zone_) int32_t;
+  *new_int = patchpoint_id;
+  return new_int;
 }
 
 uint32_t LLVMDeoptData::GetHash(int32_t patchpoint_id) {

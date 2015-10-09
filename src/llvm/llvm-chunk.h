@@ -385,7 +385,7 @@ class LLVMEnvironment final : public ZoneObject {
 };
 
 static bool MatchFunForInts(void* key1, void* key2) {
-  return key1 == key2;
+  return *static_cast<int32_t*>(key1) == *static_cast<int32_t*>(key2);
 }
 
 // TODO(llvm): LLVMDeoptData and LLVMRelocationData should probably be merged.
