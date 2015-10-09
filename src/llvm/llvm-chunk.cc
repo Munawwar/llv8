@@ -933,12 +933,10 @@ llvm::Value* LLVMChunkBuilder::Integer32ToSmi(llvm::Value* value) {
 
 llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
-  bool is_var_arg = false;
-  llvm::FunctionType* function_type = llvm::FunctionType::get(__ getVoidTy(),
-                                                              is_var_arg);
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = __ CreateIntToPtr(target_adderss, ptr_to_function);
-  return __ CreateCall(casted,  llvm::ArrayRef<llvm::Value*>());
+  auto calling_conv = llvm::CallingConv::C; // We don't really care.
+  auto empty = std::vector<llvm::Value*>();
+  bool record_safepoint = false;
+  return CallVal(target_adderss, calling_conv, empty, record_safepoint);
 }
 
 llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
@@ -956,6 +954,7 @@ llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
 
   llvm::Value* casted = __ CreateIntToPtr(target_adderss, ptr_to_function);
+  // FIXME(llvm): refactor using CallVal()
   llvm::CallInst* call_inst = __ CreateCall(casted, params);
   call_inst->setCallingConv(calling_conv);
 
@@ -965,12 +964,15 @@ llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
 llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
                                        llvm::CallingConv::ID calling_conv,
                                        std::vector<llvm::Value*>& params,
-                                       HInstruction* call_instr,
                                        bool record_safepoint) {
   bool is_var_arg = false;
 
-  int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
-
+  auto return_type = Types::tagged;
+  auto param_type = Types::tagged;
+  std::vector<llvm::Type*> param_types(params.size(), param_type);
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      return_type, param_types, is_var_arg);
+  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   auto casted = __ CreateBitOrPointerCast(callable_value, ptr_to_function);
   llvm::CallInst* call_inst = nullptr;
 
@@ -984,8 +986,16 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
   }
 
   call_inst->setCallingConv(calling_conv);
-  call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
-                          "statepoint-id", std::to_string(stackmap_id));
+
+  if (record_safepoint) {
+    int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
+    call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
+                            "statepoint-id", std::to_string(stackmap_id));
+  } else {
+    call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
+                            "no-statepoint-please", "true");
+  }
+
   return call_inst;
 }
 
@@ -1004,11 +1014,18 @@ llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
   chunk()->target_index_for_ppid()[pp_id] = index;
   return call_inst;
 }
-llvm::Value* LLVMChunkBuilder::CallAddress(llvm::Value* target_address, 
-                                           llvm::CallingConv::ID calling_conv,  std::vector<llvm::Value*>& params) {
 
 
-  // TODO(llvm): reimplement via CallVal. See what's up with tagged first
+llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
+                                           llvm::CallingConv::ID calling_conv,
+                                           std::vector<llvm::Value*>& params,
+                                           llvm::Value* val_addr) {
+  llvm::Value* target_adderss = nullptr;
+  if (val_addr != nullptr) {
+    target_adderss = val_addr;
+  } else {
+    target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
+  }
   bool is_var_arg = false;
 
   // Tagged return type won't hurt even if in fact it's void
@@ -2261,7 +2278,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   bool record_safepoint = true;
 
   auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args,
-                      instr, record_safepoint);
+                      record_safepoint);
   instr->set_llvm_value(call);
 }
 
