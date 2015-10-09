@@ -30,8 +30,6 @@ llvm::PointerType* Types::ptr_float32 = nullptr;
 llvm::PointerType* Types::ptr_float64 = nullptr;
 llvm::Type* Types::tagged = nullptr;
 llvm::PointerType* Types::ptr_tagged = nullptr;
-const int64_t LLVMChunkBuilder::kMaxDeoptCount;
-const int64_t LLVMChunkBuilder::kFirstRelocIndex;
 
 LLVMChunk::~LLVMChunk() {}
 
@@ -310,9 +308,32 @@ int LLVMDeoptData::DefineDeoptimizationLiteral(Handle<Object> literal) {
   return result;
 }
 
-void LLVMDeoptData::Add(LLVMEnvironment* environment) {
-  deoptimizations_.Add(environment, environment->zone());
-  CHECK_LE(deoptimizations_.length(), LLVMChunkBuilder::kMaxDeoptCount);
+void* LLVMDeoptData::GetKey(int32_t patchpoint_id) {
+  DCHECK(patchpoint_id >= 0);
+  return reinterpret_cast<void*>(patchpoint_id);
+}
+
+uint32_t LLVMDeoptData::GetHash(int32_t patchpoint_id) {
+  DCHECK(patchpoint_id >= 0);
+  return static_cast<uint32_t>(patchpoint_id);
+}
+
+void LLVMDeoptData::Add(LLVMEnvironment* environment, int32_t patchpoint_id) {
+  auto key = GetKey(patchpoint_id);
+  auto hash = GetHash(patchpoint_id);
+  bool do_insert = true;
+  auto entry = deoptimizations_.Lookup(key, hash, do_insert,
+                                       ZoneAllocationPolicy(zone_));
+  entry->value = environment;
+}
+
+LLVMEnvironment* LLVMDeoptData::GetEnvironmentByPatchpointId(
+    int32_t patchpoint_id) {
+  auto key = GetKey(patchpoint_id);
+  auto hash = GetHash(patchpoint_id);
+  auto entry = deoptimizations_.Lookup(key, hash, false,
+                                       ZoneAllocationPolicy(zone_));
+  return static_cast<LLVMEnvironment*>(entry->value);
 }
 
 std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
@@ -332,7 +353,7 @@ std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
   for (auto i = 0; i < stackmaps.records.size(); i++) {
     auto record = stackmaps.records[i];
     auto id = record.patchpointID;
-    if (!LLVMChunkBuilder::IsPatchpointIdReloc(id)) continue;
+    if (!reloc_data_->IsPatchpointIdReloc(id)) continue;
 
     auto pc_offset = start + record.instructionOffset;
     *pc_offset++ = 0xE8; // Call relative offset.
@@ -375,7 +396,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   for (auto i = 0; i < stackmaps.records.size(); i++) {
     auto id = stackmaps.records[i].patchpointID;
     // Check it's a stackmap record corresponding to a deopt, not a reloc.
-    if (LLVMChunkBuilder::IsPatchpointIdDeopt(id)) sorted_ids.push_back(id);
+    if (reloc_data_->IsPatchpointIdDeopt(id)) sorted_ids.push_back(id);
   }
   std::sort(sorted_ids.begin(), sorted_ids.end());
   auto true_deopt_count = sorted_ids.size();
@@ -388,7 +409,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   for (auto i = 0; i < stackmaps.records.size(); i++) {
     auto stackmap_record = stackmaps.records[i];
     auto stackmap_id = stackmap_record.patchpointID;
-    if (!LLVMChunkBuilder::IsPatchpointIdDeopt(stackmap_id)) continue;
+    if (!reloc_data_->IsPatchpointIdDeopt(stackmap_id)) continue;
 
     // stackmap_id s are unique so we'll find exactly one.
     auto it = std::lower_bound(sorted_ids.begin(),
@@ -399,7 +420,8 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
     // is the same order they were added.
     int deopt_entry_number = IntHelper::AsInt(it - sorted_ids.begin());
     // The corresponding Environment is stored in the array by index = id.
-    LLVMEnvironment* env = deopt_data_->deoptimizations()[stackmap_id];
+    LLVMEnvironment* env = deopt_data_->GetEnvironmentByPatchpointId(
+        stackmap_id);
     int translation_index = WriteTranslationFor(env,
                                                 stackmap_record,
                                                 stackmaps);
@@ -548,6 +570,49 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   LLVMChunk* chunk = builder.Build().NormalizePhis().Optimize().Create();
   if (chunk == NULL) return NULL;
   return chunk;
+}
+
+int32_t LLVMRelocationData::GetNextDeoptPathcpointId() {
+  int32_t next_id = ++last_patchpoint_id_;
+  is_deopt_.Add(next_id, zone_);
+  return next_id;
+}
+
+int32_t LLVMRelocationData::GetNextSafepointPathcpointId() {
+  int32_t next_id = ++last_patchpoint_id_;
+  is_safepoint_.Add(next_id, zone_);
+  return next_id;
+}
+
+int32_t LLVMRelocationData::GetNextRelocPathcpointId() {
+  int32_t next_id = ++last_patchpoint_id_;
+  is_reloc_.Add(next_id, zone_);
+  return next_id;
+}
+
+bool LLVMRelocationData::IsPatchpointIdDeopt(int32_t patchpoint_id) {
+  return is_deopt_.Contains(patchpoint_id);
+}
+
+bool LLVMRelocationData::IsPatchpointIdSafepoint(int32_t patchpoint_id) {
+  return is_safepoint_.Contains(patchpoint_id);
+}
+
+bool LLVMRelocationData::IsPatchpointIdReloc(int32_t patchpoint_id) {
+  return is_reloc_.Contains(patchpoint_id);
+}
+
+// TODO(llvm): I haven't yet decided if it's profitable to use llvm statepoint
+// mechanism to place safepoint polls. This function should either be used
+// or removed.
+void LLVMChunkBuilder::CreateSafepointPollFunction() {
+  DCHECK(module_);
+  DCHECK(llvm_ir_builder_);
+  auto new_func = module_->getOrInsertFunction("gc.safepoint_poll",
+                                               __ getVoidTy(), nullptr);
+  safepoint_poll_ = llvm::cast<llvm::Function>(new_func);
+  __ SetInsertPoint(NewBlock("Safepoint poll entry", safepoint_poll_));
+  __ CreateRetVoid();
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::Build() {
@@ -904,22 +969,7 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
                                        bool record_safepoint) {
   bool is_var_arg = false;
 
-
-  // FIXME(llvm): it's a hack which works as long as we have one function.
-  static int stackmap_id = kFirstSafepointIndex;
-
-  llvm::PointerType* ptr_to_function = nullptr;
-
-  if (!record_safepoint) {
-    auto return_type = Types::tagged;
-    auto param_type = Types::tagged;
-    std::vector<llvm::Type*> param_types(params.size(), param_type);
-    llvm::FunctionType* function_type = llvm::FunctionType::get(
-        return_type, param_types, is_var_arg);
-    ptr_to_function = function_type->getPointerTo();
-  } else {
-    ptr_to_function = Types::ptr_i8; // patchpoint takes i8* target.
-  }
+  int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
 
   auto casted = __ CreateBitOrPointerCast(callable_value, ptr_to_function);
   llvm::CallInst* call_inst = nullptr;
@@ -934,6 +984,8 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
   }
 
   call_inst->setCallingConv(calling_conv);
+  call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
+                          "statepoint-id", std::to_string(stackmap_id));
   return call_inst;
 }
 
@@ -997,6 +1049,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
     code = ces.GetCode();
   }
 
+  auto index = chunk()->masm().GetCodeTargetIndex(code);
 
   // 1) emit relative 32 call to index which would follow the calling convention
   // 2) record reloc info when we know the pc offset (RelocInfo::CODE...)
@@ -1017,7 +1070,18 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   }
   pending_pushed_args_.Clear();
 
-  return CallCode(code, llvm::CallingConv::X86_64_V8_CES, args);
+  int32_t pp_id = reloc_data_->GetNextRelocPathcpointId();
+
+  auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
+  auto nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
+  std::vector<llvm::Value*> empty_live_values;
+  auto call_inst = CallPatchPoint(pp_id, llvm_null, args, empty_live_values,
+                                  nop_size);
+  call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
+
+  // Map pp_id -> index in code_targets_.
+  chunk()->target_index_for_ppid()[pp_id] = index;
+  return call_inst;
 }
 
 llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
@@ -1186,6 +1250,7 @@ void LLVMChunkBuilder::DirtyHack(int arg_count) {
   __ CreateCall(inline_asm);
 }
 
+
 llvm::Value* LLVMChunkBuilder::GetContext() {
   // First parameter is our context (rsi).
   return function_->arg_begin();
@@ -1210,7 +1275,8 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
                                     bool negate,
                                     llvm::BasicBlock* next_block) {
   LLVMEnvironment* environment = AssignEnvironment();
-  deopt_data_->Add(environment);
+  auto patchpoint_id = reloc_data_->GetNextDeoptPathcpointId();
+  deopt_data_->Add(environment, patchpoint_id);
 
   if (!next_block) next_block = NewBlock("BlockCont");
   llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
@@ -1236,6 +1302,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
   Address entry;
   {
     AllowHandleAllocation allow;
+    // TODO(llvm): what if we use patchpoint_id here?
     entry = Deoptimizer::GetDeoptimizationEntry(isolate(),
         deopt_data_->DeoptCount() - 1, bailout_type);
   }
@@ -1252,7 +1319,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
   std::vector<llvm::Value*> mapped_values;
   for (auto val : *environment->values())
     mapped_values.push_back(val);
-  CallStackMap(deopt_data_->DeoptCount() - 1, mapped_values);
+  CallStackMap(patchpoint_id, mapped_values);
 
   CallVoid(entry);
   __ CreateUnreachable();
@@ -1671,6 +1738,7 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 // used only for program counter (pc) and should be replaced in the
 // future by less optimization-constraining intrinsic
 // (which should be added to LLVM).
+// UPD: totally unused
 void LLVMChunkBuilder::CallStackMap(int stackmap_id, llvm::Value* value) {
   auto vector = std::vector<llvm::Value*>(1, value);
   CallStackMap(stackmap_id, vector);
@@ -1691,7 +1759,7 @@ void LLVMChunkBuilder::CallStackMap(int stackmap_id,
 // Note: we don't set calling convention here.
 // We return the call instruction so the caller can do it.
 llvm::CallInst* LLVMChunkBuilder::CallPatchPoint(
-    int64_t stackmap_id,
+    int32_t stackmap_id,
     llvm::Value* target_function,
     std::vector<llvm::Value*>& function_args,
     std::vector<llvm::Value*>& live_values,
@@ -2189,7 +2257,9 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   }
   pending_pushed_args_.Clear();
 
-  bool record_safepoint = false; // FIXME(llvm): temporary
+  // FIXME(llvm): it's unused.
+  bool record_safepoint = true;
+
   auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args,
                       instr, record_safepoint);
   instr->set_llvm_value(call);

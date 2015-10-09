@@ -55,9 +55,14 @@ class LLVMRelocationData : public ZoneObject {
 
   using RelocMap = std::map<uint64_t, std::pair<RelocInfo, ExtendedInfo>>;
 
-  LLVMRelocationData()
+  LLVMRelocationData(Zone* zone)
      : reloc_map_(),
-       is_transferred_(false) {}
+       last_patchpoint_id_(-1),
+       is_reloc_(8, zone),
+       is_deopt_(8, zone),
+       is_safepoint_(8, zone),
+       is_transferred_(false),
+       zone_(zone) {}
 
   void Add(RelocInfo rinfo, ExtendedInfo ex_info) {
     DCHECK(!is_transferred_);
@@ -68,12 +73,26 @@ class LLVMRelocationData : public ZoneObject {
     return reloc_map_;
   }
 
+  int32_t GetNextDeoptPathcpointId();
+  int32_t GetNextSafepointPathcpointId();
+  int32_t GetNextRelocPathcpointId();
+  bool IsPatchpointIdDeopt(int32_t patchpoint_id);
+  bool IsPatchpointIdSafepoint(int32_t patchpoint_id);
+  bool IsPatchpointIdReloc(int32_t patchpoint_id);
+
   void transfer() { is_transferred_ = true; }
 
  private:
   // TODO(llvm): re-think the design and probably use ZoneHashMap
   RelocMap reloc_map_;
+  int32_t last_patchpoint_id_;
+  // FIXME(llvm): not totally sure those belong here:
+  // Patchpoint ids belong to one of the following:
+  GrowableBitVector is_reloc_;
+  GrowableBitVector is_deopt_;
+  GrowableBitVector is_safepoint_;
   bool is_transferred_;
+  Zone* zone_;
 };
 
 // TODO(llvm): move this class to a separate file. Or, better, 2 files
@@ -365,28 +384,38 @@ class LLVMEnvironment final : public ZoneObject {
   bool has_been_used_;
 };
 
+static bool MatchFunForInts(void* key1, void* key2) {
+  return key1 == key2;
+}
+
+// TODO(llvm): LLVMDeoptData and LLVMRelocationData should probably be merged.
 class LLVMDeoptData {
  public:
   LLVMDeoptData(Zone* zone)
-     : deoptimizations_(4, zone),
+     : deoptimizations_(MatchFunForInts,
+                        ZoneHashMap::kDefaultHashMapCapacity,
+                        ZoneAllocationPolicy(zone)),
        translations_(zone),
        deoptimization_literals_(8, zone),
        zone_(zone) {}
 
-  void Add(LLVMEnvironment* environment);
+  void Add(LLVMEnvironment* environment, int32_t patchpoint_id);
+  LLVMEnvironment* GetEnvironmentByPatchpointId(int32_t patchpoint_id);
 
-  ZoneList<LLVMEnvironment*>& deoptimizations() { return deoptimizations_; }
   TranslationBuffer& translations() { return translations_; }
   ZoneList<Handle<Object> >& deoptimization_literals() {
     return deoptimization_literals_;
   }
 
-  int DeoptCount() { return deoptimizations_.length(); }
+  int DeoptCount() { return deoptimizations_.occupancy(); }
 
   int DefineDeoptimizationLiteral(Handle<Object> literal);
 
  private:
-  ZoneList<LLVMEnvironment*> deoptimizations_;
+  void* GetKey(int32_t patchpoint_id);
+  uint32_t GetHash(int32_t patchpoint_id);
+  // Patchpoint_id -> LLVMEnvironment*
+  ZoneHashMap deoptimizations_;
   TranslationBuffer translations_;
   ZoneList<Handle<Object> > deoptimization_literals_;
 
@@ -405,7 +434,7 @@ class LLVMChunk final : public LowChunk {
       target_index_for_ppid_(),
       inlined_closures_(1, info->zone()) {}
 
-  using PpIdToIndexMap = std::map<int64_t, uint32_t>;
+  using PpIdToIndexMap = std::map<int32_t, uint32_t>;
 
   static LLVMChunk* NewChunk(HGraph *graph);
 
@@ -466,7 +495,7 @@ class LLVMChunk final : public LowChunk {
   // FIXME(llvm): memory leak
   // (this map allocates keys on the heap and doesn't die).
   // Map patchpointId -> index in masm_.code_targets_
-  std::map<int64_t, uint32_t> target_index_for_ppid_;
+  PpIdToIndexMap target_index_for_ppid_;
   ZoneList<Handle<JSFunction> > inlined_closures_;
 };
 
@@ -486,9 +515,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
         osr_preserved_values_(4, info->zone()),
         emit_debug_code_(FLAG_debug_code),
         volatile_zero_address_(nullptr),
-        last_reloc_index_offset_(-1),
         pointers_() {
-    reloc_data_ = new(zone()) LLVMRelocationData();
+    reloc_data_ = new(zone()) LLVMRelocationData(zone());
   }
   ~LLVMChunkBuilder() {}
 
@@ -520,24 +548,6 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)
 #undef DECLARE_DO
   static const uintptr_t kExtFillingValue = 0xabcdbeef;
-  // TODO(llvm): bitvectors seem to be a much wiser solution to this.
-  static const int64_t kMaxDeoptCount = (1 << 10) - 1;
-  static const int64_t kFirstRelocIndex = kMaxDeoptCount + 1;
-  static const int64_t kMaxRelocCount = (1 << 20) - 1;
-  static const int64_t kFirstSafepointIndex = kMaxRelocCount + 1;
-
-  static bool IsPatchpointIdDeopt(int64_t patchpoint_id) {
-    return patchpoint_id <= LLVMChunkBuilder::kMaxDeoptCount;
-  }
-
-  static bool IsPatchpointIdSafepoint(int64_t patchpoint_id) {
-    return patchpoint_id >= kFirstSafepointIndex;
-  }
-
-  static bool IsPatchpointIdReloc(int64_t patchpoint_id) {
-    return !IsPatchpointIdDeopt(patchpoint_id)
-        && !IsPatchpointIdSafepoint(patchpoint_id);
-  }
 
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
@@ -641,7 +651,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   void AddDeprecationDependency(Handle<Map> map);
   void CallStackMap(int stackmap_id, llvm::Value* value);
   void CallStackMap(int stackmap_id, std::vector<llvm::Value*>& values);
-  llvm::CallInst* CallPatchPoint(int64_t stackmap_id,
+  llvm::CallInst* CallPatchPoint(int32_t stackmap_id,
                                  llvm::Value* target_function,
                                  std::vector<llvm::Value*>& function_args,
                                  std::vector<llvm::Value*>& live_values,
@@ -680,8 +690,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   ZoneList<llvm::Value*> osr_preserved_values_;
   bool emit_debug_code_;
   llvm::Value* volatile_zero_address_;
-  int last_reloc_index_offset_;
   // TODO(llvm): choose more appropriate data structure (maybe in the zone).
+  // Or even some fancy lambda to pass to createAppendLivePointersToSafepoints.
   std::set<llvm::Value*> pointers_;
   enum ScaleFactor {
     times_1 = 0,
