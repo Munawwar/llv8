@@ -4581,6 +4581,33 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   }
 }
 
+void LLVMChunkBuilder::RecordWriteField(llvm::Value* object, llvm::Value* value,
+                                   int offset, PointersToHereCheck ptr_check) {
+  llvm::BasicBlock* current_block = NewBlock("RECORD WRITE SMI CHECKED");
+  llvm::BasicBlock* done = NewBlock("RECORD WRITE FIELD SMI CHECKED");
+  if (INLINE_SMI_CHECK) {
+    // Skip barrier if writing a smi.
+    llvm::Value* smi_cond = SmiCheck(value, false);//JumpIfSmi(value, &done);
+    __ CreateCondBr(smi_cond, done, current_block);
+    __ SetInsertPoint(current_block);
+  }
+  //DCHECK(IsAligned(offset, kPointerSize));
+  auto map_address = FieldOperand(object, offset);
+  map_address = __ CreateBitOrPointerCast(map_address, Types::tagged);
+
+  if (emit_debug_code()) {
+    UNIMPLEMENTED();
+  }
+
+  RecordWrite(object, map_address, value, ptr_check);
+  __ CreateBr(done);
+  __ SetInsertPoint(done);
+
+  if (emit_debug_code()) {
+    UNIMPLEMENTED();
+  }
+}
+
 void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
                                    llvm::Value* value, PointersToHereCheck ptr_check) {
   if (!FLAG_incremental_marking) {
@@ -4684,8 +4711,10 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     } else {
       llvm::Value* scratch = MoveHeapObject(transition);
       llvm::Value* obj = LoadFieldOperand(Use(instr->object()), HeapObject::kMapOffset);
-      obj = scratch;
-      RecordWriteForMap(obj, scratch);
+      llvm::Value* temp_obj = __ CreateIntToPtr(scratch, Types::ptr_i64);
+      //scratch = __ CreateBitCast(temp_obj, Types::ptr_i8);
+      __ CreateStore(obj, temp_obj);
+      RecordWriteForMap(Use(instr->object()), scratch);
     }
   }
 
@@ -4734,12 +4763,12 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
 
   if (instr->NeedsWriteBarrier()) {
     // UNIMPLEMENTED(); FIXME temporary for testing store_key
+    RecordWriteField(Use(instr->object()), Use(instr->value()), offset, instr->PointersToHereCheckForValue());
   }
 }
 
 void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
   //UNIMPLEMENTED();
-  // Calling convention change
   llvm::Value* context = Use(instr->context());
   llvm::Value* object = Use(instr->object());
   llvm::Value* value = Use(instr->value());
@@ -4759,7 +4788,7 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
     params.push_back(pending_pushed_args_[i]);
   pending_pushed_args_.Clear();
   llvm::Value* call = CallAddress(ic->instruction_start(),
-                                  llvm::CallingConv::X86_64_V8_S4, params);
+                                  llvm::CallingConv::X86_64_V8_S7, params);
   llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
   instr->set_llvm_value(return_val);
 }
