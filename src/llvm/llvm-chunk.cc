@@ -629,15 +629,13 @@ void LLVMChunkBuilder::ResolvePhis(HBasicBlock* block) {
       HValue* operand = phi->OperandAt(j);
       auto llvm_phi = static_cast<llvm::PHINode*>(phi->llvm_value());
       llvm::BasicBlock* operand_block = operand->block()->llvm_end_basic_block();
-      if (operand->EmitAtUses() && operand->llvm_value() == nullptr) {
-        // The problem is that in hydrogen there are Phi nodes whit parameters
-        // which are located in the same block. string-base64 -> base64ToString
-        // This parameters then translted into gap instructions in  the phi predecessor blocks.
-        DCHECK(phi->OperandCount() ==  phi->block()->predecessors()->length());
-        operand_block = phi->block()->predecessors()->at(j)->llvm_end_basic_block();
-        // We need this, otherwise we  will insert Use(operand) in the last block
-        __ SetInsertPoint(operand_block);
-      }
+      // The problem is that in hydrogen there are Phi nodes whit parameters
+      // which are located in the same block. string-base64 -> base64ToString
+      // This parameters then translted into gap instructions in  the phi predecessor blocks.
+      DCHECK(phi->OperandCount() ==  phi->block()->predecessors()->length());
+      operand_block = phi->block()->predecessors()->at(j)->llvm_end_basic_block();
+      // We need this, otherwise we  will insert Use(operand) in the last block
+      __ SetInsertPoint(operand_block);
       llvm_phi->addIncoming(Use(operand), operand_block);
       
     }
