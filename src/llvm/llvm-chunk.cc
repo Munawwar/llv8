@@ -3986,7 +3986,7 @@ void LLVMChunkBuilder::DoMathFloorOfDiv(HMathFloorOfDiv* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
+/*void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
   llvm::Value* value = Use(instr->value());
   llvm::Value* output_reg = nullptr;
   llvm::Value* output_reg_s = __ getInt32(0);
@@ -4057,6 +4057,20 @@ void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
   phi->addIncoming(result, check_overflow);
   phi->addIncoming(output_reg_s, sign);
   instr->set_llvm_value(phi);
+}
+*/
+
+void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
+  llvm::Function* floor_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+         llvm::Intrinsic::floor, Types::float64);
+  std::vector<llvm::Value*> params;
+  params.push_back(Use(instr->value()));
+  llvm::Value* floor = __ CreateCall(floor_intrinsic, params);
+  //llvm::Value* casted_floor = __ CreateBitCast(floor, Types::i32); 
+  llvm::Value* casted_int =  __ CreateFPToSI(floor, Types::i64);
+     // FIXME: Figure out why we need this step. Fix for bitops-nsieve-bits
+     auto result = __ CreateTruncOrBitCast(casted_int, Types::i32);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
