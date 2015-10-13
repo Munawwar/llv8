@@ -1164,6 +1164,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   Handle<Code> code = Handle<Code>::null();
   {
     AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap;
     code = ces.GetCode();
     // FIXME(llvm,gc): respect reloc info mode...
   }
@@ -4621,13 +4622,13 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
     llvm::Value* casted_adderss = __ CreateBitCast(gep_0,
                                                    Types::ptr_i64);
     key_l = __ CreateLoad(casted_adderss);
-    RecordWrite(elem, key_l, value, instr->PointersToHereCheckForValue());
+    RecordWrite(elem, key_l, value, instr->PointersToHereCheckForValue(), OMIT_REMEMBERED_SET);
     //UNIMPLEMENTED();
   }
 }
 
 void LLVMChunkBuilder::RecordWriteField(llvm::Value* object, llvm::Value* value,
-                                   int offset, PointersToHereCheck ptr_check) {
+                                   int offset, PointersToHereCheck ptr_check, RememberedSetAction remembered_set) {
   llvm::BasicBlock* current_block = NewBlock("RECORD WRITE SMI CHECKED");
   llvm::BasicBlock* done = NewBlock("RECORD WRITE FIELD SMI CHECKED");
   if (INLINE_SMI_CHECK) {
@@ -4644,7 +4645,7 @@ void LLVMChunkBuilder::RecordWriteField(llvm::Value* object, llvm::Value* value,
     UNIMPLEMENTED();
   }
 
-  RecordWrite(object, map_address, value, ptr_check);
+  RecordWrite(object, map_address, value, ptr_check, remembered_set);
   __ CreateBr(done);
   __ SetInsertPoint(done);
 
@@ -4654,7 +4655,7 @@ void LLVMChunkBuilder::RecordWriteField(llvm::Value* object, llvm::Value* value,
 }
 
 void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
-                                   llvm::Value* value, PointersToHereCheck ptr_check) {
+                                   llvm::Value* value, PointersToHereCheck ptr_check, RememberedSetAction remembered_set) {
   if (!FLAG_incremental_marking) {
     return;
   }
@@ -4689,7 +4690,7 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
   Register map_reg = rcx;
   Register dst_reg = rdx;
   RecordWriteStub stub(isolate(), object_reg, map_reg, dst_reg,
-                       OMIT_REMEMBERED_SET, kSaveFPRegs);
+                       remembered_set, kSaveFPRegs);
   Handle<Code> code = Handle<Code>::null();
   {
     AllowHandleAllocation allow_handles;
@@ -4808,16 +4809,14 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
 
   if (instr->NeedsWriteBarrier()) {
     // UNIMPLEMENTED(); FIXME temporary for testing store_key
-    RecordWriteField(Use(instr->object()), Use(instr->value()), offset, instr->PointersToHereCheckForValue());
+    RecordWriteField(Use(instr->object()), Use(instr->value()), offset, instr->PointersToHereCheckForValue(), EMIT_REMEMBERED_SET);
   }
 }
 
 void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
-  //UNIMPLEMENTED();
   llvm::Value* context = Use(instr->context());
   llvm::Value* object = Use(instr->object());
   llvm::Value* value = Use(instr->value());
-  //Handle<String> str = instr->name();
   llvm::Value* name_reg = MoveHeapObject(instr->name());
   AllowHandleAllocation allow_handles_allocation;
   Handle<Code> ic =
@@ -4828,7 +4827,6 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
   params.push_back(object);
   params.push_back(value);
   params.push_back(name_reg);
-  //params.push_back(value);
   for (int i = pending_pushed_args_.length() - 1; i >= 0; i--)
     params.push_back(pending_pushed_args_[i]);
   pending_pushed_args_.Clear();
