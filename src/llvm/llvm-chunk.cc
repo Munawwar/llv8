@@ -1732,7 +1732,6 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
   llvm::Value* const_value = CreateConstant(instr);
   instr->set_llvm_value(const_value);
-
 }
 
 void LLVMChunkBuilder::DoReturn(HReturn* instr) {
@@ -4300,7 +4299,50 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
 }
 
 void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
-  UNIMPLEMENTED();
+  llvm::BasicBlock* materialized = NewBlock("DoRegExpLiteral materialized");
+  llvm::BasicBlock* near = NewBlock("DoRegExpLiteral near");
+  int literal_offset =
+      FixedArray::OffsetOfElementAt(instr->literal_index());
+  llvm::Value* literals = MoveHeapObject(instr->literals());
+  llvm::Value* fild_literal = LoadFieldOperand(literals, literal_offset);
+  auto cmp_root = CompareRoot(fild_literal ,Heap::kUndefinedValueRootIndex);
+  __ CreateCondBr(cmp_root, materialized, near);
+  __ SetInsertPoint(near);
+  DCHECK(pending_pushed_args_.is_empty());
+  pending_pushed_args_.Add(literals, info()->zone());
+  pending_pushed_args_.Add(__ getInt64(literal_offset), info()->zone());
+  pending_pushed_args_.Add(MoveHeapObject(instr->pattern()), info()->zone());
+  pending_pushed_args_.Add(MoveHeapObject(instr->flags()), info()->zone());
+  llvm::Value* call_result = CallRuntimeViaId(Runtime::kMaterializeRegExpLiteral);
+  pending_pushed_args_.Clear();
+
+  __ SetInsertPoint(materialized);
+  int size = JSRegExp::kSize + JSRegExp::kInObjectFieldCount * kPointerSize;
+  //TODO(llvm) impement Allocate(size, rax, rcx, rdx, &runtime_allocate, TAG_OBJECT);
+  //                    jmp(&allocated, Label::kNear);
+
+  DCHECK(pending_pushed_args_.is_empty());
+  pending_pushed_args_.Add(call_result, info()->zone());
+  pending_pushed_args_.Add(__ getInt64(size), info()->zone());
+  llvm::Value* result = CallRuntimeViaId(Runtime::kAllocateInNewSpace);
+  llvm::Value* value = __ CreateBitOrPointerCast(result, Types::i64);
+  llvm::Value* temp = nullptr;    //rdx
+  llvm::Value* temp2 = nullptr;     //rcx
+  for (int i = 0; i < size - kPointerSize; i += 2 * kPointerSize) {
+    temp = LoadFieldOperand(value, i);
+    temp2 = LoadFieldOperand(value, i + kPointerSize);
+    llvm::Value* ptr = __ CreateIntToPtr(call_result, Types::ptr_i8);
+    llvm::Value* address =  __ CreateGEP(ptr, __ getInt32(i));
+    address = __ CreateBitCast(address, Types::ptr_tagged);
+    __ CreateStore(temp, address);
+    llvm::Value* address2 =  __ CreateGEP(ptr, __ getInt32(i + kPointerSize));
+    address2 = __ CreateBitCast(address2, Types::ptr_tagged);
+    __ CreateStore(temp2, address2);
+  }
+  if ((size % (2 * kPointerSize)) != 0) {
+    UNIMPLEMENTED();
+  }
+  instr->set_llvm_value(value);
 }
 
 void LLVMChunkBuilder::DoRor(HRor* instr) {
@@ -4847,7 +4889,51 @@ void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
 }
 
 void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* context = Use(instr->context());
+  Token::Value op = instr->token();
+  AllowHandleAllocation allow_handles;
+  Handle<Code> ic = CodeFactory::CompareIC(isolate(), op).code();
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  llvm::Value* result =  CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8,
+              params);
+  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
+  llvm::Value* test = __ CreateAnd(return_val,return_val);
+  llvm::Value* cmp = nullptr;
+  llvm::BranchInst* branch = nullptr;
+  switch (op) {
+    case Token::EQ:
+    case Token::EQ_STRICT:
+      cmp = __ CreateICmpEQ(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+      break;
+    case Token::NE:
+    case Token::NE_STRICT:
+      cmp = __ CreateICmpNE(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+      break;
+    case Token::LT:
+      cmp = __ CreateICmpULT(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+      break;
+    case Token::GT:
+      cmp = __ CreateICmpUGT(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+      break;
+    case Token::LTE:
+      cmp = __ CreateICmpULE(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+      break;
+    case Token::GTE:
+      cmp = __ CreateICmpUGE(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+      break;
+    case Token::IN:
+    case Token::INSTANCEOF:
+    default:
+      UNREACHABLE();
+  }
+  instr->set_llvm_value(branch);
 }
 
 void LLVMChunkBuilder::DoSub(HSub* instr) {
