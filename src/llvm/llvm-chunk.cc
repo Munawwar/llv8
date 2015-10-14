@@ -1777,29 +1777,30 @@ void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
 }
 
 void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
-  std::vector<llvm::Value*> args;
-  llvm::Value* arg1 = Integer32ToSmi(instr->size());
-  int flags = 0;
-  if (instr->IsOldPointerSpaceAllocation()) {
-   // DCHECK(!instr->IsOldDataSpaceAllocation());
-   // DCHECK(!instr->->IsNewSpaceAllocation());
-    flags = AllocateTargetSpace::update(flags, OLD_POINTER_SPACE);
-  } else if (instr->IsOldDataSpaceAllocation()) {
-   // DCHECK(!instr->->IsNewSpaceAllocation());
-    flags = AllocateTargetSpace::update(flags, OLD_DATA_SPACE);
-  } else {
-    flags = AllocateTargetSpace::update(flags, NEW_SPACE);
-  }
-  llvm::Value* value = __ getInt32(flags);
-  llvm::Value* arg2 = Integer32ToSmi(value);
-  args.push_back(arg2);
-  args.push_back(arg1);
-  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
-  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
-  if (instr->MustPrefillWithFiller()) {
-    UNIMPLEMENTED();
-  }
-  instr->set_llvm_value(alloc_casted);
+  UNIMPLEMENTED();
+//  std::vector<llvm::Value*> args;
+//  llvm::Value* arg1 = Integer32ToSmi(instr->size());
+//  int flags = 0;
+//  if (instr->IsOldPointerSpaceAllocation()) {
+//   // DCHECK(!instr->IsOldDataSpaceAllocation());
+//   // DCHECK(!instr->->IsNewSpaceAllocation());
+//    flags = AllocateTargetSpace::update(flags, OLD_POINTER_SPACE);
+//  } else if (instr->IsOldDataSpaceAllocation()) {
+//   // DCHECK(!instr->->IsNewSpaceAllocation());
+//    flags = AllocateTargetSpace::update(flags, OLD_DATA_SPACE);
+//  } else {
+//    flags = AllocateTargetSpace::update(flags, NEW_SPACE);
+//  }
+//  llvm::Value* value = __ getInt32(flags);
+//  llvm::Value* arg2 = Integer32ToSmi(value);
+//  args.push_back(arg2);
+//  args.push_back(arg1);
+//  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
+//  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
+//  if (instr->MustPrefillWithFiller()) {
+//    UNIMPLEMENTED();
+//  }
+//  instr->set_llvm_value(alloc_casted);
 }
 
 void LLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
@@ -2049,11 +2050,11 @@ void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   CallInterfaceDescriptor descriptor = instr->descriptor();
 
   if (descriptor.GetRegisterParameterCount() != 5) UNIMPLEMENTED();
-  if (!descriptor.GetParameterRegister(0).is(rsi) ||
-      !descriptor.GetParameterRegister(1).is(rdi) ||
-      !descriptor.GetParameterRegister(2).is(rbx) ||
-      !descriptor.GetParameterRegister(3).is(rcx) ||
-      !descriptor.GetParameterRegister(4).is(rdx)) UNIMPLEMENTED();
+  if (!descriptor.GetRegisterParameter(0).is(rsi) ||
+      !descriptor.GetRegisterParameter(1).is(rdi) ||
+      !descriptor.GetRegisterParameter(2).is(rbx) ||
+      !descriptor.GetRegisterParameter(3).is(rcx) ||
+      !descriptor.GetRegisterParameter(4).is(rdx)) UNIMPLEMENTED();
 
   HValue* target = instr->target();
   // TODO(llvm): how  about a zone list?
@@ -2113,19 +2114,15 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
                                          JSFunction::kContextOffset,
                                          "target_context");
 
-  int actual_arg_count = 3;
-  if (instr->pass_argument_count())
-    actual_arg_count = 4; //rax
-  auto argument_count = instr->argument_count() + actual_arg_count; // rsi, rdi, rbx
+  int actual_arg_count = 4; //rax (holds parameter count), rsi, rdi, rbx (OSR)
+  auto argument_count = instr->argument_count() + actual_arg_count;
 
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   args[0] = target_context;
   args[1] = function_object;
   args[2] = __ getInt64(0);
-  if (instr->pass_argument_count()) {
-    args[3] = __ getInt64(instr->argument_count());
-  }
+  args[3] = __ getInt64(instr->argument_count());
   DCHECK(pending_pushed_args_.length() + actual_arg_count == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
   for (int i = 0; i < pending_pushed_args_.length(); i++) {
@@ -2906,7 +2903,8 @@ void LLVMChunkBuilder::DoCompareHoleAndBranch(HCompareHoleAndBranch* instr) {
 
 void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   Token::Value op = instr->token();
-  Handle<Code> ic = CodeFactory::CompareIC(isolate(), op).code();
+  Handle<Code> ic = CodeFactory::CompareIC(isolate(), op, instr->strength()).
+      code();
 
   auto context = Use(instr->context());
   auto left = Use(instr->left());
@@ -3212,10 +3210,6 @@ void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
   __ SetInsertPoint(use_cache);
   
   //UNIMPLEMENTED();
-}
-
-void LLVMChunkBuilder::DoFunctionLiteral(HFunctionLiteral* instr) {
-  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoGetCachedArrayIndex(HGetCachedArrayIndex* instr) {
