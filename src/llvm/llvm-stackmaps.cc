@@ -281,12 +281,12 @@ void StackMaps::dumpMultiline(std::ostream& os, const char* prefix) const {
 StackMaps::RecordMap StackMaps::computeRecordMap() const {
   // FIXME(llvm): seems that it's best to cache results (but see usage).
   RecordMap result;
-  for (unsigned i = records.size(); i--;)
+  for (auto i = records.size(); i--;)
     result[records[i].patchpointID] = records[i]; // Careful (life-time)!
   return result;
 }
 
-unsigned StackMaps::stackSize() const {
+uint64_t StackMaps::stackSize() const {
   CHECK(stack_sizes.size() == 1);
 
   return stack_sizes[0].size;

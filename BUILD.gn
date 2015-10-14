@@ -1075,8 +1075,6 @@ source_set("v8_base") {
     "src/lithium-codegen.h",
     "src/lithium.cc",
     "src/lithium.h",
-    "src/liveedit.cc",
-    "src/liveedit.h",
     "src/llvm/llvm-chunk.cc",
     "src/llvm/llvm-chunk.h",
     "src/llvm/llvm-headers.h",

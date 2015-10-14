@@ -10,7 +10,6 @@
 #include "src/factory.h"
 #include "src/hydrogen-infer-representation.h"
 #include "src/llvm/llvm-chunk.h"
-#include "src/property-details-inl.h"
 
 #if V8_TARGET_ARCH_IA32
 #include "src/ia32/lithium-ia32.h"  // NOLINT

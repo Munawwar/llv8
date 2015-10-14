@@ -27,6 +27,7 @@
 
 #include "src/allocation.h"
 #include "src/compiler.h"
+#include "src/v8.h"
 
 namespace v8 {
 namespace internal {

@@ -463,7 +463,7 @@ bool LCodeGen::IsInteger32Constant(LConstantOperand* op) const {
 
 
 bool LCodeGen::IsExternalConstant(LConstantOperand* op) const {
-  return chunk_->LookupLiteralRepresentation(op).IsExternal();
+  return chunk()->LookupLiteralRepresentation(op).IsExternal();
 }
 
 
@@ -2096,8 +2096,8 @@ void LCodeGen::EmitBranch(InstrType instr, Condition cc) {
 
 template <class InstrType>
 void LCodeGen::EmitTrueBranch(InstrType instr, Condition cc) {
-  int true_block = instr->TrueDestination(chunk_);
-  __ j(cc, chunk_->GetAssemblyLabel(true_block));
+  int true_block = instr->TrueDestination(chunk());
+  __ j(cc, chunk()->GetAssemblyLabel(true_block));
 }
 
 
@@ -2230,7 +2230,7 @@ void LCodeGen::DoBranch(LBranch* instr) {
       if (expected.Contains(ToBooleanStub::SIMD_VALUE)) {
         // SIMD value -> true.
         __ CmpInstanceType(map, SIMD128_VALUE_TYPE);
-        __ j(equal, instr->TrueLabel(chunk_));
+        __ j(equal, instr->TrueLabel(chunk()));
       }
 
       if (expected.Contains(ToBooleanStub::HEAP_NUMBER)) {

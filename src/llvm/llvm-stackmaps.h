@@ -180,7 +180,7 @@ struct StackMaps {
 
   RecordMap computeRecordMap() const;
 
-  unsigned stackSize() const;
+  uint64_t stackSize() const;
 };
 
 

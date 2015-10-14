@@ -21,6 +21,28 @@
 namespace v8 {
 namespace internal {
 
+// TODO(llvm): Move to a separate file.
+// Actually it should be elsewhere. And probably there is.
+// So find it and remove this class.
+class IntHelper : public AllStatic {
+ public:
+  // FIXME(llvm): consider int != int32
+  static bool IsInt(uint64_t x) { return is_int32(x); }
+  static int AsInt(uint64_t x) {
+    DCHECK(IsInt(x));
+    return static_cast<int>(x);
+  }
+  static bool IsInt(long x) { return is_int32(x); }
+  static int AsInt(long x) {
+    DCHECK(IsInt(x));
+    return static_cast<int>(x);
+  }
+  static int AsUInt32(uint64_t x) {
+    DCHECK(is_uint32(x));
+    return static_cast<uint32_t>(x);
+  }
+};
+
 // ZoneObject is probably a better approach than the fancy
 // C++11 smart pointers which I have been using all over the place.
 // So TODO(llvm): more zone objects!
@@ -54,7 +76,7 @@ class LLVMRelocationData : public ZoneObject {
 };
 
 // TODO(llvm): move this class to a separate file. Or, better, 2 files
-class LLVMGranularity FINAL {
+class LLVMGranularity final {
  public:
   static LLVMGranularity& getInstance() {
     static LLVMGranularity instance;
@@ -215,7 +237,7 @@ class LLVMGranularity FINAL {
   DISALLOW_COPY_AND_ASSIGN(LLVMGranularity);
 };
 
-struct Types FINAL : public AllStatic {
+struct Types final : public AllStatic {
    static llvm::Type* tagged;
    static llvm::PointerType* ptr_tagged;
 
@@ -251,7 +273,7 @@ struct Types FINAL : public AllStatic {
   }
 };
 
-class LLVMEnvironment FINAL:  public ZoneObject {
+class LLVMEnvironment final : public ZoneObject {
  public:
   LLVMEnvironment(Handle<JSFunction> closure,
                   FrameType frame_type,
@@ -284,6 +306,7 @@ class LLVMEnvironment FINAL:  public ZoneObject {
   FrameType frame_type() const { return frame_type_; }
   int arguments_stack_height() const { return arguments_stack_height_; }
   LLVMEnvironment* outer() const { return outer_; }
+  HEnterInlined* entry() { return entry_; }
   const ZoneList<llvm::Value*>* values() const { return &values_; }
   BailoutId ast_id() const { return ast_id_; }
   int translation_size() const { return translation_size_; }
@@ -310,17 +333,8 @@ class LLVMEnvironment FINAL:  public ZoneObject {
   }
 
   ~LLVMEnvironment() { // FIXME(llvm): remove unused fields.
-//    USE(closure_);
-//    USE(frame_type_);
-//    USE(arguments_stack_height_);
     USE(deoptimization_index_);
-//    USE(ast_id_);
-//    USE(translation_size_);
-//    USE(parameter_count_);
     USE(pc_offset_);
-    //USE(object_mapping_);
-//    USE(outer_);
-    USE(entry_);
     USE(has_been_used_);
   }
 
@@ -378,7 +392,7 @@ class LLVMDeoptData {
   Zone* zone_;
 };
 
-class LLVMChunk FINAL : public LowChunk {
+class LLVMChunk final : public LowChunk {
  public:
   virtual ~LLVMChunk();
   LLVMChunk(CompilationInfo* info, HGraph* graph)
@@ -455,7 +469,7 @@ class LLVMChunk FINAL : public LowChunk {
   ZoneList<Handle<JSFunction> > inlined_closures_;
 };
 
-class LLVMChunkBuilder FINAL : public LowChunkBuilderBase {
+class LLVMChunkBuilder final : public LowChunkBuilderBase {
  public:
   LLVMChunkBuilder(CompilationInfo* info, HGraph* graph)
       : LowChunkBuilderBase(info, graph),

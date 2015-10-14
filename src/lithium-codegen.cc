@@ -38,11 +38,6 @@ namespace v8 {
 namespace internal {
 
 
-HGraph* LCodeGenBase::graph() const {
-  return chunk()->graph();
-}
-
-
 LCodeGenBase::LCodeGenBase(LChunk* chunk,
                            MacroAssembler* assembler,
                            CompilationInfo* info)

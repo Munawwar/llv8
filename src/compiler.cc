@@ -20,7 +20,6 @@
 #include "src/interpreter/interpreter.h"
 #include "src/isolate-inl.h"
 #include "src/lithium.h"
-#include "src/liveedit.h"
 #include "src/llvm/llvm-chunk.h"
 #include "src/log-inl.h"
 #include "src/messages.h"

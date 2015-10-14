@@ -85,8 +85,10 @@ Handle<Code> LLVMChunk::Codegen() {
   // TODO(llvm): what's up with setting reloc_info's host_ to *code?
 
   // Allocate and install the code.
+  if (info()->IsStub()) UNIMPLEMENTED(); // Probably different flags for stubs.
+  Code::Flags flags = Code::ComputeFlags(info()->output_code_kind());
   Handle<Code> code = isolate->factory()->NewLLVMCode(code_desc,
-      &reloc_bytevector, info()->flags());
+      &reloc_bytevector, flags);
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
@@ -126,42 +128,19 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   int height = translation_size - environment->parameter_count();
 
   WriteTranslation(environment->outer(), stackmap, translation, stackmaps);
-  bool has_closure_id = !info()->closure().is_null() &&
-      !info()->closure().is_identical_to(environment->closure());
 
-  int closure_id;
-  if (has_closure_id)
+  int shared_id;
+  if (environment->entry())
     UNIMPLEMENTED();
   else
-    closure_id = Translation::kSelfLiteralId;
-
-//  int closure_id = has_closure_id
-//      ? DefineDeoptimizationLiteral(environment->closure())
-//      : Translation::kSelfLiteralId;
+    shared_id = deopt_data_->DefineDeoptimizationLiteral(info()->shared_info());
 
   switch (environment->frame_type()) {
     case JS_FUNCTION:
-      translation->BeginJSFrame(environment->ast_id(), closure_id, height);
+      translation->BeginJSFrame(environment->ast_id(), shared_id, height);
       break;
-    case JS_CONSTRUCT:
-      translation->BeginConstructStubFrame(closure_id, translation_size);
-      break;
-    case JS_GETTER:
-      DCHECK(translation_size == 1);
-      DCHECK(height == 0);
-      translation->BeginGetterStubFrame(closure_id);
-      break;
-    case JS_SETTER:
-      DCHECK(translation_size == 2);
-      DCHECK(height == 0);
-      translation->BeginSetterStubFrame(closure_id);
-      break;
-    case ARGUMENTS_ADAPTOR:
-      translation->BeginArgumentsAdaptorFrame(closure_id, translation_size);
-      break;
-    case STUB:
-      translation->BeginCompiledStubFrame();
-      break;
+    default:
+      UNIMPLEMENTED();
   }
 
   int object_index = 0;
@@ -371,8 +350,9 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
                            return s.functionOffset ==  address;
                          });
   DCHECK(it != std::end(stackmaps.stack_sizes));
-  DCHECK(it->size / kStackSlotSize - kPhonySpillCount >= 0);
-  code->set_stack_slots(it->size / kStackSlotSize - kPhonySpillCount);
+  int stacksize_size = IntHelper::AsInt(it->size);
+  DCHECK(stacksize_size / kStackSlotSize - kPhonySpillCount >= 0);
+  code->set_stack_slots(stacksize_size / kStackSlotSize - kPhonySpillCount);
 
   std::vector<uint32_t> sorted_ids;
   for (auto i = 0; i < stackmaps.records.size(); i++) {
@@ -383,7 +363,8 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   std::sort(sorted_ids.begin(), sorted_ids.end());
   auto true_deopt_count = sorted_ids.size();
   Handle<DeoptimizationInputData> data =
-      DeoptimizationInputData::New(isolate(), true_deopt_count, TENURED);
+      DeoptimizationInputData::New(isolate(),
+                                   IntHelper::AsInt(true_deopt_count), TENURED);
 
   if (true_deopt_count == 0) return;
 
@@ -399,7 +380,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
 
     // It's important. It seems something expects deopt entries to be stored
     // is the same order they were added.
-    int deopt_entry_number = it - sorted_ids.begin();
+    int deopt_entry_number = IntHelper::AsInt(it - sorted_ids.begin());
     // The corresponding Environment is stored in the array by index = id.
     LLVMEnvironment* env = deopt_data_->deoptimizations()[stackmap_id];
     int translation_index = WriteTranslationFor(env,
@@ -1641,7 +1622,7 @@ llvm::CallInst* LLVMChunkBuilder::CallPatchPoint(
 
   auto llvm_patchpoint_id = __ getInt64(stackmap_id);
   auto nop_size = __ getInt32(covering_nop_size);
-  auto num_args = __ getInt32(function_args.size());
+  auto num_args = __ getInt32(IntHelper::AsUInt32(function_args.size()));
 
   std::vector<llvm::Value*>  patchpoint_args =
     { llvm_patchpoint_id, nop_size, target_function, num_args };
@@ -1702,7 +1683,7 @@ void LLVMChunkBuilder::DoConstant(HConstant* instr) {
     llvm::Value* value = __ getInt64(int32_value << (kSmiShift));
     instr->set_llvm_value(value);
   } else if (r.IsInteger32()) {
-    int64_t int32_value = instr->Integer32Value();
+    auto int32_value = instr->Integer32Value();
     llvm::Value* value = __ getInt32(int32_value);
     instr->set_llvm_value(value);
   } else if (r.IsDouble()) {

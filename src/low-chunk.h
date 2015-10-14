@@ -28,25 +28,21 @@ class LowChunk : public ZoneObject {
       DCHECK(map->is_stable());
       if (!map->CanTransition()) return;
       DCHECK(!info()->IsStub());
-      stability_dependencies_.insert(map);
+      stability_dependencies_.Add(map, zone());
     }
 
     void AddDeprecationDependency(Handle<Map> map) {
       DCHECK(map->is_deprecated());
       if (!map->CanBeDeprecated()) return;
       DCHECK(!info()->IsStub());
-      deprecation_dependencies_.insert(map);
+      deprecation_dependencies_.Add(map, zone());
     }
 
   protected:
-    using MapLess = std::less<Handle<Map> >;
-    using MapAllocator = zone_allocator<Handle<Map> >;
-    using MapSet = std::set<Handle<Map>, MapLess, MapAllocator>;
-
     LowChunk(CompilationInfo* info, HGraph* graph);
 
-    MapSet stability_dependencies_;
-    MapSet deprecation_dependencies_;
+    ZoneList<Handle<Map>> stability_dependencies_;
+    ZoneList<Handle<Map>> deprecation_dependencies_;
 
   private:
     CompilationInfo* info_;

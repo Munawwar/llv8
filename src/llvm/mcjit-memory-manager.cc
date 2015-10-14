@@ -47,17 +47,20 @@ byte* MCJITMemoryManager::allocateCodeSection(uintptr_t size,
       << section_id << std::endl;
 #endif
   CHECK(alignment <= base::OS::AllocateAlignment());
+  int size_as_int = static_cast<int>(size);
+  CHECK_EQ(size_as_int, size);
 //  size_t actual_size;
 //  uint8_t* buffer =
 //      static_cast<uint8_t*>(base::OS::Allocate(size, &actual_size, true));
   byte* buffer = NewArray<byte>(RoundUp(size, alignment));
   CodeDesc desc;
   desc.buffer = buffer;
-  desc.buffer_size = RoundUp(size, alignment);
-  desc.instr_size = size;
+  desc.buffer_size = RoundUp(size_as_int, alignment);
+  desc.instr_size = size_as_int;
   desc.reloc_size = 0;
   desc.origin = nullptr;
   allocated_code_.Add(desc);
+  DCHECK_EQ(size_as_int, size);
   return buffer;
 }
 

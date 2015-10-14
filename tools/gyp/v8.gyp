@@ -860,8 +860,6 @@
         '../../src/lithium.cc',
         '../../src/lithium.h',
         '../../src/lithium-inl.h',
-        '../../src/liveedit.cc',
-        '../../src/liveedit.h',
         '../../src/llvm/llvm-chunk.cc',
         '../../src/llvm/llvm-chunk.h',
         '../../src/llvm/llvm-headers.h',
@@ -1548,7 +1546,7 @@
                 'link_settings': {
                   'libraries': [
                     '-ldl',
-                    '-lrt'
+                    '-lrt',
                     '<!@(<(llvm_config) --ldflags --libs core mcjit ipo native --system-libs)', #TODO(llvm): remove redundant if any
                   ],
                 },
