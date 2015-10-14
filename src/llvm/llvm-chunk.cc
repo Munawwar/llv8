@@ -3269,7 +3269,8 @@ void LLVMChunkBuilder::DoInstanceOf(HInstanceOf* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoInstanceOfKnownGlobal(HInstanceOfKnownGlobal* instr) {
+void LLVMChunkBuilder::DoHasInPrototypeChainAndBranch(
+    HHasInPrototypeChainAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
@@ -3314,11 +3315,8 @@ void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
   }
 }
 
-void LLVMChunkBuilder::DoIsConstructCallAndBranch(HIsConstructCallAndBranch* instr) {
-  UNIMPLEMENTED();
-}
-
-void LLVMChunkBuilder::DoIsObjectAndBranch(HIsObjectAndBranch* instr) {
+void LLVMChunkBuilder::DoIsConstructCallAndBranch(
+    HIsConstructCallAndBranch* instr) {
   UNIMPLEMENTED();
 }
 
@@ -3432,127 +3430,115 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
-  Handle<Object> handle_value = instr->cell().handle();
-  int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
-  // TODO(llvm): RelocInfo::CELL Shall we?
-  auto address_val = __ getInt64(value);
-  auto gep = FieldOperand(address_val, 8);
-  llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
-  llvm::Value* load_cell = __ CreateLoad(casted_address);
-  instr->set_llvm_value(load_cell);
-  if(instr->RequiresHoleCheck()){
-    UNIMPLEMENTED();
-  }
-}
-
 void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
   UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
-  if (instr->is_typed_elements()) {
-    DoLoadKeyedExternalArray(instr);
-  } else if (instr->representation().IsDouble()) {
-    DoLoadKeyedFixedDoubleArray(instr);
-  } else {
-    DoLoadKeyedFixedArray(instr);
-  }
+  UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
+//  if (instr->is_typed_elements()) {
+//    DoLoadKeyedExternalArray(instr);
+//  } else if (instr->representation().IsDouble()) {
+//    DoLoadKeyedFixedDoubleArray(instr);
+//  } else {
+//    DoLoadKeyedFixedArray(instr);
+//  }
 }
 
 void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
-  // TODO: Not tested
-  HValue* key = instr->key();
-  ElementsKind kind = instr->elements_kind();
-  int shift_size = ElementsKindToShiftSize(kind);
-  uint32_t inst_offset = instr->base_offset();
-  llvm::Value* gep_0 = nullptr; //FIXME: Change the name
-  llvm::Value* casted_address = nullptr;
-  llvm::Value* load = nullptr;
-  
-  if (kPointerSize == kInt32Size && !key->IsConstant()) {
-    UNIMPLEMENTED();
-  }
-  
-  if (key->IsConstant()) {
-    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
-    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
-  } else {
-     llvm::Value* lkey = Use(key);
-     llvm::Value* scale = nullptr;
-     llvm::Value* offset = nullptr;
-     if (key->representation().IsInteger32()) {
-       scale = __ getInt32(8); //TODO ScaleFactor
-       offset = __ getInt32(inst_offset);
-     } else {
-       scale = __ getInt64(8);
-       offset = __ getInt64(inst_offset);
-     }
-     llvm::Value* mul = __ CreateMul(lkey, scale);
-     llvm::Value* add = __ CreateAdd(mul, offset);
-     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
-                                              Types::ptr_i8);
-     gep_0 = __ CreateGEP(int_ptr, add);
-  }
-
-  if (kind == EXTERNAL_FLOAT32_ELEMENTS ||
-      kind == FLOAT32_ELEMENTS) {
-    UNIMPLEMENTED();
-  } else if (kind == EXTERNAL_FLOAT64_ELEMENTS ||
-             kind == FLOAT64_ELEMENTS) {
-    UNIMPLEMENTED();
-  } else {
-    switch (kind) {
-      case EXTERNAL_INT8_ELEMENTS:
-      case INT8_ELEMENTS:
-        UNIMPLEMENTED();
-        break;
-      case EXTERNAL_UINT8_ELEMENTS:
-      case EXTERNAL_UINT8_CLAMPED_ELEMENTS:
-      case UINT8_ELEMENTS:
-      case UINT8_CLAMPED_ELEMENTS:
-        UNIMPLEMENTED();
-        break;
-      case EXTERNAL_INT16_ELEMENTS:
-      case INT16_ELEMENTS:
-        UNIMPLEMENTED();
-        break;
-      case EXTERNAL_UINT16_ELEMENTS:
-      case UINT16_ELEMENTS:
-        UNIMPLEMENTED();
-        break;
-      case EXTERNAL_INT32_ELEMENTS:
-      case INT32_ELEMENTS:
-        UNIMPLEMENTED();
-        break;
-      case EXTERNAL_UINT32_ELEMENTS:
-      case UINT32_ELEMENTS:
-        casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
-        load = __ CreateLoad(casted_address);
-        instr->set_llvm_value(load);
-        if (!instr->CheckFlag(HInstruction::kUint32)) {
-          UNIMPLEMENTED();
-          //__ testl(result, result);
-          //DeoptimizeIf(negative, instr, Deoptimizer::kNegativeValue);
-        }
-        break;
-      case EXTERNAL_FLOAT32_ELEMENTS:
-      case EXTERNAL_FLOAT64_ELEMENTS:
-      case FLOAT32_ELEMENTS:
-      case FLOAT64_ELEMENTS:
-      case FAST_ELEMENTS:
-      case FAST_SMI_ELEMENTS:
-      case FAST_DOUBLE_ELEMENTS:
-      case FAST_HOLEY_ELEMENTS:
-      case FAST_HOLEY_SMI_ELEMENTS:
-      case FAST_HOLEY_DOUBLE_ELEMENTS:
-      case DICTIONARY_ELEMENTS:
-      case SLOPPY_ARGUMENTS_ELEMENTS:
-        UNREACHABLE();
-        break;
-
-    }
-  }
+  UNIMPLEMENTED();
+//  // TODO: Not tested
+//  HValue* key = instr->key();
+//  ElementsKind kind = instr->elements_kind();
+//  int shift_size = ElementsKindToShiftSize(kind);
+//  uint32_t inst_offset = instr->base_offset();
+//  llvm::Value* gep_0 = nullptr; //FIXME: Change the name
+//  llvm::Value* casted_address = nullptr;
+//  llvm::Value* load = nullptr;
+//
+//  if (kPointerSize == kInt32Size && !key->IsConstant()) {
+//    UNIMPLEMENTED();
+//  }
+//
+//  if (key->IsConstant()) {
+//    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+//    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
+//  } else {
+//     llvm::Value* lkey = Use(key);
+//     llvm::Value* scale = nullptr;
+//     llvm::Value* offset = nullptr;
+//     if (key->representation().IsInteger32()) {
+//       scale = __ getInt32(8); //TODO ScaleFactor
+//       offset = __ getInt32(inst_offset);
+//     } else {
+//       scale = __ getInt64(8);
+//       offset = __ getInt64(inst_offset);
+//     }
+//     llvm::Value* mul = __ CreateMul(lkey, scale);
+//     llvm::Value* add = __ CreateAdd(mul, offset);
+//     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+//                                              Types::ptr_i8);
+//     gep_0 = __ CreateGEP(int_ptr, add);
+//  }
+//
+//  if (kind == EXTERNAL_FLOAT32_ELEMENTS ||
+//      kind == FLOAT32_ELEMENTS) {
+//    UNIMPLEMENTED();
+//  } else if (kind == EXTERNAL_FLOAT64_ELEMENTS ||
+//             kind == FLOAT64_ELEMENTS) {
+//    UNIMPLEMENTED();
+//  } else {
+//    switch (kind) {
+//      case EXTERNAL_INT8_ELEMENTS:
+//      case INT8_ELEMENTS:
+//        UNIMPLEMENTED();
+//        break;
+//      case EXTERNAL_UINT8_ELEMENTS:
+//      case EXTERNAL_UINT8_CLAMPED_ELEMENTS:
+//      case UINT8_ELEMENTS:
+//      case UINT8_CLAMPED_ELEMENTS:
+//        UNIMPLEMENTED();
+//        break;
+//      case EXTERNAL_INT16_ELEMENTS:
+//      case INT16_ELEMENTS:
+//        UNIMPLEMENTED();
+//        break;
+//      case EXTERNAL_UINT16_ELEMENTS:
+//      case UINT16_ELEMENTS:
+//        UNIMPLEMENTED();
+//        break;
+//      case EXTERNAL_INT32_ELEMENTS:
+//      case INT32_ELEMENTS:
+//        UNIMPLEMENTED();
+//        break;
+//      case EXTERNAL_UINT32_ELEMENTS:
+//      case UINT32_ELEMENTS:
+//        casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
+//        load = __ CreateLoad(casted_address);
+//        instr->set_llvm_value(load);
+//        if (!instr->CheckFlag(HInstruction::kUint32)) {
+//          UNIMPLEMENTED();
+//          //__ testl(result, result);
+//          //DeoptimizeIf(negative, instr, Deoptimizer::kNegativeValue);
+//        }
+//        break;
+//      case EXTERNAL_FLOAT32_ELEMENTS:
+//      case EXTERNAL_FLOAT64_ELEMENTS:
+//      case FLOAT32_ELEMENTS:
+//      case FLOAT64_ELEMENTS:
+//      case FAST_ELEMENTS:
+//      case FAST_SMI_ELEMENTS:
+//      case FAST_DOUBLE_ELEMENTS:
+//      case FAST_HOLEY_ELEMENTS:
+//      case FAST_HOLEY_SMI_ELEMENTS:
+//      case FAST_HOLEY_DOUBLE_ELEMENTS:
+//      case DICTIONARY_ELEMENTS:
+//      case SLOPPY_ARGUMENTS_ELEMENTS:
+//        UNREACHABLE();
+//        break;
+//
+//    }
+//  }
 }
 
 void LLVMChunkBuilder::DoLoadKeyedFixedDoubleArray(HLoadKeyed* instr) {
@@ -3705,31 +3691,32 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
-  DCHECK(instr->object()->representation().IsTagged());
-
-  llvm::Value* obj = Use(instr->object());
-  llvm::Value* context = Use(instr->context());
-
-  Handle<Object> handle_name = instr->name(); 
-  auto name = MoveHeapObject(handle_name);
-  if (FLAG_vector_ics) {
-    UNIMPLEMENTED();
-  }
-  AllowHandleAllocation allow_handles; 
-  Handle<Code> ic = CodeFactory::LoadICInOptimizedCode(
-                        isolate(), NOT_CONTEXTUAL,
-                        instr->initialization_state()).code();
-
-  // TODO(llvm): RecordSafepointWithLazyDeopt (and reloc info) + MarkAsCall
-
-  std::vector<llvm::Value*> params;
-  params.push_back(context);
-  params.push_back(obj);
-  params.push_back(name);
-  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S5,
-                            params);
-  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
-  instr->set_llvm_value(return_val);
+  UNIMPLEMENTED();
+//  DCHECK(instr->object()->representation().IsTagged());
+//
+//  llvm::Value* obj = Use(instr->object());
+//  llvm::Value* context = Use(instr->context());
+//
+//  Handle<Object> handle_name = instr->name();
+//  auto name = MoveHeapObject(handle_name);
+//  if (FLAG_vector_ics) {
+//    UNIMPLEMENTED();
+//  }
+//  AllowHandleAllocation allow_handles;
+//  Handle<Code> ic = CodeFactory::LoadICInOptimizedCode(
+//                        isolate(), NOT_CONTEXTUAL,
+//                        instr->initialization_state()).code();
+//
+//  // TODO(llvm): RecordSafepointWithLazyDeopt (and reloc info) + MarkAsCall
+//
+//  std::vector<llvm::Value*> params;
+//  params.push_back(context);
+//  params.push_back(obj);
+//  params.push_back(name);
+//  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S5,
+//                            params);
+//  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
+//  instr->set_llvm_value(return_val);
 }
 
 void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
@@ -4132,127 +4119,105 @@ void LLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
-  if (instr->RequiresHoleCheck()) {
-    Handle<Cell> instr_cell = instr->cell().handle();
-    auto ptr_value = reinterpret_cast<uint64_t>(*(instr_cell.location()));
-    auto address_val = __ getInt64(ptr_value);
-    auto gep = FieldOperand(address_val, 8);
-    llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
-    auto loaded_value = __ CreateLoad(casted_address);
-    llvm::Value* deopt_val = CompareRoot(loaded_value, Heap::kTheHoleValueRootIndex);
-    DeoptimizeIf(deopt_val);
-    llvm::Value* store_cell = __ CreateStore(Use(instr->value()), casted_address);
-    instr->set_llvm_value(store_cell);    
-    //UNIMPLEMENTED();
-  } else {
-    Handle<Object> handle_value = instr->cell().handle();
-    int64_t value = reinterpret_cast<int64_t>(*(handle_value.location()));
-    auto address_val = __ getInt64(value);
-    auto gep = FieldOperand(address_val, 8);
-    llvm::Value* casted_address = __ CreateBitCast(gep, Types::ptr_i64);
-    llvm::Value* store_cell = __ CreateStore(Use(instr->value()), casted_address);
-    instr->set_llvm_value(store_cell);
-  }
-}
-
 void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
-  if (instr->is_typed_elements()) {
-    DoStoreKeyedExternalArray(instr);
-  } else if (instr->value()->representation().IsDouble()) {
-    DoStoreKeyedFixedDoubleArray(instr);
-  } else {
-    DoStoreKeyedFixedArray(instr);
-  }
+  UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
+//  if (instr->is_typed_elements()) {
+//    DoStoreKeyedExternalArray(instr);
+//  } else if (instr->value()->representation().IsDouble()) {
+//    DoStoreKeyedFixedDoubleArray(instr);
+//  } else {
+//    DoStoreKeyedFixedArray(instr);
+//  }
 }
 
 void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
-  //TODO: Not tested
-  ElementsKind elements_kind = instr->elements_kind();
-  int shift_size = ElementsKindToShiftSize(elements_kind);
-  uint32_t inst_offset = instr->base_offset();
-  llvm::Value* gep_0 = nullptr; //TODO: Change mame
-  llvm::Value* casted_address = nullptr;
-  llvm::Value* store = nullptr;
-  HValue* key = instr->key();
-
-  if (kPointerSize == kInt32Size && !key->IsConstant()) {
-    Representation key_representation =
-        instr->key()->representation();
-    if (ExternalArrayOpRequiresTemp(key_representation, elements_kind)) {
-      UNIMPLEMENTED();
-    } else if (instr->IsDehoisted()) {
-      UNIMPLEMENTED();
-    }
-  }
-
-  if (key->IsConstant()) {
-    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
-    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
-  } else {
-     llvm::Value* lkey = Use(key);
-     llvm::Value* scale = nullptr;
-     llvm::Value* offset = nullptr;
-     if (key->representation().IsInteger32()) {
-       scale = __ getInt32(8);
-       offset = __ getInt32(inst_offset);
-     } else {
-       scale = __ getInt64(8); //TODO: Scale_factor
-       offset = __ getInt64(inst_offset);
-     }
-     llvm::Value* mul = __ CreateMul(lkey, scale);
-     llvm::Value* add = __ CreateAdd(mul, offset);
-     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
-                                              Types::ptr_i8);
-     gep_0 = __ CreateGEP(int_ptr, add);
-  }
-
-  if (elements_kind == EXTERNAL_FLOAT32_ELEMENTS ||
-    elements_kind == FLOAT32_ELEMENTS) {
-    UNIMPLEMENTED();
-  } else if (elements_kind == EXTERNAL_FLOAT64_ELEMENTS ||
-             elements_kind == FLOAT64_ELEMENTS) {
-    UNIMPLEMENTED();
-  } else {
-    switch (elements_kind) {
-      case EXTERNAL_UINT8_CLAMPED_ELEMENTS:
-      case EXTERNAL_INT8_ELEMENTS:
-      case EXTERNAL_UINT8_ELEMENTS:
-      case INT8_ELEMENTS:
-      case UINT8_ELEMENTS:
-      case UINT8_CLAMPED_ELEMENTS:
-        UNIMPLEMENTED();
-        break;
-      case EXTERNAL_INT16_ELEMENTS:
-      case EXTERNAL_UINT16_ELEMENTS:
-      case INT16_ELEMENTS:
-      case UINT16_ELEMENTS:
-        UNIMPLEMENTED();
-        break;
-      case EXTERNAL_INT32_ELEMENTS:
-      case EXTERNAL_UINT32_ELEMENTS:
-      case INT32_ELEMENTS:
-      case UINT32_ELEMENTS:
-        casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
-        store = __ CreateStore(Use(instr->value()), casted_address);
-        instr->set_llvm_value(store);
-        break;
-      case EXTERNAL_FLOAT32_ELEMENTS:
-      case EXTERNAL_FLOAT64_ELEMENTS:
-      case FLOAT32_ELEMENTS:
-      case FLOAT64_ELEMENTS:
-      case FAST_ELEMENTS:
-      case FAST_SMI_ELEMENTS:
-      case FAST_DOUBLE_ELEMENTS:
-      case FAST_HOLEY_ELEMENTS:
-      case FAST_HOLEY_SMI_ELEMENTS:
-      case FAST_HOLEY_DOUBLE_ELEMENTS:
-      case DICTIONARY_ELEMENTS:
-      case SLOPPY_ARGUMENTS_ELEMENTS:
-        UNREACHABLE();
-        break;
-    }
-  }
+  UNIMPLEMENTED();
+//  //TODO: Not tested
+//  ElementsKind elements_kind = instr->elements_kind();
+//  int shift_size = ElementsKindToShiftSize(elements_kind);
+//  uint32_t inst_offset = instr->base_offset();
+//  llvm::Value* gep_0 = nullptr; //TODO: Change mame
+//  llvm::Value* casted_address = nullptr;
+//  llvm::Value* store = nullptr;
+//  HValue* key = instr->key();
+//
+//  if (kPointerSize == kInt32Size && !key->IsConstant()) {
+//    Representation key_representation =
+//        instr->key()->representation();
+//    if (ExternalArrayOpRequiresTemp(key_representation, elements_kind)) {
+//      UNIMPLEMENTED();
+//    } else if (instr->IsDehoisted()) {
+//      UNIMPLEMENTED();
+//    }
+//  }
+//
+//  if (key->IsConstant()) {
+//    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+//    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
+//  } else {
+//     llvm::Value* lkey = Use(key);
+//     llvm::Value* scale = nullptr;
+//     llvm::Value* offset = nullptr;
+//     if (key->representation().IsInteger32()) {
+//       scale = __ getInt32(8);
+//       offset = __ getInt32(inst_offset);
+//     } else {
+//       scale = __ getInt64(8); //TODO: Scale_factor
+//       offset = __ getInt64(inst_offset);
+//     }
+//     llvm::Value* mul = __ CreateMul(lkey, scale);
+//     llvm::Value* add = __ CreateAdd(mul, offset);
+//     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+//                                              Types::ptr_i8);
+//     gep_0 = __ CreateGEP(int_ptr, add);
+//  }
+//
+//  if (elements_kind == EXTERNAL_FLOAT32_ELEMENTS ||
+//    elements_kind == FLOAT32_ELEMENTS) {
+//    UNIMPLEMENTED();
+//  } else if (elements_kind == EXTERNAL_FLOAT64_ELEMENTS ||
+//             elements_kind == FLOAT64_ELEMENTS) {
+//    UNIMPLEMENTED();
+//  } else {
+//    switch (elements_kind) {
+//      case EXTERNAL_UINT8_CLAMPED_ELEMENTS:
+//      case EXTERNAL_INT8_ELEMENTS:
+//      case EXTERNAL_UINT8_ELEMENTS:
+//      case INT8_ELEMENTS:
+//      case UINT8_ELEMENTS:
+//      case UINT8_CLAMPED_ELEMENTS:
+//        UNIMPLEMENTED();
+//        break;
+//      case EXTERNAL_INT16_ELEMENTS:
+//      case EXTERNAL_UINT16_ELEMENTS:
+//      case INT16_ELEMENTS:
+//      case UINT16_ELEMENTS:
+//        UNIMPLEMENTED();
+//        break;
+//      case EXTERNAL_INT32_ELEMENTS:
+//      case EXTERNAL_UINT32_ELEMENTS:
+//      case INT32_ELEMENTS:
+//      case UINT32_ELEMENTS:
+//        casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
+//        store = __ CreateStore(Use(instr->value()), casted_address);
+//        instr->set_llvm_value(store);
+//        break;
+//      case EXTERNAL_FLOAT32_ELEMENTS:
+//      case EXTERNAL_FLOAT64_ELEMENTS:
+//      case FLOAT32_ELEMENTS:
+//      case FLOAT64_ELEMENTS:
+//      case FAST_ELEMENTS:
+//      case FAST_SMI_ELEMENTS:
+//      case FAST_DOUBLE_ELEMENTS:
+//      case FAST_HOLEY_ELEMENTS:
+//      case FAST_HOLEY_SMI_ELEMENTS:
+//      case FAST_HOLEY_DOUBLE_ELEMENTS:
+//      case DICTIONARY_ELEMENTS:
+//      case SLOPPY_ARGUMENTS_ELEMENTS:
+//        UNREACHABLE();
+//        break;
+//    }
+//  }
 }
 
 void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
@@ -4599,10 +4564,6 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
   else {
     UNIMPLEMENTED();
   }
-}
-
-void LLVMChunkBuilder::DoTailCallThroughMegamorphicCache(HTailCallThroughMegamorphicCache* instr) {
-  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoThisFunction(HThisFunction* instr) {
@@ -4994,6 +4955,27 @@ void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {
 }
 
 void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
+  UNIMPLEMENTED();
+}
+
+void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(
+    HCheckArrayBufferNotNeutered* instr) {
+  UNIMPLEMENTED();
+}
+
+void LLVMChunkBuilder::DoLoadGlobalViaContext(HLoadGlobalViaContext* instr) {
+  UNIMPLEMENTED();
+}
+
+void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
+  UNIMPLEMENTED();
+}
+
+void LLVMChunkBuilder::DoPrologue(HPrologue* instr) {
+  UNIMPLEMENTED();
+}
+
+void LLVMChunkBuilder::DoStoreGlobalViaContext(HStoreGlobalViaContext* instr) {
   UNIMPLEMENTED();
 }
 
