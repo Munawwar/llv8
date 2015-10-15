@@ -52,6 +52,9 @@ byte* MCJITMemoryManager::allocateCodeSection(uintptr_t size,
 //  size_t actual_size;
 //  uint8_t* buffer =
 //      static_cast<uint8_t*>(base::OS::Allocate(size, &actual_size, true));
+  // FIXME(llvm): this is wrong understanding of the alignment parameter.
+  // The commented code above is better (so TODO: use it) + at least CHECK()
+  // if alignment is right. Ditto for allocateDataSection.
   byte* buffer = NewArray<byte>(RoundUp(size, alignment));
   CodeDesc desc;
   desc.buffer = buffer;

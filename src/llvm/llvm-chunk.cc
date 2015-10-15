@@ -36,15 +36,16 @@ LLVMChunk::~LLVMChunk() {}
 Handle<Code> LLVMChunk::Codegen() {
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
       llvm_function_id_);
+  auto buf = LLVMGranularity::getInstance().memory_manager_ref()
+      ->LastAllocatedCode().buffer;
 #ifdef DEBUG
   std::cerr << "\taddress == " <<  reinterpret_cast<void*>(address) << std::endl;
-  std::cerr << "\tlast code allocated == "
-      << reinterpret_cast<void*>(
-          LLVMGranularity::getInstance()
-            .memory_manager_ref()
-            ->LastAllocatedCode()
-            .buffer)
-      << std::endl;
+  std::cerr << "\tlast allocated code section start == "
+      << static_cast<void*>(buf) << std::endl;
+  // FIXME(llvm):
+  // The right thing is address. But for now it's harder to get. So there.
+  if (reinterpret_cast<void*>(address) != static_cast<void*>(buf))
+    UNIMPLEMENTED();
   LLVMGranularity::getInstance().Err();
 #else
   USE(address);
@@ -634,6 +635,9 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   //    chunk()->GetNextSpillIndex(GENERAL_REGISTERS);
   //  }
   //}
+
+  // TODO(llvm): decide whether do have llvm insert safepoint polls.
+  //  CreateSafepointPollFunction();
 
   // First param is context (v8, js context) which goes to rsi,
   // second param is the callee's JSFunction object (rdi),
