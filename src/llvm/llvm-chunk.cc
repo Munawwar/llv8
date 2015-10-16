@@ -1777,30 +1777,27 @@ void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
 }
 
 void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
-  UNIMPLEMENTED();
-//  std::vector<llvm::Value*> args;
-//  llvm::Value* arg1 = Integer32ToSmi(instr->size());
-//  int flags = 0;
-//  if (instr->IsOldPointerSpaceAllocation()) {
-//   // DCHECK(!instr->IsOldDataSpaceAllocation());
-//   // DCHECK(!instr->->IsNewSpaceAllocation());
-//    flags = AllocateTargetSpace::update(flags, OLD_POINTER_SPACE);
-//  } else if (instr->IsOldDataSpaceAllocation()) {
-//   // DCHECK(!instr->->IsNewSpaceAllocation());
-//    flags = AllocateTargetSpace::update(flags, OLD_DATA_SPACE);
-//  } else {
-//    flags = AllocateTargetSpace::update(flags, NEW_SPACE);
-//  }
-//  llvm::Value* value = __ getInt32(flags);
-//  llvm::Value* arg2 = Integer32ToSmi(value);
-//  args.push_back(arg2);
-//  args.push_back(arg1);
-//  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
-//  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
+//  UNIMPLEMENTED();
+  std::vector<llvm::Value*> args;
+  llvm::Value* arg1 = Integer32ToSmi(instr->size());
+  int flags = 0;
+  if (instr->IsOldSpaceAllocation()) {
+    DCHECK(!instr->IsNewSpaceAllocation());
+    flags = AllocateTargetSpace::update(flags, OLD_SPACE);
+  } else {
+    flags = AllocateTargetSpace::update(flags, NEW_SPACE);
+  }
+
+  llvm::Value* value = __ getInt32(flags);
+  llvm::Value* arg2 = Integer32ToSmi(value);
+  args.push_back(arg2);
+  args.push_back(arg1);
+  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
+  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
 //  if (instr->MustPrefillWithFiller()) {
 //    UNIMPLEMENTED();
 //  }
-//  instr->set_llvm_value(alloc_casted);
+  instr->set_llvm_value(alloc_casted);
 }
 
 void LLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
@@ -2049,12 +2046,11 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   CallInterfaceDescriptor descriptor = instr->descriptor();
 
-  if (descriptor.GetRegisterParameterCount() != 5) UNIMPLEMENTED();
-  if (!descriptor.GetRegisterParameter(0).is(rsi) ||
-      !descriptor.GetRegisterParameter(1).is(rdi) ||
-      !descriptor.GetRegisterParameter(2).is(rbx) ||
-      !descriptor.GetRegisterParameter(3).is(rcx) ||
-      !descriptor.GetRegisterParameter(4).is(rdx)) UNIMPLEMENTED();
+  if (descriptor.GetRegisterParameterCount() != 4) UNIMPLEMENTED();
+   if (!descriptor.GetRegisterParameter(0).is(rdi) ||
+      !descriptor.GetRegisterParameter(1).is(rbx) ||
+      !descriptor.GetRegisterParameter(2).is(rcx) ||
+      !descriptor.GetRegisterParameter(3).is(rdx)) UNIMPLEMENTED();
 
   HValue* target = instr->target();
   // TODO(llvm): how  about a zone list?
@@ -2114,7 +2110,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
                                          JSFunction::kContextOffset,
                                          "target_context");
 
-  int actual_arg_count = 4; //rax (holds parameter count), rsi, rdi, rbx (OSR)
+  int actual_arg_count = 3; //rax (holds parameter count), rsi, rdi, rbx (OSR)
   auto argument_count = instr->argument_count() + actual_arg_count;
 
   // Set up the actual arguments
@@ -2122,7 +2118,8 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   args[0] = target_context;
   args[1] = function_object;
   args[2] = __ getInt64(0);
-  args[3] = __ getInt64(instr->argument_count());
+  //FIXME: This case needs farther investigation. Do we need new Calling Conversion here?
+  //args[3] = __ getInt64(instr->argument_count());
   DCHECK(pending_pushed_args_.length() + actual_arg_count == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
   for (int i = 0; i < pending_pushed_args_.length(); i++) {
@@ -3435,14 +3432,14 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
-  UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
-//  if (instr->is_typed_elements()) {
-//    DoLoadKeyedExternalArray(instr);
-//  } else if (instr->representation().IsDouble()) {
-//    DoLoadKeyedFixedDoubleArray(instr);
-//  } else {
-//    DoLoadKeyedFixedArray(instr);
-//  }
+  //UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
+  if (instr->is_fixed_typed_array()) {
+    DoLoadKeyedExternalArray(instr);
+  } else if (instr->representation().IsDouble()) {
+    DoLoadKeyedFixedDoubleArray(instr);
+  } else {
+    DoLoadKeyedFixedArray(instr);
+  }
 }
 
 void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
@@ -4120,14 +4117,14 @@ void LLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
-  UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
-//  if (instr->is_typed_elements()) {
-//    DoStoreKeyedExternalArray(instr);
-//  } else if (instr->value()->representation().IsDouble()) {
-//    DoStoreKeyedFixedDoubleArray(instr);
-//  } else {
-//    DoStoreKeyedFixedArray(instr);
-//  }
+//  UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
+  if (instr->is_fixed_typed_array()) {
+    DoStoreKeyedExternalArray(instr);
+  } else if (instr->value()->representation().IsDouble()) {
+    DoStoreKeyedFixedDoubleArray(instr);
+  } else {
+    DoStoreKeyedFixedArray(instr);
+  }
 }
 
 void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
@@ -4972,7 +4969,9 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
 }
 
 void LLVMChunkBuilder::DoPrologue(HPrologue* instr) {
-  UNIMPLEMENTED();
+  if (info_->num_heap_slots() > 0) {
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoStoreGlobalViaContext(HStoreGlobalViaContext* instr) {
