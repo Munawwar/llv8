@@ -714,6 +714,35 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
   current_instruction_ = old_current;
 }
 
+llvm::Value* LLVMChunkBuilder::CreateConstant(HConstant* instr) {
+  Representation r = instr->representation();
+  if (r.IsSmi()) {
+    // TODO(llvm): use/write a function for that
+    // FIXME(llvm): this block was not tested
+    int64_t int32_value = instr->Integer32Value();
+    return __ getInt64(int32_value << (kSmiShift));
+  } else if (r.IsInteger32()) {
+    return __ getInt32(instr->Integer32Value());
+  } else if (r.IsDouble()) {
+    return llvm::ConstantFP::get(Types::float64,
+                                 instr->DoubleValue());
+  } else if (r.IsExternal()) {
+    // TODO(llvm): tagged type
+    // TODO(llvm): RelocInfo::EXTERNAL_REFERENCE
+    Address external_address = instr->ExternalReferenceValue().address();
+    return __ getInt64(reinterpret_cast<uint64_t>(external_address));
+  } else if (r.IsTagged()) {
+    AllowHandleAllocation allow_handle_allocation;
+    AllowHeapAllocation allow_heap_allocation;
+    Handle<Object> object = instr->handle(isolate());
+    return MoveHeapObject(object);
+  } else {
+    UNREACHABLE();
+    llvm::Value* fictive_value = nullptr;
+    return fictive_value;
+  }
+}
+
 llvm::BasicBlock* LLVMChunkBuilder::NewBlock(const std::string& name) {
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
   return llvm::BasicBlock::Create(llvm_context, name, function_);
@@ -1483,7 +1512,12 @@ LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
       op = LLVMEnvironment::materialization_marker();
       UNIMPLEMENTED();
     } else {
-      op = Use(value);
+      if (value->IsConstant()) {
+        HConstant* instr = HConstant::cast(value);
+        op = CreateConstant(instr);
+      } else {
+        op = Use(value);
+      }
     }
     // Well, we can add a corresponding llvm value here.
     // Though it seems redundant...
@@ -1674,38 +1708,9 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
-  // Note: constants might have EmitAtUses() == true
-  Representation r = instr->representation();
-  if (r.IsSmi()) {
-    // TODO(llvm): use/write a function for that
-    // FIXME(llvm): this block was not tested
-    int64_t int32_value = instr->Integer32Value();
-    llvm::Value* value = __ getInt64(int32_value << (kSmiShift));
-    instr->set_llvm_value(value);
-  } else if (r.IsInteger32()) {
-    auto int32_value = instr->Integer32Value();
-    llvm::Value* value = __ getInt32(int32_value);
-    instr->set_llvm_value(value);
-  } else if (r.IsDouble()) {
-    llvm::Value* value = llvm::ConstantFP::get(Types::float64,
-                                               instr->DoubleValue());
-    instr->set_llvm_value(value);
-  } else if (r.IsExternal()) {
-    Address external_address = instr->ExternalReferenceValue().address();
-    // TODO(llvm): tagged type
-    // TODO(llvm): RelocInfo::EXTERNAL_REFERENCE
-    llvm::Value* value = __ getInt64(
-        reinterpret_cast<uint64_t>(external_address));
-    instr->set_llvm_value(value);
-  } else if (r.IsTagged()) {
-    AllowHandleAllocation allow_handle_allocation;
-    AllowHeapAllocation allow_heap_allocation;
-    Handle<Object> object = instr->handle(isolate());
-    auto value = MoveHeapObject(object);
-    instr->set_llvm_value(value);
-  } else {
-    UNREACHABLE();
-  }
+  llvm::Value* const_value = CreateConstant(instr);
+  instr->set_llvm_value(const_value);
+
 }
 
 void LLVMChunkBuilder::DoReturn(HReturn* instr) {
