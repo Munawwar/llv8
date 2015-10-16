@@ -934,16 +934,26 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
   return call_inst;
 }
 
-llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
+llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
                                            llvm::CallingConv::ID calling_conv,
-                                           std::vector<llvm::Value*>& params, llvm::Value* val_addr) {
+                                           std::vector<llvm::Value*>& params) {
+
+  auto index = chunk()->masm().GetCodeTargetIndex(code);
+  int64_t pp_id = ++last_reloc_index_offset_ + kFirstRelocIndex;
+  auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
+  auto nop_size = 5;
+  std::vector<llvm::Value*> empty_live_values;
+  auto call_inst = CallPatchPoint(pp_id, llvm_null, params, empty_live_values,
+                                  nop_size);
+  call_inst->setCallingConv(calling_conv);
+  chunk()->target_index_for_ppid()[pp_id] = index;
+  return call_inst;
+}
+llvm::Value* LLVMChunkBuilder::CallAddress(llvm::Value* target_address, 
+                                           llvm::CallingConv::ID calling_conv,  std::vector<llvm::Value*>& params) {
+
+
   // TODO(llvm): reimplement via CallVal. See what's up with tagged first
-  llvm::Value* target_adderss = nullptr;
-  if (val_addr != nullptr) {
-    target_adderss = val_addr;
-  } else {
-    target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
-  }
   bool is_var_arg = false;
 
   // Tagged return type won't hurt even if in fact it's void
@@ -954,11 +964,96 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
       return_type, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
 
-  llvm::Value* casted = __ CreateIntToPtr(target_adderss, ptr_to_function);
+  llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
   llvm::CallInst* call_inst = __ CreateCall(casted, params);
   call_inst->setCallingConv(calling_conv);
 
   return call_inst;
+}
+
+llvm::Value* LLVMChunkBuilder::CallRuntimeViaId(Runtime::FunctionId id) {
+ return CallRuntime(Runtime::FunctionForId(id));
+}
+
+llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
+  auto arg_count = function->nargs;
+
+  Address rt_target = ExternalReference(function, isolate()).address();
+  // TODO(llvm): we shouldn't always save FP regs
+  // moreover, we should find a way to offload such decisions to LLVM.
+  // TODO(llvm): With a proper calling convention implemented in LLVM
+  // we could call the runtime functions directly.
+  // For now we call the CEntryStub which calls the function
+  // (just as CrankShaft does).
+
+  // Don't save FP regs because llvm will [try to] take care of that
+  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    code = ces.GetCode();
+  }
+
+
+  // 1) emit relative 32 call to index which would follow the calling convention
+  // 2) record reloc info when we know the pc offset (RelocInfo::CODE...)
+
+  DirtyHack(arg_count);
+
+  auto llvm_nargs = __ getInt64(arg_count);
+  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = target_temp; //__ CreateIntToPtr(target_temp, Types::ptr_i8);
+  auto context = GetContext();
+  std::vector<llvm::Value*> args(arg_count + 3, nullptr);
+  args[0] = llvm_nargs;
+  args[1] = llvm_rt_target;
+  args[2] = context;
+
+  for (int i = 0; i < pending_pushed_args_.length(); i++) {
+    args[arg_count + 3 - 1 - i] = pending_pushed_args_[i];
+  }
+  pending_pushed_args_.Clear();
+
+  return CallCode(code, llvm::CallingConv::X86_64_V8_CES, args);
+}
+
+llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
+    llvm::Value* context, std::vector<llvm::Value*> params) {
+  const Runtime::Function* function = Runtime::FunctionForId(id);
+  auto arg_count = function->nargs;
+
+  Address rt_target = ExternalReference(function, isolate()).address();
+  // TODO(llvm): we shouldn't always save FP regs
+  // moreover, we should find a way to offload such decisions to LLVM.
+  // TODO(llvm): With a proper calling convention implemented in LLVM
+  // we could call the runtime functions directly.
+  // For now we call the CEntryStub which calls the function
+  // (just as CrankShaft does).
+
+  // Don't save FP regs because llvm will [try to] take care of that
+  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap;
+    code = ces.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+
+  // bool is_var_arg = false;
+  DirtyHack(arg_count);
+  auto llvm_nargs = __ getInt64(arg_count);
+  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
+  std::vector<llvm::Value*> actualParams;
+  actualParams.push_back(llvm_nargs);
+  actualParams.push_back(llvm_rt_target);
+  actualParams.push_back(context);
+  for (auto i = 0; i < params.size(); ++i)
+     actualParams.push_back(params[i]);
+  llvm::Value* call_inst = CallCode(code, llvm::CallingConv::X86_64_V8_CES, actualParams);
+  return call_inst;
+
 }
 
 llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
@@ -1086,131 +1181,6 @@ void LLVMChunkBuilder::DirtyHack(int arg_count) {
   llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
   __ CreateCall(inline_asm);
-}
-
-llvm::Value* LLVMChunkBuilder::CallRuntimeViaId(Runtime::FunctionId id) {
-  return CallRuntime(Runtime::FunctionForId(id));
-}
-
-llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
-  auto arg_count = function->nargs;
-
-  Address rt_target = ExternalReference(function, isolate()).address();
-  // TODO(llvm): we shouldn't always save FP regs
-  // moreover, we should find a way to offload such decisions to LLVM.
-  // TODO(llvm): With a proper calling convention implemented in LLVM
-  // we could call the runtime functions directly.
-  // For now we call the CEntryStub which calls the function
-  // (just as CrankShaft does).
-
-  // Don't save FP regs because llvm will [try to] take care of that
-  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
-  Handle<Code> code = Handle<Code>::null();
-  {
-    AllowHandleAllocation allow_handles;
-    code = ces.GetCode();
-  }
-
-  auto index = chunk()->masm().GetCodeTargetIndex(code);
-
-  // 1) emit relative 32 call to index which would follow the calling convention
-  // 2) record reloc info when we know the pc offset (RelocInfo::CODE...)
-
-  DirtyHack(arg_count);
-
-  auto llvm_nargs = __ getInt64(arg_count);
-  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
-  auto llvm_rt_target = target_temp; //__ CreateIntToPtr(target_temp, Types::ptr_i8);
-  auto context = GetContext();
-  std::vector<llvm::Value*> args(arg_count + 3, nullptr);
-  args[0] = llvm_nargs;
-  args[1] = llvm_rt_target;
-  args[2] = context;
-
-  for (int i = 0; i < pending_pushed_args_.length(); i++) {
-    args[arg_count + 3 - 1 - i] = pending_pushed_args_[i];
-  }
-  pending_pushed_args_.Clear();
-
-  int64_t pp_id = ++last_reloc_index_offset_ + kFirstRelocIndex;
-
-  auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
-  auto nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
-  std::vector<llvm::Value*> empty_live_values;
-  auto call_inst = CallPatchPoint(pp_id, llvm_null, args, empty_live_values,
-                                  nop_size);
-  call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
-
-  // Map pp_id -> index in code_targets_.
-  chunk()->target_index_for_ppid()[pp_id] = index;
-  return call_inst;
-}
-
-llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
-    llvm::Value* context, std::vector<llvm::Value*> params) {
-  const Runtime::Function* function = Runtime::FunctionForId(id);
-  auto arg_count = function->nargs;
-
-  Address rt_target = ExternalReference(function, isolate()).address();
-  // TODO(llvm): we shouldn't always save FP regs
-  // moreover, we should find a way to offload such decisions to LLVM.
-  // TODO(llvm): With a proper calling convention implemented in LLVM
-  // we could call the runtime functions directly.
-  // For now we call the CEntryStub which calls the function
-  // (just as CrankShaft does).
-
-  // Don't save FP regs because llvm will [try to] take care of that
-  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
-  Handle<Code> code = Handle<Code>::null();
-  {
-    AllowHandleAllocation allow_handles;
-    AllowHeapAllocation allow_heap;
-    code = ces.GetCode();
-    // FIXME(llvm,gc): respect reloc info mode...
-  }
-
-  llvm::Value* target_address = __ getInt64(
-      reinterpret_cast<uint64_t>(code->instruction_start()));
-  bool is_var_arg = false;
-  std::vector<llvm::Type*> pTypes;
-  LLVMContext& lcontext = LLVMGranularity::getInstance().context();
-  std::vector<llvm::Type*>FuncTy_3_args;
-  llvm::FunctionType* FuncTy_3 = llvm::FunctionType::get(
-       llvm::Type::getVoidTy(lcontext), FuncTy_3_args, false);
-  pTypes.push_back(Types::i64);
-  pTypes.push_back(Types::ptr_i8);
-  pTypes.push_back(Types::i64);
-  for (auto i = 0; i < params.size(); ++i) 
-     pTypes.push_back(params[i]->getType());
-  llvm::ArrayRef<llvm::Type*> pRef (pTypes);
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      Types::ptr_i8, pRef, is_var_arg);
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-  llvm::Value* casted = __ CreateIntToPtr(target_address, ptr_to_function);
-  // FIXME Dirty hack. We need to find way to push arguments in stack instead of moving them
-  // It will also fix arguments offset mismatch problem in runtime functions
-  // TODO(llvm): refactor (just call DirtyHack)
-  std::string argOffset = std::to_string(arg_count * 8);
-  std::string asm_string1 = "sub $$";
-  std::string asm_string2 = ", %rsp";
-  std::string final_strig = asm_string1 + argOffset+asm_string2;
-  llvm::InlineAsm* ptr_121 = llvm::InlineAsm::get(FuncTy_3, final_strig, "~{dirflag},~{fpsr},~{flags}",true);
-  llvm::CallInst* void_111 = __ CreateCall(ptr_121);
-  void_111->setCallingConv(llvm::CallingConv::C);
-  auto llvm_nargs = __ getInt64(arg_count);
-  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
-  auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
-  std::vector<llvm::Value*> actualParams;
-  actualParams.push_back(llvm_nargs);
-  actualParams.push_back(llvm_rt_target);
-  actualParams.push_back(context);
-  for (auto i = 0; i < params.size(); ++i)
-     actualParams.push_back(params[i]);
-  llvm::ArrayRef<llvm::Value*> args (actualParams);
-  llvm::CallInst* call_inst = __ CreateCall(casted, args );
-  call_inst->setCallingConv(llvm::CallingConv::X86_64_V8_CES);
-  return call_inst;
-
 }
 
 llvm::Value* LLVMChunkBuilder::GetContext() {
@@ -2116,8 +2086,7 @@ void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
       Handle<Object> handle = HConstant::cast(target)->handle(isolate());
       Handle<Code> code = Handle<Code>::cast(handle);
       // TODO(llvm, gc): reloc info mode of the code (CODE_TARGET)...
-      llvm::Value* call = CallAddress(code->instruction_start(),
-                                      llvm::CallingConv::X86_64_V8_S1, params);
+      llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S1, params);
       instr->set_llvm_value(call);
     } else {
       UNIMPLEMENTED();
@@ -2203,7 +2172,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S6,
+    result = CallCode(ic, llvm::CallingConv::X86_64_V8_S6,
                              params);
     return_val = __ CreatePtrToInt(result, Types::i64);
   } else {
@@ -2216,7 +2185,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    result = CallAddress(stub.GetCode()->instruction_start(), llvm::CallingConv::X86_64_V8,
+    result = CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8,
                              params);
     return_val = __ CreatePtrToInt(result, Types::i64);
   }
@@ -2250,7 +2219,7 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
   pending_pushed_args_.Clear();
-  llvm::Value* call = CallAddress(code->instruction_start(),
+  llvm::Value* call = CallCode(code,
                                   llvm::CallingConv::X86_64_V8_S3, params);
   llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
   instr->set_llvm_value(return_val);
@@ -2308,7 +2277,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
       llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
       __ CreateCall(inline_asm);
-      llvm::Value* call = CallAddress(code->instruction_start(),
+      llvm::Value* call = CallCode(code,
                                     llvm::CallingConv::X86_64_V8_S3, params);
       result_packed_elem = __ CreatePtrToInt(call, Types::i64);
       done =  NewBlock("CALL NEW ARRAY END");
@@ -2346,7 +2315,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
     __ CreateCall(inline_asm);
-    llvm::Value* call = CallAddress(code->instruction_start(),
+    llvm::Value* call = CallCode(code,
                                     llvm::CallingConv::X86_64_V8_S3, params);
     llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
     __ CreateBr(done);
@@ -2949,9 +2918,7 @@ void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   auto left = Use(instr->left());
   auto right = Use(instr->right());
   std::vector<llvm::Value*> params = { context, left, right };
-  auto result = CallAddress(ic->instruction_start(),
-                            llvm::CallingConv::C,
-                            params);
+  auto result = CallCode(ic, llvm::CallingConv::C, params);
   // Lithium comparison is a little strange, I think mine is all right.
   auto compare_result = __ CreateICmpNE(result, __ getInt64(0));
   auto compare_true = NewBlock("generic comparison true");
@@ -3124,9 +3091,7 @@ llvm::Value* LLVMChunkBuilder::CallCFunction(ExternalReference function,
     UNIMPLEMENTED();
   }
   llvm::Value* obj = LoadAddress(function);
-  llvm::Value* call = CallAddress(NULL,
-                                  llvm::CallingConv::X86_64_V8_S3, params,
-                                  obj);
+  llvm::Value* call = CallAddress(obj, llvm::CallingConv::X86_64_V8_S3, params);
   DCHECK(base::OS::ActivationFrameAlignment() != 0);
   DCHECK(num_arguments >= 0);
   int argument_slots_on_stack = ArgumentStackSlotsForCFunctionCall(num_arguments);
@@ -3523,9 +3488,8 @@ void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
           params.push_back(pending_pushed_args_[i]);
         pending_pushed_args_.Clear();
         // callingConv 
-        llvm::Value* call = CallAddress(NULL,
-                                  llvm::CallingConv::X86_64_V8_S4, params,
-                                  LoadFieldOperand(Use(instr->function()),JSFunction::kCodeEntryOffset));
+        llvm::Value* call = CallAddress(LoadFieldOperand(Use(instr->function()), JSFunction::kCodeEntryOffset), 
+                                       llvm::CallingConv::X86_64_V8_S4, params);
         llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
         instr->set_llvm_value(return_val);
       }
@@ -3678,7 +3642,7 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
   params.push_back(context);
   params.push_back(global_object);
   params.push_back(name);
-  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S5,
+  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S5,
                             params);
   llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
   instr->set_llvm_value(return_val);
@@ -3947,12 +3911,12 @@ void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
 //  llvm::Value* obj = Use(instr->object());
 //  llvm::Value* context = Use(instr->context());
 //
-//  Handle<Object> handle_name = instr->name();
+//  Handle<Object> handle_name = instr->name(); 
 //  auto name = MoveHeapObject(handle_name);
 //  if (FLAG_vector_ics) {
 //    UNIMPLEMENTED();
 //  }
-//  AllowHandleAllocation allow_handles;
+//  AllowHandleAllocation allow_handles; 
 //  Handle<Code> ic = CodeFactory::LoadICInOptimizedCode(
 //                        isolate(), NOT_CONTEXTUAL,
 //                        instr->initialization_state()).code();
@@ -3963,7 +3927,7 @@ void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
 //  params.push_back(context);
 //  params.push_back(obj);
 //  params.push_back(name);
-//  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8_S5,
+//  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S5,
 //                            params);
 //  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
 //  instr->set_llvm_value(return_val);
@@ -4713,9 +4677,7 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
     // FIXME(llvm,gc): respect reloc info mode...
   }
   std::vector<llvm::Value*> params = { object, key_reg, value };
-  CallAddress(code->instruction_start(),
-              llvm::CallingConv::X86_64_V8_RWS,
-              params);
+  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params);
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
@@ -4738,8 +4700,7 @@ void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
   // TODO(llvm): RecordSafepointWithLazyDeopt (and reloc info) + MarkAsCall
 
   std::vector<llvm::Value*> no_params;
-  auto result = CallAddress(ic->instruction_start(), llvm::CallingConv::C,
-                            no_params);
+  auto result = CallCode(ic, llvm::CallingConv::C, no_params);
   instr->set_llvm_value(result);
 }
 
@@ -4844,8 +4805,7 @@ void LLVMChunkBuilder::DoStoreNamedGeneric(HStoreNamedGeneric* instr) {
   for (int i = pending_pushed_args_.length() - 1; i >= 0; i--)
     params.push_back(pending_pushed_args_[i]);
   pending_pushed_args_.Clear();
-  llvm::Value* call = CallAddress(ic->instruction_start(),
-                                  llvm::CallingConv::X86_64_V8_S7, params);
+  llvm::Value* call = CallCode(ic, llvm::CallingConv::X86_64_V8_S7, params);
   llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
   instr->set_llvm_value(return_val);
 }
@@ -4867,8 +4827,7 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
   for (int i = 1; i < instr->OperandCount() ; ++i)
     params.push_back(Use(instr->OperandAt(i)));
   pending_pushed_args_.Clear();
-  llvm::Value* call = CallAddress(code->instruction_start(),
-                                  llvm::CallingConv::X86_64_V8_S4, params);
+  llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S4, params);
   llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
   instr->set_llvm_value(return_val); 
 }
@@ -4876,6 +4835,7 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
 void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   std::vector<llvm::Value*> args;
   //TODO : implement non constant case
+  //FIXME: Wrong implementation
   if(instr->index()->IsConstant()) {
     llvm::Value* const_index = Integer32ToSmi(instr->index());
     args.push_back(const_index);
@@ -4884,10 +4844,9 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
     args.push_back(arg_index);
   }
   args.push_back(Use(instr->string()));
-  llvm::Value* alloc = CallRuntimeFromDeferred(
+  llvm::Value* result = CallRuntimeFromDeferred(
       Runtime::kStringCharCodeAtRT, Use(instr->context()), args);
-  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i32);
-  instr->set_llvm_value(alloc_casted);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
@@ -4895,9 +4854,8 @@ void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
   std::vector<llvm::Value*> args;
   llvm::Value* arg1 = Integer32ToSmi(instr->value());
   args.push_back(arg1);
-  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kCharFromCode, Use(instr->context()), args);
-  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
-  instr->set_llvm_value(alloc_casted);
+  llvm::Value* result =  CallRuntimeFromDeferred(Runtime::kCharFromCode, Use(instr->context()), args);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
@@ -4907,8 +4865,7 @@ void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) 
   Handle<Code> ic = CodeFactory::CompareIC(isolate(), op).code();
   std::vector<llvm::Value*> params;
   params.push_back(context);
-  llvm::Value* result =  CallAddress(ic->instruction_start(), llvm::CallingConv::X86_64_V8,
-              params);
+  llvm::Value* result =  CallCode(ic, llvm::CallingConv::X86_64_V8, params);
   llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
   llvm::Value* test = __ CreateAnd(return_val,return_val);
   llvm::Value* cmp = nullptr;
@@ -5054,9 +5011,7 @@ void LLVMChunkBuilder::RecordWriteForMap(llvm::Value* object,
     // FIXME(llvm,gc): respect reloc info mode...
   }
   std::vector<llvm::Value*> params = { object, map, map_address };
-  CallAddress(code->instruction_start(),
-              llvm::CallingConv::X86_64_V8_RWS,
-              params);
+  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params);
   __ CreateBr(cont);
 
   __ SetInsertPoint(cont);

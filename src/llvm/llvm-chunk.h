@@ -578,9 +578,12 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                        std::vector<llvm::Value*>& params,
                        HInstruction* call_instr = nullptr,
                        bool record_safepoint = false);
-  llvm::Value* CallAddress(Address target,
+  llvm::Value* CallCode(Handle<Code> code,
                            llvm::CallingConv::ID calling_conv,
-                           std::vector<llvm::Value*>& params, llvm::Value* val = nullptr);
+                           std::vector<llvm::Value*>& params);
+  llvm::Value* CallAddress(llvm::Value* target_address,
+                           llvm::CallingConv::ID calling_conv,
+                           std::vector<llvm::Value*>& params);
   void CheckEnumCache(llvm::Value* enum_val, llvm::Value* val, llvm::BasicBlock* bb);
   llvm::Value* EnumLength(llvm::Value* map_);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
