@@ -4273,7 +4273,21 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
                                     llvm::CallingConv::X86_64_V8_S2, params);
     instr->set_llvm_value(call);
   } else {
-    UNIMPLEMENTED();
+    //UNIMPLEMENTED();
+    MathPowStub stub(isolate(), MathPowStub::DOUBLE);
+    Handle<Code> code = Handle<Code>::null();
+    {
+      AllowHandleAllocation allow_handles;
+      AllowHeapAllocation allow_heap;
+      code = stub.GetCode();
+      // FIXME(llvm,gc): respect reloc info mode...
+    }
+    std::vector<llvm::Value*> params;
+    for (int i = 0; i < instr->OperandCount(); i++)
+      params.push_back(Use(instr->OperandAt(i)));
+    llvm::Value* call = CallAddressForMathPow(code->instruction_start(),
+                                    llvm::CallingConv::X86_64_V8_S2, params);
+    instr->set_llvm_value(call);
   }
 }
 
