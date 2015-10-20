@@ -1596,6 +1596,8 @@ HValue* HUnaryMathOperation::Canonicalize() {
     }
   }
   if (op() == kMathFloor && value()->IsDiv() && value()->HasOneUse()) {
+    //TODO issue connected with MathFloorOfDiv
+    return this ;
     HDiv* hdiv = HDiv::cast(value());
 
     HValue* left = hdiv->left();
