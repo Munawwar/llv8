@@ -588,11 +588,12 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   llvm::Value* CallVal(llvm::Value* callable_value,
                        llvm::CallingConv::ID calling_conv,
                        std::vector<llvm::Value*>& params,
-                       bool record_safepoint = false);
+                       bool record_safepoint = false,
+                       bool expect_return = true);
   llvm::Value* CallCode(Handle<Code> code,
-                           llvm::CallingConv::ID calling_conv,
-                           std::vector<llvm::Value*>& params);
-  llvm::Value* CallAddress(llvm::Value* target_address,
+                        llvm::CallingConv::ID calling_conv,
+                        std::vector<llvm::Value*>& params);
+  llvm::Value* CallAddress(Address target,
                            llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params,
                            llvm::Value* val = nullptr);

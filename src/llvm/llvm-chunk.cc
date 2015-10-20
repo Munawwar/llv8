@@ -942,7 +942,9 @@ llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   auto calling_conv = llvm::CallingConv::C; // We don't really care.
   auto empty = std::vector<llvm::Value*>();
   bool record_safepoint = false;
-  return CallVal(target_adderss, calling_conv, empty, record_safepoint);
+  bool returns = false;
+  return CallVal(target_adderss, calling_conv, empty, record_safepoint,
+                 returns);
 }
 
 llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
@@ -970,10 +972,16 @@ llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
 llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
                                        llvm::CallingConv::ID calling_conv,
                                        std::vector<llvm::Value*>& params,
-                                       bool record_safepoint) {
+                                       bool record_safepoint,
+                                       bool expect_return) {
   bool is_var_arg = false;
 
-  auto return_type = Types::tagged;
+  llvm::Type* return_type = nullptr;
+  if (expect_return)
+    return_type = Types::tagged;
+  else
+    return_type = __ getVoidTy();
+
   auto param_type = Types::tagged;
   std::vector<llvm::Type*> param_types(params.size(), param_type);
   llvm::FunctionType* function_type = llvm::FunctionType::get(
