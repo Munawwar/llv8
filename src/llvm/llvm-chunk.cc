@@ -993,14 +993,14 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
 
   call_inst->setCallingConv(calling_conv);
 
-  if (record_safepoint) {
-    int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
-    call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
-                            "statepoint-id", std::to_string(stackmap_id));
-  } else {
+//  if (record_safepoint) {
+//    int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
+//    call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
+//                            "statepoint-id", std::to_string(stackmap_id));
+//  } else {
     call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
                             "no-statepoint-please", "true");
-  }
+//  }
 
   return call_inst;
 }
