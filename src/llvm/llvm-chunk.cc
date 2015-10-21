@@ -2988,15 +2988,14 @@ void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
 }
 
 void LLVMChunkBuilder::DoConstructDouble(HConstructDouble* instr) {
-  UNIMPLEMENTED();
-  llvm::Value* result = Use(instr->hi());
-  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-      llvm::Intrinsic::x86_mmx_psll_q, Types::float64);
-  llvm::Value* params[] = { result, __ getInt32(32) };
-  llvm::Value* call = __ CreateCall(intrinsic, params);
-  llvm::Value* scratch = Use(instr->lo());
-  result = __ CreateOr(call, scratch);
-  instr->set_llvm_value(result);
+  //TODO Not tested.
+  llvm::Value* hi = Use(instr->hi());
+  llvm::Value* lo = Use(instr->lo());
+  llvm::Value* hi_ext = __ CreateZExt(hi, Types::i64);
+  llvm::Value* hi_shift = __ CreateShl(hi_ext, __ getInt64(32));
+  llvm::Value* result = __ CreateOr(hi_shift, lo);
+  llvm::Value* result_double = __ CreateSIToFP(result, Types::float64);
+  instr->set_llvm_value(result_double);
 }
 
 int64_t LLVMChunkBuilder::RootRegisterDelta(ExternalReference other) {
