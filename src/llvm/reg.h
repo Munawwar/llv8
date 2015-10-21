@@ -3,6 +3,8 @@
 namespace v8 {
 namespace internal {
 
+// FIXME(llvm): our rebase to a more recent trunk has rendered
+// pretty much everything in here useless. So get rid of it!
 class StackMapReg {
  public:
    StackMapReg()

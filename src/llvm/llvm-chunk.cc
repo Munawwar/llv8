@@ -135,9 +135,18 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   else
     shared_id = deopt_data_->DefineDeoptimizationLiteral(info()->shared_info());
 
+  // WriteTranslationFrame
   switch (environment->frame_type()) {
     case JS_FUNCTION:
       translation->BeginJSFrame(environment->ast_id(), shared_id, height);
+
+      if (info()->closure().is_identical_to(environment->closure())) {
+        translation->StoreJSFrameFunction();
+      } else {
+        int closure_id = deopt_data_->DefineDeoptimizationLiteral(
+            environment->closure());
+        translation->StoreLiteral(closure_id);
+      }
       break;
     default:
       UNIMPLEMENTED();
@@ -176,6 +185,24 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   }
 }
 
+// As far as I understand, index is CallerPC-relative offset
+// i.e. relative to the stack cell holding the ret address.
+static int FpRelativeOffsetToIndex(int32_t offset) {
+  //  ........................
+  // index                      fp-relative offset (decimal)
+  //  -1   | arg N (the last) | +16
+  //   0   |       RET        | +8
+  //   1   |     saved FP     |  0
+  //   2   | saved context    | -8
+  //  ........................
+
+  DCHECK(offset % kInt32Size == 0);
+  if (FLAG_enable_embedded_constant_pool) // This would change the pic above.
+    UNIMPLEMENTED();
+  auto index = -offset / kPointerSize + 1;
+  return index;
+}
+
 void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
                                  Translation* translation,
                                  llvm::Value* op,
@@ -197,18 +224,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
   } else if (location.kind == StackMaps::Location::kIndirect) {
     Register reg = location.dwarf_reg.reg().IntReg();
     if (!reg.is(rbp)) UNIMPLEMENTED();
-    auto offset = location.offset;
-    DCHECK(offset % kInt32Size == 0);
-    // TODO(llvm): check for off-by-one error in int32 case on real deopts.
-    auto index = offset / kPointerSize;
-    // TODO(llvm): see StackSlotOffset()
-    CHECK(index != 1 && index != 0); // rbp and return address
-    if (index >= 0)
-      index = 1 - index;
-    else {
-      index = -index -
-        (StandardFrameConstants::kFixedFrameSize / kPointerSize - 1);
-    }
+    auto index = FpRelativeOffsetToIndex(location.offset);
     if (is_tagged) {
       DCHECK(location.size == kPointerSize);
       translation->StoreStackSlot(index);
