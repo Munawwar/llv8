@@ -1697,7 +1697,12 @@ llvm::CallInst* LLVMChunkBuilder::CallPatchPoint(
   patchpoint_args.insert(patchpoint_args.end(),
                          live_values.begin(), live_values.end());
 
-  return __ CreateCall(patchpoint, patchpoint_args);
+  auto call = __ CreateCall(patchpoint, patchpoint_args);
+
+  // FIXME(llvm): [safepoints] temp. We need a safepoint there.
+  call->addAttribute(llvm::AttributeSet::FunctionIndex,
+                       "no-statepoint-please", "true");
+  return call;
 }
 
 llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
