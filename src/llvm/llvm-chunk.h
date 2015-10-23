@@ -531,6 +531,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   // Hydrogen does not impose such a constraint.
   // For that reason our phis are not LLVM-compliant right after phi resolution.
   LLVMChunkBuilder& NormalizePhis();
+  LLVMChunkBuilder& PlaceStatePoints();
+  LLVMChunkBuilder& RewriteStatePoints();
   LLVMChunkBuilder& Optimize(); // invoke llvm transformation passes for the function
   LLVMChunk* Create();
 
@@ -558,6 +560,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                                                    bool is_double = false);
   static bool HasTaggedValue(HValue* value);
 
+  void CreateSafepointPollFunction();
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
   void DoPhi(HPhi* phi);
@@ -566,7 +569,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   void CreateVolatileZero();
   llvm::Value* GetVolatileZero();
   llvm::Value* ConstFoldBarrier(llvm::Value* imm);
-  llvm::BasicBlock* NewBlock(const std::string& name);
+  llvm::BasicBlock* NewBlock(const std::string& name,
+                             llvm::Function* = nullptr);
   // if the llvm counterpart of the block does not exist, create it
   llvm::BasicBlock* Use(HBasicBlock* block);
   llvm::Value* Use(HValue* value);
@@ -684,6 +688,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   // Not to be used for fetching the actual native code,
   // since the corresponding methods are deprecated.
   llvm::Function* function_;
+  llvm::Function* safepoint_poll_;
   std::unique_ptr<llvm::IRBuilder<>> llvm_ir_builder_;
   std::unique_ptr<LLVMDeoptData> deopt_data_;
   LLVMRelocationData* reloc_data_;

@@ -324,9 +324,8 @@ uint32_t LLVMDeoptData::GetHash(int32_t patchpoint_id) {
 void LLVMDeoptData::Add(LLVMEnvironment* environment, int32_t patchpoint_id) {
   auto key = GetKey(patchpoint_id);
   auto hash = GetHash(patchpoint_id);
-  bool do_insert = true;
-  auto entry = deoptimizations_.Lookup(key, hash, do_insert,
-                                       ZoneAllocationPolicy(zone_));
+  auto entry = deoptimizations_.LookupOrInsert(key, hash,
+                                               ZoneAllocationPolicy(zone_));
   entry->value = environment;
 }
 
@@ -334,8 +333,7 @@ LLVMEnvironment* LLVMDeoptData::GetEnvironmentByPatchpointId(
     int32_t patchpoint_id) {
   auto key = GetKey(patchpoint_id);
   auto hash = GetHash(patchpoint_id);
-  auto entry = deoptimizations_.Lookup(key, hash, false,
-                                       ZoneAllocationPolicy(zone_));
+  auto entry = deoptimizations_.Lookup(key, hash);
   return static_cast<LLVMEnvironment*>(entry->value);
 }
 
@@ -837,9 +835,11 @@ llvm::Value* LLVMChunkBuilder::CreateConstant(HConstant* instr) {
   }
 }
 
-llvm::BasicBlock* LLVMChunkBuilder::NewBlock(const std::string& name) {
+llvm::BasicBlock* LLVMChunkBuilder::NewBlock(const std::string& name,
+                                             llvm::Function* function) {
   LLVMContext& llvm_context = LLVMGranularity::getInstance().context();
-  return llvm::BasicBlock::Create(llvm_context, name, function_);
+  if (!function) function = function_;
+  return llvm::BasicBlock::Create(llvm_context, name, function);
 }
 
 llvm::BasicBlock* LLVMChunkBuilder::Use(HBasicBlock* block) {
@@ -990,17 +990,8 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
       return_type, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
   auto casted = __ CreateBitOrPointerCast(callable_value, ptr_to_function);
-  llvm::CallInst* call_inst = nullptr;
 
-  if (!record_safepoint) {
-    call_inst = __ CreateCall(casted, params);
-  } else {
-    DCHECK(call_instr);
-    auto live_values = GetSafepointValues(call_instr);
-    live_values.clear();
-    call_inst = CallPatchPoint(stackmap_id++, casted, params, live_values);
-  }
-
+  llvm::CallInst* call_inst = __ CreateCall(casted, params);
   call_inst->setCallingConv(calling_conv);
 
 //  if (record_safepoint) {
@@ -1016,21 +1007,21 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
 }
 
 llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
-                                           llvm::CallingConv::ID calling_conv,
-                                           std::vector<llvm::Value*>& params) {
-
+                                        llvm::CallingConv::ID calling_conv,
+                                        std::vector<llvm::Value*>& params) {
   auto index = chunk()->masm().GetCodeTargetIndex(code);
-  int64_t pp_id = ++last_reloc_index_offset_ + kFirstRelocIndex;
+
+  int32_t pp_id = reloc_data_->GetNextRelocPathcpointId();
   auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
-  auto nop_size = 5;
+  auto nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
   std::vector<llvm::Value*> empty_live_values;
   auto call_inst = CallPatchPoint(pp_id, llvm_null, params, empty_live_values,
                                   nop_size);
   call_inst->setCallingConv(calling_conv);
+  // Map pp_id -> index in code_targets_.
   chunk()->target_index_for_ppid()[pp_id] = index;
   return call_inst;
 }
-
 
 llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
                                            llvm::CallingConv::ID calling_conv,
@@ -1040,6 +1031,90 @@ llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
     val_addr = __ getInt64(reinterpret_cast<uint64_t>(target));
   return CallVal(val_addr, calling_conv, params);
 }
+
+llvm::Value* LLVMChunkBuilder::CallRuntimeViaId(Runtime::FunctionId id) {
+ return CallRuntime(Runtime::FunctionForId(id));
+}
+
+llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
+  auto arg_count = function->nargs;
+
+  Address rt_target = ExternalReference(function, isolate()).address();
+  // TODO(llvm): we shouldn't always save FP regs
+  // moreover, we should find a way to offload such decisions to LLVM.
+  // TODO(llvm): With a proper calling convention implemented in LLVM
+  // we could call the runtime functions directly.
+  // For now we call the CEntryStub which calls the function
+  // (just as CrankShaft does).
+
+  // Don't save FP regs because llvm will [try to] take care of that
+  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    code = ces.GetCode();
+  }
+
+  // 1) emit relative 32 call to index which would follow the calling convention
+  // 2) record reloc info when we know the pc offset (RelocInfo::CODE...)
+
+  DirtyHack(arg_count);
+
+  auto llvm_nargs = __ getInt64(arg_count);
+  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = target_temp; //__ CreateIntToPtr(target_temp, Types::ptr_i8);
+  auto context = GetContext();
+  std::vector<llvm::Value*> args(arg_count + 3, nullptr);
+  args[0] = llvm_nargs;
+  args[1] = llvm_rt_target;
+  args[2] = context;
+
+  for (int i = 0; i < pending_pushed_args_.length(); i++) {
+    args[arg_count + 3 - 1 - i] = pending_pushed_args_[i];
+  }
+  pending_pushed_args_.Clear();
+
+  return CallCode(code, llvm::CallingConv::X86_64_V8_CES, args);
+}
+
+llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
+    llvm::Value* context, std::vector<llvm::Value*> params) {
+  const Runtime::Function* function = Runtime::FunctionForId(id);
+  auto arg_count = function->nargs;
+
+  Address rt_target = ExternalReference(function, isolate()).address();
+  // TODO(llvm): we shouldn't always save FP regs
+  // moreover, we should find a way to offload such decisions to LLVM.
+  // TODO(llvm): With a proper calling convention implemented in LLVM
+  // we could call the runtime functions directly.
+  // For now we call the CEntryStub which calls the function
+  // (just as CrankShaft does).
+
+  // Don't save FP regs because llvm will [try to] take care of that
+  CEntryStub ces(isolate(), function->result_size, kDontSaveFPRegs);
+  Handle<Code> code = Handle<Code>::null();
+  {
+    AllowHandleAllocation allow_handles;
+    AllowHeapAllocation allow_heap;
+    code = ces.GetCode();
+    // FIXME(llvm,gc): respect reloc info mode...
+  }
+
+  // bool is_var_arg = false;
+  DirtyHack(arg_count);
+  auto llvm_nargs = __ getInt64(arg_count);
+  auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
+  auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
+  std::vector<llvm::Value*> actualParams;
+  actualParams.push_back(llvm_nargs);
+  actualParams.push_back(llvm_rt_target);
+  actualParams.push_back(context);
+  for (auto i = 0; i < params.size(); ++i)
+     actualParams.push_back(params[i]);
+  llvm::Value* call_inst = CallCode(code, llvm::CallingConv::X86_64_V8_CES, actualParams);
+  return call_inst;
+}
+
 
 llvm::Value* LLVMChunkBuilder::FieldOperand(llvm::Value* base, int offset) {
   // The problem is (volatile_0 + imm) + offset == volatile_0 + (imm + offset),
@@ -3129,13 +3204,13 @@ llvm::Value* LLVMChunkBuilder::LoadAddress(ExternalReference source) {
 }
 
 llvm::Value* LLVMChunkBuilder::CallCFunction(ExternalReference function,
-                                       std::vector<llvm::Value*> params,
-                                       int num_arguments) {
+                                             std::vector<llvm::Value*> params,
+                                             int num_arguments) {
   if (emit_debug_code()) {
     UNIMPLEMENTED();
   }
   llvm::Value* obj = LoadAddress(function);
-  llvm::Value* call = CallAddress(obj, llvm::CallingConv::X86_64_V8_S3, params);
+  llvm::Value* call = CallVal(obj, llvm::CallingConv::X86_64_V8_S3, params);
   DCHECK(base::OS::ActivationFrameAlignment() != 0);
   DCHECK(num_arguments >= 0);
   int argument_slots_on_stack = ArgumentStackSlotsForCFunctionCall(num_arguments);
@@ -3532,8 +3607,8 @@ void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
           params.push_back(pending_pushed_args_[i]);
         pending_pushed_args_.Clear();
         // callingConv 
-        llvm::Value* call = CallAddress(LoadFieldOperand(Use(instr->function()), JSFunction::kCodeEntryOffset), 
-                                       llvm::CallingConv::X86_64_V8_S4, params);
+        llvm::Value* call = CallVal(LoadFieldOperand(Use(instr->function()), JSFunction::kCodeEntryOffset),
+                                    llvm::CallingConv::X86_64_V8_S4, params);
         llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
         instr->set_llvm_value(return_val);
       }
