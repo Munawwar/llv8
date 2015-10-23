@@ -4860,7 +4860,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
                                                 Map::kInstanceTypeOffset);
   //movzxbl
   llvm::Value* result_type = __ CreateAnd(instance_type,
-                                          __ getInt64(0x0000000f));
+                                          __ getInt64(0x000000ff));
   llvm::BasicBlock* check_sequental = NewBlock("StringCharCodeAt"
                                                 "CheckSequental");
   llvm::BasicBlock* check_seq_cont = NewBlock("StringCharCodeAt"
@@ -4919,7 +4919,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   llvm::Value* indirect_instance = LoadFieldOperand(indirect_map,
                                                     Map::kInstanceTypeOffset);
   llvm::Value* indirect_result_type = __ CreateAnd(indirect_instance,
-                                                  __ getInt64(0x0000000f));
+                                                  __ getInt64(0x000000ff));
   __ CreateBr(check_sequental);
 
   __ SetInsertPoint(check_sequental);
@@ -4983,7 +4983,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
                                                      Types::ptr_tagged);
   llvm::Value* two_byte_ex_load = __ CreateLoad(casted_addr_two_ext);
   llvm::Value* two_byte_external_result = __ CreateAnd(two_byte_ex_load,
-                                                      __ getInt64(0x000000ff));
+                                                      __ getInt64(0x0000ffff));
   __ CreateBr(done);
 
   __ SetInsertPoint(one_byte_external);
@@ -4996,9 +4996,8 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   llvm::Value* casted_addr_one_ext = __ CreatePointerCast(one_byte_addr_ext,
                                                   Types::ptr_tagged);
   llvm::Value* add_result_one =  __ CreateLoad(casted_addr_one_ext);
-  //TODO(Jivan) 0x0000000f or 0x000000ff ??
   llvm::Value* one_byte_external_result = __ CreateAnd(add_result_one,
-                                                      __ getInt64(0x0000000f));
+                                                      __ getInt64(0x000000ff));
   __ CreateBr(done);
 
   __ SetInsertPoint(seq_string);
@@ -5023,7 +5022,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
                                                      Types::ptr_tagged);
   llvm::Value* two_byte_load = __ CreateLoad(casted_adds_two);
   llvm::Value* two_byte_result = __ CreateAnd(two_byte_load,
-                                             __ getInt64(0x000000ff));
+                                             __ getInt64(0x0000ffff));
   __ CreateBr(done);
 
   __ SetInsertPoint(one_byte);
