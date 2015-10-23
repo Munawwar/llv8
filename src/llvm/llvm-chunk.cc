@@ -4847,20 +4847,229 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
 }
 
 void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
-  std::vector<llvm::Value*> args;
-  //TODO : implement non constant case
-  //FIXME: Wrong implementation
-  if(instr->index()->IsConstant()) {
-    llvm::Value* const_index = Integer32ToSmi(instr->index());
-    args.push_back(const_index);
-  } else {
-    llvm::Value* arg_index = Integer32ToSmi(instr->index());
-    args.push_back(arg_index);
+  //Only one path is tested
+  //IsSeqString->OneByte->Done.
+  //TODO: Find scripts to tests other paths
+  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::Value* str = Use(instr->string());
+  llvm::Value* index = Use(instr->index());
+  llvm::BasicBlock* deferred = NewBlock("StringCharCodeAt Deferred");
+  llvm::BasicBlock* set_value = NewBlock("StringCharCodeAt End");
+  llvm::Value* map_offset = LoadFieldOperand(str, HeapObject::kMapOffset);
+  llvm::Value* instance_type = LoadFieldOperand(map_offset,
+                                                Map::kInstanceTypeOffset);
+  //movzxbl
+  llvm::Value* result_type = __ CreateAnd(instance_type,
+                                          __ getInt64(0x0000000f));
+  llvm::BasicBlock* check_sequental = NewBlock("StringCharCodeAt"
+                                                "CheckSequental");
+  llvm::BasicBlock* check_seq_cont = NewBlock("StringCharCodeAt"
+                                                "CheckSequental Cont");
+  llvm::Value* and_IndirectStringMask = __ CreateAnd(result_type,
+                                            __ getInt64(kIsIndirectStringMask));
+  llvm::Value* cmp_IndirectStringMask = __ CreateICmpEQ(and_IndirectStringMask,
+                                                        __ getInt64(0));
+  __ CreateCondBr(cmp_IndirectStringMask, check_sequental, check_seq_cont);
+
+  __ SetInsertPoint(check_seq_cont);
+  llvm::BasicBlock* cons_str = NewBlock("StringCharCodeAt IsConsString");
+  llvm::BasicBlock* cons_str_cont =  NewBlock("StringCharCodeAt NotConsString");
+  llvm::Value* and_NotConsMask = __ CreateAnd(result_type,
+                                             __ getInt64(kSlicedNotConsMask));
+  llvm::Value* cmp_NotConsMask = __ CreateICmpEQ(and_NotConsMask, __ getInt64(0));
+  __ CreateCondBr(cmp_NotConsMask, cons_str, cons_str_cont);
+
+  __ SetInsertPoint(cons_str_cont);
+  llvm::BasicBlock* indirect_string_loaded = NewBlock("StringCharCodeAt Indirect String");
+  llvm::Value* ptr_string = __ CreateIntToPtr(str, Types::ptr_i8);
+  llvm::Value* gep_string = __ CreateGEP(ptr_string,
+                                        __ getInt64(kSmiShift / kBitsPerByte));
+  // TODO(Jivan) //Do wee need ptr_i32 here?
+  llvm::Value* casted_cons = __ CreateBitCast(gep_string, Types::ptr_i32);
+  llvm::Value* cons_load = __ CreateLoad(casted_cons);
+  llvm::Value* cons_index = __ CreateAdd(index, cons_load);
+  llvm::Value* cons_string = LoadFieldOperand(str, SlicedString::kParentOffset);
+  __ CreateBr(indirect_string_loaded);
+
+  __ SetInsertPoint(cons_str);
+  llvm::BasicBlock* cmp_root_cont = NewBlock("StringCharCodeAt"
+                                              "ConsStr CompareRoot Cont");
+  llvm::Value* string_second_offset = LoadFieldOperand(str,
+                                                       ConsString::kSecondOffset);
+  llvm::Value* cmp_root = CompareRoot(string_second_offset,
+                                      Heap::kempty_stringRootIndex);
+  __ CreateCondBr(cmp_root, cmp_root_cont, deferred);
+
+  __ SetInsertPoint(cmp_root_cont);
+  llvm::Value* after_cmp_root_str = LoadFieldOperand(str,
+                                                     ConsString::kFirstOffset);
+  __ CreateBr(indirect_string_loaded);
+
+  __ SetInsertPoint(indirect_string_loaded);
+  llvm::PHINode* phi_string = __ CreatePHI(Types::i64, 2);
+  phi_string->addIncoming(after_cmp_root_str, cmp_root_cont);
+  phi_string->addIncoming(cons_string, cons_str_cont);
+
+  llvm::PHINode* index_indirect = __ CreatePHI(Types::i32, 2);
+  index_indirect->addIncoming(cons_index, cons_str_cont);
+  index_indirect->addIncoming(index, insert);
+
+  llvm::Value* indirect_map = LoadFieldOperand(phi_string,
+                                               HeapObject::kMapOffset);
+  llvm::Value* indirect_instance = LoadFieldOperand(indirect_map,
+                                                    Map::kInstanceTypeOffset);
+  llvm::Value* indirect_result_type = __ CreateAnd(indirect_instance,
+                                                  __ getInt64(0x0000000f));
+  __ CreateBr(check_sequental);
+
+  __ SetInsertPoint(check_sequental);
+  STATIC_ASSERT(kSeqStringTag == 0);
+  llvm::BasicBlock* seq_string = NewBlock("StringCharCodeAt SeqString");
+  llvm::BasicBlock* cont_inside_seq = NewBlock("StringCharCodeAt SeqString cont");
+  llvm::PHINode* phi_result_type = __ CreatePHI(Types::i64, 2);
+  phi_result_type->addIncoming(indirect_result_type, indirect_string_loaded);
+  phi_result_type->addIncoming(result_type, insert);
+
+  llvm::PHINode* phi_index = __ CreatePHI(Types::i32, 2);
+  phi_index->addIncoming(index_indirect, indirect_string_loaded);
+  phi_index->addIncoming(index, insert);
+
+  llvm::PHINode* phi_str = __ CreatePHI(Types::i64, 2);
+  phi_str->addIncoming(str, insert);
+  phi_str->addIncoming(phi_string, indirect_string_loaded);
+
+  llvm::Value* and_representation =  __ CreateAnd(phi_result_type,
+                                        __ getInt64(kStringRepresentationMask));
+  llvm::Value* cmp_representation = __ CreateICmpEQ(and_representation,
+                                                        __ getInt64(0));
+   __ CreateCondBr(cmp_representation, seq_string, cont_inside_seq);
+
+  __ SetInsertPoint(cont_inside_seq);
+  llvm::BasicBlock* extern_string = NewBlock("StringCharCodeAt"
+                                             "CheckShortExternelString");
+  if (FLAG_debug_code) {
+    UNIMPLEMENTED();
   }
-  args.push_back(Use(instr->string()));
-  llvm::Value* result = CallRuntimeFromDeferred(
-      Runtime::kStringCharCodeAtRT, Use(instr->context()), args);
-  instr->set_llvm_value(result);
+  STATIC_ASSERT(kShortExternalStringTag != 0);
+  llvm::Value* and_short_tag = __ CreateAnd(phi_result_type,
+                                          __ getInt64(kShortExternalStringTag));
+  llvm::Value* cmp_short_tag = __ CreateICmpNE(and_short_tag,
+                                                             __ getInt64(0));
+  __ CreateCondBr(cmp_short_tag, deferred, extern_string);
+
+  __ SetInsertPoint(extern_string);
+  STATIC_ASSERT(kTwoByteStringTag == 0);
+  llvm::BasicBlock* one_byte_external = NewBlock("StringCharCodeAt"
+                                                 "OneByteExternal");
+  llvm::BasicBlock* two_byte_external = NewBlock("StringCharCodeAt"
+                                                 "OneByteExternal Cont");
+
+  llvm::Value* and_encoding_mask = __ CreateAnd(phi_result_type,
+                                              __ getInt64(kStringEncodingMask));
+  llvm::Value* not_encoding_mask = __ CreateICmpNE(and_encoding_mask,
+                                                       __ getInt64(0));
+  llvm::Value* external_string = LoadFieldOperand(phi_str,
+                                           ExternalString::kResourceDataOffset);
+  __ CreateCondBr(not_encoding_mask, one_byte_external, two_byte_external);
+
+  __ SetInsertPoint(two_byte_external);
+  llvm::BasicBlock* done = NewBlock("StringCharCodeAt Done");
+  llvm::Value* two_byte_offset = __ CreateMul(phi_index, __ getInt32(2));
+  llvm::Value* base_casted_two_ext = __ CreateIntToPtr(external_string,
+                                                      Types::ptr_i8);
+  llvm::Value* two_byte_address = __ CreateGEP(base_casted_two_ext,
+                                               two_byte_offset);
+  llvm::Value* casted_addr_two_ext = __ CreatePointerCast(two_byte_address,
+                                                     Types::ptr_tagged);
+  llvm::Value* two_byte_ex_load = __ CreateLoad(casted_addr_two_ext);
+  llvm::Value* two_byte_external_result = __ CreateAnd(two_byte_ex_load,
+                                                      __ getInt64(0x000000ff));
+  __ CreateBr(done);
+
+  __ SetInsertPoint(one_byte_external);
+  llvm::Value* one_byte_offset = __ CreateAdd(phi_index,
+                                              __ getInt32(kHeapObjectTag));
+  llvm::Value* base_casted_one_ext = __ CreateIntToPtr(external_string,
+                                                       Types::ptr_i8);
+  llvm::Value* one_byte_addr_ext = __ CreateGEP(base_casted_one_ext,
+                                           one_byte_offset);
+  llvm::Value* casted_addr_one_ext = __ CreatePointerCast(one_byte_addr_ext,
+                                                  Types::ptr_tagged);
+  llvm::Value* add_result_one =  __ CreateLoad(casted_addr_one_ext);
+  //TODO(Jivan) 0x0000000f or 0x000000ff ??
+  llvm::Value* one_byte_external_result = __ CreateAnd(add_result_one,
+                                                      __ getInt64(0x0000000f));
+  __ CreateBr(done);
+
+  __ SetInsertPoint(seq_string);
+  llvm::BasicBlock* one_byte = NewBlock("StringCharCodeAt OneByte");
+  llvm::BasicBlock* two_byte = NewBlock("StringCharCodeAt OneByteCont");
+  STATIC_ASSERT((kStringEncodingMask & kOneByteStringTag) != 0);
+  STATIC_ASSERT((kStringEncodingMask & kTwoByteStringTag) == 0);
+  llvm::Value* and_seq_str = __ CreateAnd(phi_result_type,
+                                        __ getInt64(kStringEncodingMask));
+  llvm::Value* seq_not_zero = __ CreateICmpNE(and_seq_str, __ getInt64(0));
+  __ CreateCondBr(seq_not_zero, one_byte, two_byte);
+
+  __ SetInsertPoint(two_byte);
+  STATIC_ASSERT(kSmiTag == 0 && kSmiTagSize == 1);
+
+  llvm::Value* two_byte_index = __ CreateMul(phi_index, __ getInt32(2));
+  llvm::Value* two_byte_add_index = __ CreateAdd(two_byte_index,
+                                    __ getInt32(SeqTwoByteString::kHeaderSize));
+  llvm::Value* base_casted_two = __ CreateIntToPtr(phi_str, Types::ptr_i8);
+  llvm::Value* address_two = __ CreateGEP(base_casted_two, two_byte_add_index);
+  llvm::Value* casted_adds_two = __ CreatePointerCast(address_two,
+                                                     Types::ptr_tagged);
+  llvm::Value* two_byte_load = __ CreateLoad(casted_adds_two);
+  llvm::Value* two_byte_result = __ CreateAnd(two_byte_load,
+                                             __ getInt64(0x000000ff));
+  __ CreateBr(done);
+
+  __ SetInsertPoint(one_byte);
+  llvm::Value* one_byte_add_index = __ CreateAdd(phi_index,
+                               __ getInt32(SeqTwoByteString::kHeaderSize - 1));
+  llvm::Value* base_casted_one = __ CreateIntToPtr(phi_str, Types::ptr_i8);
+  llvm::Value* addr_one = __ CreateGEP(base_casted_one, one_byte_add_index);
+  llvm::Value* casted_adds_one = __ CreatePointerCast(addr_one, Types::ptr_tagged);
+  llvm::Value* one_byte_load = __ CreateLoad(casted_adds_one);
+  llvm::Value* one_byte_result = __ CreateAnd(one_byte_load, __ getInt64(0x000000ff));
+  __ CreateBr(done);
+
+  __ SetInsertPoint(done);
+  llvm::PHINode* result_gen = __ CreatePHI(Types::i64, 4);
+  result_gen->addIncoming(one_byte_external_result, one_byte_external);
+  result_gen->addIncoming(two_byte_external_result, two_byte_external);
+  result_gen->addIncoming(one_byte_result, one_byte);
+  result_gen->addIncoming(two_byte_result, two_byte);
+  __ CreateBr(set_value);
+
+  __ SetInsertPoint(deferred);
+  llvm::PHINode* str_phi_deferred = __ CreatePHI(Types::i64, 2);
+  str_phi_deferred->addIncoming(string_second_offset, cons_str);
+  str_phi_deferred->addIncoming(phi_str, cont_inside_seq);
+
+  std::vector<llvm::Value*> params;
+  params.push_back(str_phi_deferred);
+  //TODO : implement non constant case
+  STATIC_ASSERT(String::kMaxLength <= Smi::kMaxValue);
+  if (instr->index()->IsConstant()) {
+    UNIMPLEMENTED();
+  } else {
+    llvm::Value* const_index = Integer32ToSmi(instr->index());
+    params.push_back(const_index);
+  }
+  llvm::Value* call = CallRuntimeFromDeferred(Runtime::kStringCharCodeAtRT,
+                                               Use(instr->context()),
+                                               params);
+   llvm::Value* call_casted = __ CreatePtrToInt(call, Types::i64);
+  __ CreateBr(set_value);
+
+  __ SetInsertPoint(set_value);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(result_gen, insert);
+  phi->addIncoming(call_casted, deferred);
+  instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
