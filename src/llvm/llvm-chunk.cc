@@ -3736,37 +3736,34 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
-  UNIMPLEMENTED(); // TODO(jivan): reimplement
-//  //llvm::BasicBlock* insert_block = __ GetInsertBlock();
-//  llvm::BasicBlock* Myblock = NewBlock("LoadGlobalGeneric");
-//  __ CreateBr(Myblock);
-//  __ SetInsertPoint(Myblock);
-//  llvm::Value* context = Use(instr->context());
-//  llvm::Value* global_object = Use(instr->global_object());
-//  llvm::Value* name = MoveHeapObject(instr->name());
-////  llvm::Value* vector = nullptr;
-//  bool for_typeof = instr->for_typeof();
-//
-//  if (instr->HasVectorAndSlot()) {
-//    UNIMPLEMENTED();
-//  }
-//
-//  if (FLAG_vector_ics) {
-//    UNIMPLEMENTED();
-//  }
-//
-//  ContextualMode mode = for_typeof ? NOT_CONTEXTUAL : CONTEXTUAL;
-//  AllowHandleAllocation allow_handles;
-//  Handle<Code> ic =
-//        CodeFactory::LoadICInOptimizedCode(isolate(), mode, PREMONOMORPHIC).code();
-//  std::vector<llvm::Value*> params;
-//  params.push_back(context);
-//  params.push_back(global_object);
-//  params.push_back(name);
-//  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S5,
-//                            params);
-//  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
-//  instr->set_llvm_value(return_val);
+  //TODO: Not tested, test case string-base64.js in  base64ToString finction
+  llvm::Value* context = Use(instr->context());
+  llvm::Value* global_object = Use(instr->global_object());
+  llvm::Value* name = MoveHeapObject(instr->name());
+  //llvm::Value* vector = nullptr;
+   
+  AllowDeferredHandleDereference vector_structure_check;
+  Handle<TypeFeedbackVector> feedback_vector = instr->feedback_vector();
+  llvm::Value* vector =  MoveHeapObject(feedback_vector);
+  FeedbackVectorSlot instr_slot = instr->slot();
+  int index = feedback_vector->GetIndex(instr_slot);
+  llvm::Value* slot = __ getInt64(index);
+
+  AllowHandleAllocation allow_handles;
+  AllowHeapAllocation allow_heap;
+  Handle<Code> ic =
+        CodeFactory::LoadICInOptimizedCode(isolate(), instr->typeof_mode(),
+                                             SLOPPY, PREMONOMORPHIC).code();
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(global_object);
+  params.push_back(name);
+  params.push_back(vector);
+  params.push_back(slot);
+  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S9,
+                            params);
+  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
+  instr->set_llvm_value(return_val);
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
