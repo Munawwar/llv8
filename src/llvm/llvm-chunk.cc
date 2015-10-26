@@ -2178,11 +2178,8 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   CallInterfaceDescriptor descriptor = instr->descriptor();
 
-  if (descriptor.GetRegisterParameterCount() != 4) UNIMPLEMENTED();
-   if (!descriptor.GetRegisterParameter(0).is(rdi) ||
-      !descriptor.GetRegisterParameter(1).is(rbx) ||
-      !descriptor.GetRegisterParameter(2).is(rcx) ||
-      !descriptor.GetRegisterParameter(3).is(rdx)) UNIMPLEMENTED();
+  //TODO: Do wee need this check here?
+  if (descriptor.GetRegisterParameterCount() != instr->OperandCount() - 2) UNIMPLEMENTED();
 
   HValue* target = instr->target();
   // TODO(llvm): how  about a zone list?
