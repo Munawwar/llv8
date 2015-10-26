@@ -2063,10 +2063,11 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ CreateCondBr(smi_cond, true_target, check_blocks[++cur_block]);
  
   } else if (expected.NeedsMap()) {
-    UNIMPLEMENTED();
     // If we need a map later and have a Smi -> deopt.
-//    __ testb(reg, Immediate(kSmiTagMask));
-//    DeoptimizeIf(zero, instr, Deoptimizer::kSmi);
+    //TODO: Not tested, string-fasta fastaRandom
+    auto smi_and = __ CreateAnd(value, __ getInt64(kSmiTagMask));
+    auto is_smi = __ CreateICmpEQ(smi_and, __ getInt64(0));
+    DeoptimizeIf(is_smi);
   }
 
   llvm::Value* map = nullptr;
