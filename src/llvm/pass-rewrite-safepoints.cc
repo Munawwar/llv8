@@ -327,6 +327,7 @@ static void makeStatepointExplicit(const llvm::CallSite& CS, // to replace
   llvm::SmallVector<llvm::Value*, 64> args;
   args.insert(args.end(), CS.arg_begin(), CS.arg_end());
   llvm::Value* last = args.pop_back_val();
+  USE(last);
   // Actually, it's not just a constant, it's a zero meaning
   // there are no deopt parameters. TODO(llvm): check for int zero here.
   DCHECK(llvm::isa<llvm::Constant>(last));
@@ -390,6 +391,7 @@ static bool InsertParsePoints(
     DCHECK(!callsite.isInvoke());
     DCHECK(llvm::isStatepoint(callsite));
     llvm::Statepoint statepoint = llvm::Statepoint(callsite);
+    USE(statepoint);
     // We expect 'deopt args' of the safepoint instructions to be empty. Because
     // if it wasn't we'd have to ensure their liveness across the safepoint.
     DCHECK_EQ(statepoint.vm_state_begin(), statepoint.vm_state_end());

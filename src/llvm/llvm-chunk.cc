@@ -38,6 +38,7 @@ Handle<Code> LLVMChunk::Codegen() {
       llvm_function_id_);
   auto buf = LLVMGranularity::getInstance().memory_manager_ref()
       ->LastAllocatedCode().buffer;
+  USE(buf);
 #ifdef DEBUG
   std::cerr << "\taddress == " <<  reinterpret_cast<void*>(address) << std::endl;
   std::cerr << "\tlast allocated code section start == "
@@ -1386,6 +1387,8 @@ class PassInfoPrinter {
   PassInfoPrinter(const char* name, llvm::Module* module)
      : name_(name),
        module_(module) {
+    USE(name_);
+    USE(module_);
 #if DEBUG
     if (!only_after) {
       llvm::errs() << filler << "vvv Module BEFORE " << name_ <<" vvv"
