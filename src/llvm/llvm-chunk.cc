@@ -5189,7 +5189,8 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(result_gen, insert);
   phi->addIncoming(call_casted, deferred);
-  instr->set_llvm_value(phi);
+  auto result = __ CreateTruncOrBitCast(phi, Types::i32);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
