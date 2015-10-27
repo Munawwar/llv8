@@ -25,6 +25,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/CodeGen/LinkAllCodegenComponents.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstrTypes.h"

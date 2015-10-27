@@ -18,6 +18,7 @@ namespace internal {
 #define __ llvm_ir_builder_->
 
 auto LLVMGranularity::x64_target_triple = "x86_64-unknown-linux-gnu";
+const char* LLVMChunkBuilder::kGcStrategyName = "v8-gc";
 llvm::Type* Types::i8 = nullptr;
 llvm::Type* Types::i32 = nullptr;
 llvm::Type* Types::i64 = nullptr;
@@ -569,7 +570,13 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   CompilationInfo* info = graph->info();
 
   LLVMChunkBuilder builder(info, graph);
-  LLVMChunk* chunk = builder.Build().NormalizePhis().Optimize().Create();
+  LLVMChunk* chunk = builder
+      .Build()
+      .NormalizePhis()
+      .PlaceStatePoints()
+      .RewriteStatePoints()
+      .Optimize()
+      .Create();
   if (chunk == NULL) return NULL;
   return chunk;
 }
@@ -657,7 +664,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
                                    llvm::AttributeSet::FunctionIndex,
                                    "no-frame-pointer-elim", "true");
   function_->setAttributes(attr_set);
-
+  function_->setGC(kGcStrategyName);
   function_->setCallingConv(llvm::CallingConv::X86_64_V8);
 
   const ZoneList<HBasicBlock*>* blocks = graph()->blocks();
@@ -995,14 +1002,14 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
   llvm::CallInst* call_inst = __ CreateCall(casted, params);
   call_inst->setCallingConv(calling_conv);
 
-//  if (record_safepoint) {
-//    int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
-//    call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
-//                            "statepoint-id", std::to_string(stackmap_id));
-//  } else {
+  if (record_safepoint) {
+    int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
+    call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
+                            "statepoint-id", std::to_string(stackmap_id));
+  } else {
     call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
                             "no-statepoint-please", "true");
-//  }
+  }
 
   return call_inst;
 }
@@ -2266,9 +2273,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   }
   pending_pushed_args_.Clear();
 
-  // FIXME(llvm): it's unused.
   bool record_safepoint = true;
-
   auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args,
                       record_safepoint);
   instr->set_llvm_value(call);

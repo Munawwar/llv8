@@ -247,6 +247,7 @@ class LLVMGranularity final {
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
     llvm::InitializeNativeTargetDisassembler();
+//    llvm::initializeCodeGen(*llvm::PassRegistry::getPassRegistry());
     pass_manager_builder_.OptLevel = 3; // -O3
   }
 
@@ -550,6 +551,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)
 #undef DECLARE_DO
   static const uintptr_t kExtFillingValue = 0xabcdbeef;
+  static const char* kGcStrategyName;
 
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
@@ -589,6 +591,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                                      llvm::CallingConv::ID calling_conv,
                                      std::vector<llvm::Value*>& params);
   // These Call functions are intended to be highly reusable.
+  // TODO(llvm): default parameters -- not very good.
+  // (Especially with different default values for different methods).
   llvm::Value* CallVal(llvm::Value* callable_value,
                        llvm::CallingConv::ID calling_conv,
                        std::vector<llvm::Value*>& params,
