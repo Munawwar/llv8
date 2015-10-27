@@ -5211,55 +5211,62 @@ void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
 }
 
 void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
-  // TODO(jivan): reimplement (impl in  lithium-codegen-x64.cc has changed)
-  // And please respect the codestyle:
-  // > Each line of text in your code should be at most 80 characters long.
-
   UNIMPLEMENTED();
-//  llvm::Value* context = Use(instr->context());
-//  Token::Value op = instr->token();
-//  AllowHandleAllocation allow_handles;
-//  Handle<Code> ic = CodeFactory::CompareIC(isolate(), op).code();
-//  std::vector<llvm::Value*> params;
-//  params.push_back(context);
-//  llvm::Value* result =  CallCode(ic, llvm::CallingConv::X86_64_V8, params);
-//  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
-//  llvm::Value* test = __ CreateAnd(return_val,return_val);
-//  llvm::Value* cmp = nullptr;
-//  llvm::BranchInst* branch = nullptr;
-//  switch (op) {
-//    case Token::EQ:
-//    case Token::EQ_STRICT:
-//      cmp = __ CreateICmpEQ(test, __ getInt64(0));
-//      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-//      break;
-//    case Token::NE:
-//    case Token::NE_STRICT:
-//      cmp = __ CreateICmpNE(test, __ getInt64(0));
-//      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-//      break;
-//    case Token::LT:
-//      cmp = __ CreateICmpULT(test, __ getInt64(0));
-//      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-//      break;
-//    case Token::GT:
-//      cmp = __ CreateICmpUGT(test, __ getInt64(0));
-//      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-//      break;
-//    case Token::LTE:
-//      cmp = __ CreateICmpULE(test, __ getInt64(0));
-//      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-//      break;
-//    case Token::GTE:
-//      cmp = __ CreateICmpUGE(test, __ getInt64(0));
-//      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-//      break;
-//    case Token::IN:
-//    case Token::INSTANCEOF:
-//    default:
-//      UNREACHABLE();
-//  }
-//  instr->set_llvm_value(branch);
+  llvm::Value* context = Use(instr->context());
+  llvm::Value* left = Use(instr->left());
+  llvm::Value* right = Use(instr->right());
+  Token::Value op = instr->token();
+  AllowHandleAllocation allow_handles;
+  Handle<Code> ic = CodeFactory::StringCompare(isolate()).code();
+
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(left);
+  params.push_back(right);
+  llvm::Value* result =  CallCode(ic, llvm::CallingConv::X86_64_V8_S4, params);
+  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
+  llvm::Value* test = __ CreateAnd(return_val,return_val);
+  llvm::Value* cmp = nullptr;
+  llvm::BranchInst* branch = nullptr;
+  switch (op) {
+    case Token::EQ:
+    case Token::EQ_STRICT:
+      cmp = __ CreateICmpEQ(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
+                               Use(instr->SuccessorAt(1)));
+      break;
+    case Token::NE:
+    case Token::NE_STRICT:
+      cmp = __ CreateICmpNE(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
+                               Use(instr->SuccessorAt(1)));
+      break;
+    case Token::LT:
+      cmp = __ CreateICmpULT(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), 
+                               Use(instr->SuccessorAt(1)));
+      break;
+    case Token::GT:
+      cmp = __ CreateICmpUGT(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
+                               Use(instr->SuccessorAt(1)));
+      break;
+    case Token::LTE:
+      cmp = __ CreateICmpULE(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
+                               Use(instr->SuccessorAt(1)));
+      break;
+    case Token::GTE:
+      cmp = __ CreateICmpUGE(test, __ getInt64(0));
+      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
+                               Use(instr->SuccessorAt(1)));
+      break;
+    case Token::IN:
+    case Token::INSTANCEOF:
+    default:
+      UNREACHABLE();
+  }
+  instr->set_llvm_value(branch);
 }
 
 void LLVMChunkBuilder::DoSub(HSub* instr) {
@@ -5676,7 +5683,16 @@ void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
 
 void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(
     HCheckArrayBufferNotNeutered* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* view = Use(instr->value());
+  llvm::Value* array_offset = LoadFieldOperand(view,
+                                               JSArrayBufferView::kBufferOffset);
+  llvm::Value* bit_field_offset = LoadFieldOperand(array_offset,
+                                                   JSArrayBuffer::kBitFieldOffset);
+  llvm::Value* shift = __ getInt64(1 << JSArrayBuffer::WasNeutered::kShift);
+  llvm::Value* test = __ CreateAnd(bit_field_offset, shift);
+  llvm::Value* cmp = __ CreateICmpEQ(test, __ getInt64(0));
+  DeoptimizeIf(cmp);
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoLoadGlobalViaContext(HLoadGlobalViaContext* instr) {
