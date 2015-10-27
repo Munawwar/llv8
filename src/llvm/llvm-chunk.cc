@@ -1885,6 +1885,15 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       HValue* right = instr->BetterRightOperand();
       llvm::Value* fadd = __ CreateFAdd(Use(left), Use(right));
       instr->set_llvm_value(fadd);
+  } else if (instr->representation().IsExternal()) {
+    DCHECK(instr->IsConsistentExternalRepresentation());
+    CHECK(!instr->CheckFlag(HValue::kCanOverflow));
+
+    llvm::Value* left = Use(instr->left());
+    llvm::Value* right = Use(instr->right());
+
+    llvm::Value* sum = __ CreateAdd(left, right);
+    instr->set_llvm_value(sum);
   } else {
     UNIMPLEMENTED();
   }
@@ -3778,99 +3787,98 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
-  UNIMPLEMENTED();
-//  // TODO: Not tested
-//  HValue* key = instr->key();
-//  ElementsKind kind = instr->elements_kind();
-//  int shift_size = ElementsKindToShiftSize(kind);
-//  uint32_t inst_offset = instr->base_offset();
-//  llvm::Value* gep_0 = nullptr; //FIXME: Change the name
-//  llvm::Value* casted_address = nullptr;
-//  llvm::Value* load = nullptr;
-//
-//  if (kPointerSize == kInt32Size && !key->IsConstant()) {
-//    UNIMPLEMENTED();
-//  }
-//
-//  if (key->IsConstant()) {
-//    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
-//    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
-//  } else {
-//     llvm::Value* lkey = Use(key);
-//     llvm::Value* scale = nullptr;
-//     llvm::Value* offset = nullptr;
-//     if (key->representation().IsInteger32()) {
-//       scale = __ getInt32(8); //TODO ScaleFactor
-//       offset = __ getInt32(inst_offset);
-//     } else {
-//       scale = __ getInt64(8);
-//       offset = __ getInt64(inst_offset);
-//     }
-//     llvm::Value* mul = __ CreateMul(lkey, scale);
-//     llvm::Value* add = __ CreateAdd(mul, offset);
-//     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
-//                                              Types::ptr_i8);
-//     gep_0 = __ CreateGEP(int_ptr, add);
-//  }
-//
-//  if (kind == EXTERNAL_FLOAT32_ELEMENTS ||
-//      kind == FLOAT32_ELEMENTS) {
-//    UNIMPLEMENTED();
-//  } else if (kind == EXTERNAL_FLOAT64_ELEMENTS ||
-//             kind == FLOAT64_ELEMENTS) {
-//    UNIMPLEMENTED();
-//  } else {
-//    switch (kind) {
-//      case EXTERNAL_INT8_ELEMENTS:
-//      case INT8_ELEMENTS:
-//        UNIMPLEMENTED();
-//        break;
-//      case EXTERNAL_UINT8_ELEMENTS:
-//      case EXTERNAL_UINT8_CLAMPED_ELEMENTS:
-//      case UINT8_ELEMENTS:
-//      case UINT8_CLAMPED_ELEMENTS:
-//        UNIMPLEMENTED();
-//        break;
-//      case EXTERNAL_INT16_ELEMENTS:
-//      case INT16_ELEMENTS:
-//        UNIMPLEMENTED();
-//        break;
-//      case EXTERNAL_UINT16_ELEMENTS:
-//      case UINT16_ELEMENTS:
-//        UNIMPLEMENTED();
-//        break;
-//      case EXTERNAL_INT32_ELEMENTS:
-//      case INT32_ELEMENTS:
-//        UNIMPLEMENTED();
-//        break;
-//      case EXTERNAL_UINT32_ELEMENTS:
-//      case UINT32_ELEMENTS:
-//        casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
-//        load = __ CreateLoad(casted_address);
-//        instr->set_llvm_value(load);
-//        if (!instr->CheckFlag(HInstruction::kUint32)) {
-//          UNIMPLEMENTED();
-//          //__ testl(result, result);
-//          //DeoptimizeIf(negative, instr, Deoptimizer::kNegativeValue);
-//        }
-//        break;
-//      case EXTERNAL_FLOAT32_ELEMENTS:
-//      case EXTERNAL_FLOAT64_ELEMENTS:
-//      case FLOAT32_ELEMENTS:
-//      case FLOAT64_ELEMENTS:
-//      case FAST_ELEMENTS:
-//      case FAST_SMI_ELEMENTS:
-//      case FAST_DOUBLE_ELEMENTS:
-//      case FAST_HOLEY_ELEMENTS:
-//      case FAST_HOLEY_SMI_ELEMENTS:
-//      case FAST_HOLEY_DOUBLE_ELEMENTS:
-//      case DICTIONARY_ELEMENTS:
-//      case SLOPPY_ARGUMENTS_ELEMENTS:
-//        UNREACHABLE();
-//        break;
-//
-//    }
-//  }
+//  UNIMPLEMENTED();
+  // TODO: Not tested
+  HValue* key = instr->key();
+  ElementsKind kind = instr->elements_kind();
+  int shift_size = ElementsKindToShiftSize(kind);
+  int32_t base_offset = instr->base_offset();
+  llvm::Value* address = nullptr;
+  llvm::Value* casted_address = nullptr;
+  llvm::Value* load = nullptr;
+
+  if (kPointerSize == kInt32Size && !key->IsConstant()) {
+    UNIMPLEMENTED();
+  }
+
+  if (key->IsConstant()) {
+    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+    
+    if (const_val & 0xF0000000) {
+      Abort(kArrayIndexConstantValueTooBig);
+    }
+
+    address = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + base_offset);
+  } else {
+     UNIMPLEMENTED();
+/*    
+     ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
+     
+     llvm::Value* lkey = Use(key);
+     llvm::Value* scale = nullptr;
+     llvm::Value* offset = nullptr;
+     if (key->representation().IsInteger32()) {
+       //scale = __ getInt32(8); //TODO ScaleFactor
+       //offset = __ getInt32(inst_offset);
+     } else {
+       //scale = __ getInt64(8);
+       //offset = __ getInt64(inst_offset);
+     }
+     llvm::Value* mul = __ CreateMul(lkey, scale);
+     llvm::Value* add = __ CreateAdd(mul, offset);
+     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                              Types::ptr_i8);
+     address = __ CreateGEP(int_ptr, add);
+*/
+  }
+
+  if (kind == FLOAT32_ELEMENTS) {
+    UNIMPLEMENTED();
+  } else if (kind == FLOAT64_ELEMENTS) {
+    UNIMPLEMENTED();
+  } else {
+    switch (kind) {
+      case INT8_ELEMENTS:
+        UNIMPLEMENTED();
+        break;
+      case UINT8_ELEMENTS:
+      case UINT8_CLAMPED_ELEMENTS:
+        UNIMPLEMENTED();
+        break;
+      case INT16_ELEMENTS:
+        UNIMPLEMENTED();
+        break;
+      case UINT16_ELEMENTS:
+        UNIMPLEMENTED();
+        break;
+      case INT32_ELEMENTS:
+        UNIMPLEMENTED();
+        break;
+      case UINT32_ELEMENTS:
+        casted_address = __ CreateBitCast(address, Types::ptr_i32);
+        load = __ CreateLoad(casted_address);
+        instr->set_llvm_value(load);
+        if (!instr->CheckFlag(HInstruction::kUint32)) {
+          UNIMPLEMENTED();
+          //__ testl(result, result);
+          //DeoptimizeIf(negative, instr, Deoptimizer::kNegativeValue);
+        }
+        break;
+      case FLOAT32_ELEMENTS:
+      case FLOAT64_ELEMENTS:
+      case FAST_ELEMENTS:
+      case FAST_SMI_ELEMENTS:
+      case FAST_DOUBLE_ELEMENTS:
+      case FAST_HOLEY_ELEMENTS:
+      case FAST_HOLEY_SMI_ELEMENTS:
+      case FAST_HOLEY_DOUBLE_ELEMENTS:
+      case DICTIONARY_ELEMENTS:
+      case FAST_SLOPPY_ARGUMENTS_ELEMENTS:
+      case SLOW_SLOPPY_ARGUMENTS_ELEMENTS:
+        UNREACHABLE();
+        break;
+    }
+  }
 }
 
 void LLVMChunkBuilder::DoLoadKeyedFixedDoubleArray(HLoadKeyed* instr) {
@@ -4423,6 +4431,9 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
 void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
   llvm::BasicBlock* materialized = NewBlock("DoRegExpLiteral materialized");
   llvm::BasicBlock* near = NewBlock("DoRegExpLiteral near");
+  llvm::Value* zero = __ getInt64(0);
+  llvm::BasicBlock* input = __ GetInsertBlock();
+
   int literal_offset =
       FixedArray::OffsetOfElementAt(instr->literal_index());
   llvm::Value* literals = MoveHeapObject(instr->literals());
@@ -4437,14 +4448,17 @@ void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
   pending_pushed_args_.Add(MoveHeapObject(instr->flags()), info()->zone());
   llvm::Value* call_result = CallRuntimeViaId(Runtime::kMaterializeRegExpLiteral);
   pending_pushed_args_.Clear();
+  __ CreateBr(materialized);
 
   __ SetInsertPoint(materialized);
   int size = JSRegExp::kSize + JSRegExp::kInObjectFieldCount * kPointerSize;
   //TODO(llvm) impement Allocate(size, rax, rcx, rdx, &runtime_allocate, TAG_OBJECT);
   //                    jmp(&allocated, Label::kNear);
-
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(call_result, near);
+  phi->addIncoming(zero, input);
   DCHECK(pending_pushed_args_.is_empty());
-  pending_pushed_args_.Add(call_result, info()->zone());
+  pending_pushed_args_.Add(phi, info()->zone());
   pending_pushed_args_.Add(__ getInt64(size), info()->zone());
   llvm::Value* result = CallRuntimeViaId(Runtime::kAllocateInNewSpace);
   llvm::Value* value = __ CreateBitOrPointerCast(result, Types::i64);
@@ -4453,7 +4467,7 @@ void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
   for (int i = 0; i < size - kPointerSize; i += 2 * kPointerSize) {
     temp = LoadFieldOperand(value, i);
     temp2 = LoadFieldOperand(value, i + kPointerSize);
-    llvm::Value* ptr = __ CreateIntToPtr(call_result, Types::ptr_i8);
+    llvm::Value* ptr = __ CreateIntToPtr(phi, Types::ptr_i8);
     llvm::Value* address =  __ CreateGEP(ptr, __ getInt32(i));
     address = __ CreateBitCast(address, Types::ptr_tagged);
     __ CreateStore(temp, address);
@@ -4462,7 +4476,11 @@ void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
     __ CreateStore(temp2, address2);
   }
   if ((size % (2 * kPointerSize)) != 0) {
-    UNIMPLEMENTED();
+   temp = LoadFieldOperand(value, size - kPointerSize);  // rdx
+   llvm::Value* ptr = __ CreateIntToPtr(phi, Types::ptr_i8);
+   llvm::Value* address =  __ CreateGEP(ptr, __ getInt32(size - kPointerSize));
+   llvm::Value* casted_address = __ CreateBitCast(address, Types::ptr_tagged);
+   __ CreateStore(temp, casted_address);
   }
   instr->set_llvm_value(value);
 }
@@ -4545,93 +4563,85 @@ void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
-  UNIMPLEMENTED();
-//  //TODO: Not tested
-//  ElementsKind elements_kind = instr->elements_kind();
-//  int shift_size = ElementsKindToShiftSize(elements_kind);
-//  uint32_t inst_offset = instr->base_offset();
-//  llvm::Value* gep_0 = nullptr; //TODO: Change mame
-//  llvm::Value* casted_address = nullptr;
-//  llvm::Value* store = nullptr;
-//  HValue* key = instr->key();
-//
-//  if (kPointerSize == kInt32Size && !key->IsConstant()) {
-//    Representation key_representation =
-//        instr->key()->representation();
-//    if (ExternalArrayOpRequiresTemp(key_representation, elements_kind)) {
-//      UNIMPLEMENTED();
-//    } else if (instr->IsDehoisted()) {
-//      UNIMPLEMENTED();
-//    }
-//  }
-//
-//  if (key->IsConstant()) {
-//    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
-//    gep_0 = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
-//  } else {
-//     llvm::Value* lkey = Use(key);
-//     llvm::Value* scale = nullptr;
-//     llvm::Value* offset = nullptr;
-//     if (key->representation().IsInteger32()) {
-//       scale = __ getInt32(8);
-//       offset = __ getInt32(inst_offset);
-//     } else {
-//       scale = __ getInt64(8); //TODO: Scale_factor
-//       offset = __ getInt64(inst_offset);
-//     }
-//     llvm::Value* mul = __ CreateMul(lkey, scale);
-//     llvm::Value* add = __ CreateAdd(mul, offset);
-//     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
-//                                              Types::ptr_i8);
-//     gep_0 = __ CreateGEP(int_ptr, add);
-//  }
-//
-//  if (elements_kind == EXTERNAL_FLOAT32_ELEMENTS ||
-//    elements_kind == FLOAT32_ELEMENTS) {
-//    UNIMPLEMENTED();
-//  } else if (elements_kind == EXTERNAL_FLOAT64_ELEMENTS ||
-//             elements_kind == FLOAT64_ELEMENTS) {
-//    UNIMPLEMENTED();
-//  } else {
-//    switch (elements_kind) {
-//      case EXTERNAL_UINT8_CLAMPED_ELEMENTS:
-//      case EXTERNAL_INT8_ELEMENTS:
-//      case EXTERNAL_UINT8_ELEMENTS:
-//      case INT8_ELEMENTS:
-//      case UINT8_ELEMENTS:
-//      case UINT8_CLAMPED_ELEMENTS:
-//        UNIMPLEMENTED();
-//        break;
-//      case EXTERNAL_INT16_ELEMENTS:
-//      case EXTERNAL_UINT16_ELEMENTS:
-//      case INT16_ELEMENTS:
-//      case UINT16_ELEMENTS:
-//        UNIMPLEMENTED();
-//        break;
-//      case EXTERNAL_INT32_ELEMENTS:
-//      case EXTERNAL_UINT32_ELEMENTS:
-//      case INT32_ELEMENTS:
-//      case UINT32_ELEMENTS:
-//        casted_address = __ CreateBitCast(gep_0, Types::ptr_i32);
-//        store = __ CreateStore(Use(instr->value()), casted_address);
-//        instr->set_llvm_value(store);
-//        break;
-//      case EXTERNAL_FLOAT32_ELEMENTS:
-//      case EXTERNAL_FLOAT64_ELEMENTS:
-//      case FLOAT32_ELEMENTS:
-//      case FLOAT64_ELEMENTS:
-//      case FAST_ELEMENTS:
-//      case FAST_SMI_ELEMENTS:
-//      case FAST_DOUBLE_ELEMENTS:
-//      case FAST_HOLEY_ELEMENTS:
-//      case FAST_HOLEY_SMI_ELEMENTS:
-//      case FAST_HOLEY_DOUBLE_ELEMENTS:
-//      case DICTIONARY_ELEMENTS:
-//      case SLOPPY_ARGUMENTS_ELEMENTS:
-//        UNREACHABLE();
-//        break;
-//    }
-//  }
+  //UNIMPLEMENTED();
+  //TODO: Not tested
+  ElementsKind elements_kind = instr->elements_kind();
+  int shift_size = ElementsKindToShiftSize(elements_kind);
+  uint32_t inst_offset = instr->base_offset();
+  llvm::Value*  address= nullptr;
+  llvm::Value* casted_address = nullptr;
+  llvm::Value* store = nullptr;
+  HValue* key = instr->key();
+
+  if (kPointerSize == kInt32Size && !key->IsConstant()) {
+    Representation key_representation =
+        instr->key()->representation();
+    if (ExternalArrayOpRequiresTemp(key_representation, elements_kind)) {
+      UNIMPLEMENTED();
+    } else if (instr->IsDehoisted()) {
+      UNIMPLEMENTED();
+    }
+  }
+
+  if (key->IsConstant()) {
+    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+    address = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
+  } else {
+     UNIMPLEMENTED();
+/*   llvm::Value* lkey = Use(key);
+     llvm::Value* scale = nullptr;
+     llvm::Value* offset = nullptr;
+     if (key->representation().IsInteger32()) {
+       scale = __ getInt32(8);
+       offset = __ getInt32(inst_offset);
+     } else {
+       scale = __ getInt64(8); //TODO: Scale_factor
+       offset = __ getInt64(inst_offset);
+     }
+     llvm::Value* mul = __ CreateMul(lkey, scale);
+     llvm::Value* add = __ CreateAdd(mul, offset);
+     llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
+                                              Types::ptr_i8);
+     address = __ CreateGEP(int_ptr, add);
+*/
+  }
+
+  if (elements_kind == FLOAT32_ELEMENTS) {
+    UNIMPLEMENTED();
+  } else if (elements_kind == FLOAT64_ELEMENTS) {
+    UNIMPLEMENTED();
+  } else {
+    switch (elements_kind) {
+      case INT8_ELEMENTS:
+      case UINT8_ELEMENTS:
+      case UINT8_CLAMPED_ELEMENTS:
+        UNIMPLEMENTED();
+        break;
+      case INT16_ELEMENTS:
+      case UINT16_ELEMENTS:
+        UNIMPLEMENTED();
+        break;
+      case INT32_ELEMENTS:
+      case UINT32_ELEMENTS:
+        casted_address = __ CreateBitCast(address, Types::ptr_i32);
+        store = __ CreateStore(Use(instr->value()), casted_address);
+        instr->set_llvm_value(store);
+        break;
+      case FLOAT32_ELEMENTS:
+      case FLOAT64_ELEMENTS:
+      case FAST_ELEMENTS:
+      case FAST_SMI_ELEMENTS:
+      case FAST_DOUBLE_ELEMENTS:
+      case FAST_HOLEY_ELEMENTS:
+      case FAST_HOLEY_SMI_ELEMENTS:
+      case FAST_HOLEY_DOUBLE_ELEMENTS:
+      case DICTIONARY_ELEMENTS:
+      case FAST_SLOPPY_ARGUMENTS_ELEMENTS:
+      case SLOW_SLOPPY_ARGUMENTS_ELEMENTS:
+        UNREACHABLE();
+        break;
+    }
+  }
 }
 
 void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
@@ -4750,9 +4760,9 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
 
 void LLVMChunkBuilder::RecordWriteField(llvm::Value* object, llvm::Value* value,
                                    int offset, PointersToHereCheck ptr_check, RememberedSetAction remembered_set) {
-  llvm::BasicBlock* current_block = NewBlock("RECORD WRITE SMI CHECKED");
-  llvm::BasicBlock* done = NewBlock("RECORD WRITE FIELD SMI CHECKED");
+  llvm::BasicBlock* done = NewBlock("RecordWriteField done");
   if (INLINE_SMI_CHECK) {
+    llvm::BasicBlock* current_block = NewBlock("RecordWriteField Smi checked");
     // Skip barrier if writing a smi.
     llvm::Value* smi_cond = SmiCheck(value, false);//JumpIfSmi(value, &done);
     __ CreateCondBr(smi_cond, done, current_block);
@@ -4784,11 +4794,11 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
   if (emit_debug_code()) {
     Assert(Compare(value, LoadFieldOperand(key_reg, 0)));
   }
-  llvm::BasicBlock* current_block = NewBlock("RECORD WRITE SMI CHECKED");
-  auto stub_block = NewBlock("AFTER CHECK_PAGE_FLAG");
-  llvm::BasicBlock* done = NewBlock("END OF RECORD WRITE");
+  auto stub_block = NewBlock("RecordWrite after checked page flag");
+  llvm::BasicBlock* done = NewBlock("RecordWrite dane");
 
   if (INLINE_SMI_CHECK) {
+    llvm::BasicBlock* current_block = NewBlock("RecordWrite Smi checked");
     // Skip barrier if writing a smi.
     llvm::Value* smi_cond = SmiCheck(value, false);//JumpIfSmi(value, &done);
     __ CreateCondBr(smi_cond, done, current_block);
@@ -4796,10 +4806,11 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
   }
   ptr_check = kPointersToHereAreAlwaysInteresting;
   if(ptr_check != kPointersToHereAreAlwaysInteresting) {
+    llvm::BasicBlock* page_check = NewBlock("RecordWrite page check");
     auto equal = CheckPageFlag(value,
                              MemoryChunk::kPointersToHereAreInterestingMask);
-    __ CreateCondBr(equal, done, current_block);
-    __ SetInsertPoint(current_block);
+    __ CreateCondBr(equal, done, page_check);
+    __ SetInsertPoint(page_check);
   }
 
   auto equal = CheckPageFlag(object,
@@ -5211,12 +5222,12 @@ void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
 }
 
 void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
-  UNIMPLEMENTED();
   llvm::Value* context = Use(instr->context());
   llvm::Value* left = Use(instr->left());
   llvm::Value* right = Use(instr->right());
   Token::Value op = instr->token();
   AllowHandleAllocation allow_handles;
+  AllowHeapAllocation allow_heap;
   Handle<Code> ic = CodeFactory::StringCompare(isolate()).code();
 
   std::vector<llvm::Value*> params;
