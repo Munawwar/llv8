@@ -3794,8 +3794,9 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
-//  UNIMPLEMENTED();
+  //  UNIMPLEMENTED();
   //TODO: not tested string-validate-input.js in doTest 
+  //TODO: Compare generated asm while testing
   HValue* key = instr->key();
   ElementsKind kind = instr->elements_kind();
   int shift_size = ElementsKindToShiftSize(kind);
@@ -3927,6 +3928,7 @@ void LLVMChunkBuilder::DoLoadKeyedFixedDoubleArray(HLoadKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
+  //TODO: Not tested, test case in string-validate-input.js -> doTest
   HValue* key = instr->key();
   Representation representation = instr->representation();
   bool requires_hole_check = instr->RequiresHoleCheck();
@@ -4560,7 +4562,7 @@ void LLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
-//  UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
+  //  UNIMPLEMENTED(); 
   if (instr->is_fixed_typed_array()) {
     DoStoreKeyedExternalArray(instr);
   } else if (instr->value()->representation().IsDouble()) {
@@ -5238,16 +5240,19 @@ void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) 
   AllowHandleAllocation allow_handles;
   AllowHeapAllocation allow_heap;
   Handle<Code> ic = CodeFactory::StringCompare(isolate()).code();
-
+  //TODO(Jivan) Convertion V8_S4 uses 4 registers. 
   std::vector<llvm::Value*> params;
   params.push_back(context);
   params.push_back(left);
   params.push_back(right);
   llvm::Value* result =  CallCode(ic, llvm::CallingConv::X86_64_V8_S4, params);
   llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
-  llvm::Value* test = __ CreateAnd(return_val,return_val);
+  //TODO (Jivan) It seems redudant
+  llvm::Value* test = __ CreateAnd(return_val, return_val);
   llvm::Value* cmp = nullptr;
   llvm::BranchInst* branch = nullptr;
+  //TODO (Jivan) There are multiply uses of  TokenToCondition
+  // Beter to move this code into function.
   switch (op) {
     case Token::EQ:
     case Token::EQ_STRICT:
