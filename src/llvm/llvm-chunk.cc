@@ -1886,6 +1886,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* fadd = __ CreateFAdd(Use(left), Use(right));
       instr->set_llvm_value(fadd);
   } else if (instr->representation().IsExternal()) {
+    //TODO: not tested string-validate-input.js in doTest
     DCHECK(instr->IsConsistentExternalRepresentation());
     CHECK(!instr->CheckFlag(HValue::kCanOverflow));
 
@@ -3779,6 +3780,7 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
   //UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
   if (instr->is_fixed_typed_array()) {
     DoLoadKeyedExternalArray(instr);
+
   } else if (instr->representation().IsDouble()) {
     DoLoadKeyedFixedDoubleArray(instr);
   } else {
@@ -3788,7 +3790,7 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
 
 void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
 //  UNIMPLEMENTED();
-  // TODO: Not tested
+  //TODO: not tested string-validate-input.js in doTest 
   HValue* key = instr->key();
   ElementsKind kind = instr->elements_kind();
   int shift_size = ElementsKindToShiftSize(kind);
@@ -4429,6 +4431,7 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
 }
 
 void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
+  //TODO: not tested string-validate-input.js in doTest
   llvm::BasicBlock* materialized = NewBlock("DoRegExpLiteral materialized");
   llvm::BasicBlock* near = NewBlock("DoRegExpLiteral near");
   llvm::Value* zero = __ getInt64(0);
@@ -4564,7 +4567,7 @@ void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
 
 void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
   //UNIMPLEMENTED();
-  //TODO: Not tested
+  //TODO: not tested string-validate-input.js in doTest
   ElementsKind elements_kind = instr->elements_kind();
   int shift_size = ElementsKindToShiftSize(elements_kind);
   uint32_t inst_offset = instr->base_offset();
@@ -5222,6 +5225,7 @@ void LLVMChunkBuilder::DoStringCharFromCode(HStringCharFromCode* instr) {
 }
 
 void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) {
+  //TODO: not tested string-validate-input.js in doTest
   llvm::Value* context = Use(instr->context());
   llvm::Value* left = Use(instr->left());
   llvm::Value* right = Use(instr->right());
