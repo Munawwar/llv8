@@ -5240,57 +5240,18 @@ void LLVMChunkBuilder::DoStringCompareAndBranch(HStringCompareAndBranch* instr) 
   AllowHandleAllocation allow_handles;
   AllowHeapAllocation allow_heap;
   Handle<Code> ic = CodeFactory::StringCompare(isolate()).code();
-  //TODO(Jivan) Convertion V8_S4 uses 4 registers. 
   std::vector<llvm::Value*> params;
   params.push_back(context);
   params.push_back(left);
   params.push_back(right);
-  llvm::Value* result =  CallCode(ic, llvm::CallingConv::X86_64_V8_S4, params);
+  llvm::Value* result =  CallCode(ic, llvm::CallingConv::X86_64_V8_S10, params);
   llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
   //TODO (Jivan) It seems redudant
   llvm::Value* test = __ CreateAnd(return_val, return_val);
-  llvm::Value* cmp = nullptr;
-  llvm::BranchInst* branch = nullptr;
-  //TODO (Jivan) There are multiply uses of  TokenToCondition
-  // Beter to move this code into function.
-  switch (op) {
-    case Token::EQ:
-    case Token::EQ_STRICT:
-      cmp = __ CreateICmpEQ(test, __ getInt64(0));
-      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
-                               Use(instr->SuccessorAt(1)));
-      break;
-    case Token::NE:
-    case Token::NE_STRICT:
-      cmp = __ CreateICmpNE(test, __ getInt64(0));
-      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
-                               Use(instr->SuccessorAt(1)));
-      break;
-    case Token::LT:
-      cmp = __ CreateICmpULT(test, __ getInt64(0));
-      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), 
-                               Use(instr->SuccessorAt(1)));
-      break;
-    case Token::GT:
-      cmp = __ CreateICmpUGT(test, __ getInt64(0));
-      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
-                               Use(instr->SuccessorAt(1)));
-      break;
-    case Token::LTE:
-      cmp = __ CreateICmpULE(test, __ getInt64(0));
-      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
-                               Use(instr->SuccessorAt(1)));
-      break;
-    case Token::GTE:
-      cmp = __ CreateICmpUGE(test, __ getInt64(0));
-      branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
-                               Use(instr->SuccessorAt(1)));
-      break;
-    case Token::IN:
-    case Token::INSTANCEOF:
-    default:
-      UNREACHABLE();
-  }
+  llvm::CmpInst::Predicate pred = TokenToPredicate(op, false, false);
+  llvm::Value* cmp = __ CreateICmp(pred, test, __ getInt64(0));
+  llvm::BranchInst* branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
+                                             Use(instr->SuccessorAt(1)));
   instr->set_llvm_value(branch);
 }
 
