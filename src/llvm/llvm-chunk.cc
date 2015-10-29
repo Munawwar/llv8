@@ -1151,12 +1151,17 @@ llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int64_t offse
   return __ CreateGEP(base_casted, offset_val);
 }
 
+llvm::Value* ValueFromSmi(Smi* smi) {
+   intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
+   llvm::Value* value = __ getInt64(intptr_value);
+   return value;
+}
+
 llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
   if (object->IsSmi()) {
     // TODO(llvm): use/write a function for that
     Smi* smi = Smi::cast(*object);
-    intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
-    llvm::Value* value = __ getInt64(intptr_value);
+    llvm::Value* value = ValueFromSmi(smi);
     return value;
   } else { // Heap object
     // MacroAssembler::MoveHeapObject
@@ -4053,7 +4058,8 @@ void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
   llvm::Value* vector =  MoveHeapObject(feedback_vector);
   FeedbackVectorSlot instr_slot = instr->slot();
   int index = feedback_vector->GetIndex(instr_slot);
-  llvm::Value* slot = __ getInt64(index);
+  Smi* smi = Smi::FromInt(index);
+  llvm::Value* slot = ValueFromSmi(smi)
 
   AllowHandleAllocation allow_handles;
   AllowHeapAllocation allow_heap;

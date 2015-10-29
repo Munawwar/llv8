@@ -611,6 +611,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   llvm::Value* LoadFieldOperand(llvm::Value* base,
                                 int offset,
                                 const char* name = "");
+  llvm::Value* ValueFromSmi(Smi* smi);
   llvm::Value* CreateConstant(HConstant* instr);
   llvm::Value* ConstructAddress(llvm::Value* base, int64_t offset);
   llvm::Value* MoveHeapObject(Handle<Object> obj);
