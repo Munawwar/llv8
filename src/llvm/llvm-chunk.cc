@@ -1151,7 +1151,7 @@ llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int64_t offse
   return __ CreateGEP(base_casted, offset_val);
 }
 
-llvm::Value* ValueFromSmi(Smi* smi) {
+llvm::Value* LLVMChunkBuilder::ValueFromSmi(Smi* smi) {
    intptr_t intptr_value = reinterpret_cast<intptr_t>(smi);
    llvm::Value* value = __ getInt64(intptr_value);
    return value;
@@ -4059,7 +4059,7 @@ void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
   FeedbackVectorSlot instr_slot = instr->slot();
   int index = feedback_vector->GetIndex(instr_slot);
   Smi* smi = Smi::FromInt(index);
-  llvm::Value* slot = ValueFromSmi(smi)
+  llvm::Value* slot = ValueFromSmi(smi);
 
   AllowHandleAllocation allow_handles;
   AllowHeapAllocation allow_heap;
