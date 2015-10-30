@@ -3994,7 +3994,27 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* obj = Use(instr->object());
+  llvm::Value* context = Use(instr->context());
+  llvm::Value*  key = Use(instr->key());
+  
+  if (instr->HasVectorAndSlot()) {
+    UNIMPLEMENTED();
+  }
+ 
+  UNIMPLEMENTED(); 
+  AllowHandleAllocation allow_handles;
+  Handle<Code> ic = CodeFactory::KeyedLoadICInOptimizedCode(
+                        isolate(), instr->language_mode(),
+                        instr->initialization_state()).code();
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(obj);
+  params.push_back(key);
+  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S5,
+                         params);
+  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
+  instr->set_llvm_value(return_val);
 }
 
 void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
@@ -4997,7 +5017,7 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
   for (int i = 1; i < instr->OperandCount() ; ++i)
     params.push_back(Use(instr->OperandAt(i)));
   pending_pushed_args_.Clear();
-  llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S4, params);
+  llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S10, params);
   llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
   instr->set_llvm_value(return_val); 
 }
