@@ -4002,7 +4002,6 @@ void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
     UNIMPLEMENTED();
   }
  
-  UNIMPLEMENTED(); 
   AllowHandleAllocation allow_handles;
   Handle<Code> ic = CodeFactory::KeyedLoadICInOptimizedCode(
                         isolate(), instr->language_mode(),
