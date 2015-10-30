@@ -2791,9 +2791,8 @@ void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
 }
 
 void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
-  llvm::Value* address = FieldOperand(Use(instr->value()), HeapObject::kMapOffset);
-  llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
-  llvm::Value* value = __ CreateLoad(cast_int);
+  llvm::Value* value = LoadFieldOperand(Use(instr->value()),
+                                        HeapObject::kMapOffset);
   
   if (instr->is_interval_check()) {
     UNIMPLEMENTED();
@@ -2814,7 +2813,15 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
       }
       DeoptimizeIf(cmp, true); 
     } else {
-      UNIMPLEMENTED();
+      //TODO: not tested (fail form string-tagcloud.js in function ""
+      //                  fail form date-format-tofte.js in arrayExists)
+      llvm::Value* instance_offset = LoadFieldOperand(value,
+                                                      Map::kInstanceTypeOffset);
+      
+      llvm::Value* and_value = __ CreateAnd(instance_offset, __ getInt64(0x000000ff));
+      llvm::Value* and_mask = __ CreateAnd(and_value, __ getInt64(mask));
+      llvm::Value* cmp = __ CreateICmpEQ(and_mask, __ getInt64(tag));
+      DeoptimizeIf(cmp, true);
     }
   }
 }
