@@ -4122,7 +4122,6 @@ void LCodeGen::DoStoreNamedGeneric(LStoreNamedGeneric* instr) {
   DCHECK(ToRegister(instr->context()).is(rsi));
   DCHECK(ToRegister(instr->object()).is(StoreDescriptor::ReceiverRegister()));
   DCHECK(ToRegister(instr->value()).is(StoreDescriptor::ValueRegister()));
-
   if (instr->hydrogen()->HasVectorAndSlot()) {
     EmitVectorStoreICRegisters<LStoreNamedGeneric>(instr);
   }

@@ -4802,6 +4802,8 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
 
 void LLVMChunkBuilder::RecordWriteField(llvm::Value* object, llvm::Value* value,
                                    int offset, PointersToHereCheck ptr_check, RememberedSetAction remembered_set) {
+  //FIXME: Not sure this is right
+  //TODO: Find a way to test this function
   llvm::BasicBlock* done = NewBlock("RecordWriteField done");
   if (INLINE_SMI_CHECK) {
     llvm::BasicBlock* current_block = NewBlock("RecordWriteField Smi checked");
@@ -4922,15 +4924,17 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     if (!instr->NeedsWriteBarrierForMap()) {
       UNIMPLEMENTED();
       // TODO : Maybe MoveHeapObj
-      llvm::Value* store_address = FieldOperand(Use(instr->object()),HeapObject::kMapOffset);
-      llvm::Value* address = __ getInt64(reinterpret_cast<uint64_t>(transition.location()));
+      llvm::Value* store_address = FieldOperand(Use(instr->object()), 
+                                                 HeapObject::kMapOffset);
+      llvm::Value* address = __ getInt64(
+                             reinterpret_cast<uint64_t>(transition.location()));
       __ CreateStore(store_address, address);
     } else {
       llvm::Value* scratch = MoveHeapObject(transition);
-      llvm::Value* obj = LoadFieldOperand(Use(instr->object()), HeapObject::kMapOffset);
-      llvm::Value* temp_obj = __ CreateIntToPtr(scratch, Types::ptr_i64);
-      //scratch = __ CreateBitCast(temp_obj, Types::ptr_i8);
-      __ CreateStore(obj, temp_obj);
+      llvm::Value* obj_addr = FieldOperand(Use(instr->object()),
+                                           HeapObject::kMapOffset);
+      auto casted_address = __ CreateBitCast(obj_addr, Types::ptr_i64);
+      __ CreateStore(scratch, casted_address);
       RecordWriteForMap(Use(instr->object()), scratch);
     }
   }
@@ -4959,7 +4963,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i32);
       __ CreateStore(casted_value, casted_adderss);
     } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
-      llvm::Value* store_address = ConstructAddress(Use(instr->object()), offset);
+      llvm::Value* store_address = ConstructAddress(obj_arg, offset);
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
                                                      Types::ptr_i64);
       llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i64);
@@ -4968,7 +4972,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       DCHECK(hValue->IsConstant());
       HConstant* constant = HConstant::cast(instr->value());
       Handle<Object> handle_value = constant->handle(isolate());
-      llvm::Value* store_address = ConstructAddress(Use(instr->object()),
+      llvm::Value* store_address = ConstructAddress(obj_arg,
                                                     offset);
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
                                                      Types::ptr_i64);
@@ -4979,8 +4983,10 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   }
 
   if (instr->NeedsWriteBarrier()) {
-    // UNIMPLEMENTED(); FIXME temporary for testing store_key
-    RecordWriteField(Use(instr->object()), Use(instr->value()), offset, instr->PointersToHereCheckForValue(), EMIT_REMEMBERED_SET);
+    //FIXME: Not sure this is right
+    //TODO: Find a way to test this case
+    RecordWriteField(obj_arg, Use(instr->value()), offset, 
+                     instr->PointersToHereCheckForValue(), EMIT_REMEMBERED_SET);
   }
 }
 
