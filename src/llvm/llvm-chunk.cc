@@ -4287,8 +4287,7 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
       //UNIMPLEMENTED();
       DoModByConstI(instr);
     } else {
-      UNIMPLEMENTED();
-      //return DoModI(instr);
+      DoModI(instr);
     }
   } else if (instr->representation().IsDouble()) {
     UNIMPLEMENTED();
@@ -4377,6 +4376,53 @@ void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
   llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
   phi->addIncoming(div1, near);
   phi->addIncoming(div2, is_not_negative);
+  instr->set_llvm_value(phi);
+}
+
+void LLVMChunkBuilder::DoModI(HMod* instr) {
+  //TODO: not tested, test case string-unpack-code.js in e finction
+  llvm::Value* left = Use(instr->left());
+  llvm::Value* right = Use(instr->right());
+  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::BasicBlock* done = NewBlock("DoModI done");
+  llvm::Value* result = nullptr;
+  llvm::BasicBlock* after_cmp_one = NewBlock("DoModI after cmpare minus one");
+  if (instr->CheckFlag(HValue::kCanBeDivByZero)) {
+    llvm::Value* test  = __ CreateICmpNE(right, __ getInt32(0));
+    DeoptimizeIf(test, true);
+  }
+  if (instr->CheckFlag(HValue::kCanOverflow)) {
+    llvm::BasicBlock* after_cmp_minInt = NewBlock("DoModI after cmpare MinInt");
+    llvm::BasicBlock* no_overflow_possible = NewBlock("DoModI no_overflow_possible");
+    llvm::Value* min_int = __ getInt32(kMinInt);
+    llvm::Value* cmp_min = __ CreateICmpEQ(left, min_int);
+    __ CreateCondBr(cmp_min, no_overflow_possible, after_cmp_minInt);
+
+    __ SetInsertPoint(after_cmp_minInt);
+    llvm::Value* minus_one = __ getInt32(-1);
+    llvm::Value* cmp_one = __ CreateICmpNE(right, minus_one);
+    if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+      UNIMPLEMENTED();
+    } else {
+      __ CreateCondBr(cmp_one, no_overflow_possible, after_cmp_one);
+      __ SetInsertPoint(after_cmp_one);
+      result = __ getInt32(0);
+      __ CreateBr(done);
+    }
+    __ SetInsertPoint(no_overflow_possible);
+    }
+
+  //llvm::Value* left_casted = __ CreateSExt(left, Types::i64);
+  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+    UNIMPLEMENTED();
+  }
+
+  llvm::Value* div = __ CreateSDiv(left, right);
+
+  __ SetInsertPoint(done);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
+  phi->addIncoming(div, insert);
+  phi->addIncoming(result, after_cmp_one);
   instr->set_llvm_value(phi);
 }
 
