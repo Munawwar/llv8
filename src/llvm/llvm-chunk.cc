@@ -5396,7 +5396,23 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
     RecordWriteForMap(object, new_map);
     __ CreateBr(end);
   } else {
-    UNIMPLEMENTED();
+   //TODO: not tested, 3d-cube.js in function VMulti
+   //PushSafepointRegistersScope scope(this);
+   bool is_js_array = from_map->instance_type() == JS_ARRAY_TYPE;
+   llvm::Value* map = MoveHeapObject(to_map);
+   TransitionElementsKindStub stub(isolate(), from_kind, to_kind, is_js_array);
+   //TypeFeedbackId id = TypeFeedbackId::None();
+   std::vector<llvm::Value*> params;
+   params.push_back(object);
+   params.push_back(map);
+   params.push_back(GetContext());
+   for (int i = 1; i < instr->OperandCount() ; ++i)
+    params.push_back(Use(instr->OperandAt(i)));
+   pending_pushed_args_.Clear();
+   AllowHandleAllocation allow_handles; 
+   CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_CES, params);
+   //RecordSafepointWithLazyDeopt(instr, RECORD_SAFEPOINT_WITH_REGISTERS, 0);
+   __ CreateBr(end);
   }
   __ SetInsertPoint(end);
 }
