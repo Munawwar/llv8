@@ -720,6 +720,17 @@ void LLVMChunkBuilder::ResolvePhis(HBasicBlock* block) {
   }
 }
 
+void LLVMChunkBuilder::int3() {
+  LLVMContext& context1 = LLVMGranularity::getInstance().context();
+  llvm::ArrayRef<llvm::Type*>FuncTy_3_args;
+  llvm::FunctionType* FuncTy_3 = llvm::FunctionType::get(
+  llvm::Type::getVoidTy(context1), FuncTy_3_args, false);
+  llvm::ArrayRef<llvm::Value*> pRef;
+  llvm::InlineAsm* ptr_12 = llvm::InlineAsm::get(FuncTy_3,
+                            "int3", "~{dirflag},~{fpsr},~{flags}",true);
+  llvm_ir_builder_->CreateCall(ptr_12,pRef);
+}
+
 llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
   switch (r.kind()) {
     case Representation::Kind::kInteger32:
@@ -4303,9 +4314,8 @@ void LLVMChunkBuilder::DoMathMinMax(HMathMinMax* instr) {
 void LLVMChunkBuilder::DoMod(HMod* instr) {
   if (instr->representation().IsSmiOrInteger32()) {
     if (instr->RightIsPowerOf2()) {
-       DoModByPowerOf2I(instr);
+      DoModByPowerOf2I(instr);
     } else if (instr->right()->IsConstant()) {
-      //UNIMPLEMENTED();
       DoModByConstI(instr);
     } else {
       DoModI(instr);
@@ -4414,20 +4424,27 @@ void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoModI(HMod* instr) {
+  llvm::BasicBlock* insert = __ GetInsertBlock();
   //TODO: not tested, test case string-unpack-code.js in e finction
   llvm::Value* left = Use(instr->left());
   llvm::Value* right = Use(instr->right());
-  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::Value* zero = __ getInt32(0);
   llvm::BasicBlock* done = NewBlock("DoModI done");
   llvm::Value* result = nullptr;
-  llvm::BasicBlock* after_cmp_one = NewBlock("DoModI after cmpare minus one");
+  llvm::Value* div_res = nullptr;
   if (instr->CheckFlag(HValue::kCanBeDivByZero)) {
-    llvm::Value* test  = __ CreateICmpNE(right, __ getInt32(0));
+    llvm::Value* test  = __ CreateICmpNE(right, zero);
     DeoptimizeIf(test, true);
   }
+
+  int phi_in = 1;
+  llvm::BasicBlock* after_cmp_one = nullptr;
   if (instr->CheckFlag(HValue::kCanOverflow)) {
+    UNIMPLEMENTED(); // because not tested
+    after_cmp_one = NewBlock("DoModI after cmpare minus one");
     llvm::BasicBlock* after_cmp_minInt = NewBlock("DoModI after cmpare MinInt");
-    llvm::BasicBlock* no_overflow_possible = NewBlock("DoModI no_overflow_possible");
+    llvm::BasicBlock* no_overflow_possible = NewBlock("DoModI"
+                                                      "no_overflow_possible");
     llvm::Value* min_int = __ getInt32(kMinInt);
     llvm::Value* cmp_min = __ CreateICmpEQ(left, min_int);
     __ CreateCondBr(cmp_min, no_overflow_possible, after_cmp_minInt);
@@ -4436,27 +4453,51 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
     llvm::Value* minus_one = __ getInt32(-1);
     llvm::Value* cmp_one = __ CreateICmpNE(right, minus_one);
     if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-      UNIMPLEMENTED();
+      DeoptimizeIf(cmp_one, true);
     } else {
-      __ CreateCondBr(cmp_one, no_overflow_possible, after_cmp_one);
-      __ SetInsertPoint(after_cmp_one);
-      result = __ getInt32(0);
+    phi_in++;
+    __ CreateCondBr(cmp_one, no_overflow_possible, after_cmp_one);
+    __ SetInsertPoint(after_cmp_one);
+    result = zero;
       __ CreateBr(done);
     }
     __ SetInsertPoint(no_overflow_possible);
     }
 
-  //llvm::Value* left_casted = __ CreateSExt(left, Types::i64);
-  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-    UNIMPLEMENTED();
+   llvm::BasicBlock* negative = nullptr;
+   llvm::BasicBlock* positive = nullptr;
+
+ if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+    phi_in++;
+    negative = NewBlock("DoModI left is negative");
+    positive = NewBlock("DoModI left is positive");
+    llvm::Value* cmp_sign = __ CreateICmpSGT(left, zero);
+    __ CreateCondBr(cmp_sign, positive, negative);
+
+    __ SetInsertPoint(negative);
+    div_res = __ CreateSRem(left, right);
+    llvm::Value* cmp_zero = __ CreateICmpNE(div_res, zero);
+    DeoptimizeIf(cmp_zero, true);
+    __ CreateBr(done);
+
+    __ SetInsertPoint(positive);
   }
 
-  llvm::Value* div = __ CreateSDiv(left, right);
+  llvm::Value* div = __ CreateSRem(left, right);
+  __ CreateBr(done);
 
   __ SetInsertPoint(done);
-  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
-  phi->addIncoming(div, insert);
-  phi->addIncoming(result, after_cmp_one);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, phi_in);
+  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+    phi->addIncoming(div_res, negative);
+    phi->addIncoming(div, positive);
+  } else {
+    phi->addIncoming(div, insert);
+  }
+  if (instr->CheckFlag(HValue::kCanOverflow) &&
+      !instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+    phi->addIncoming(result, after_cmp_one);
+  }
   instr->set_llvm_value(phi);
 }
 
@@ -5432,6 +5473,9 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
   } else {
    //TODO: not tested, 3d-cube.js in function VMulti
    //PushSafepointRegistersScope scope(this);
+
+
+   AllowHeapAllocation allow_heap;
    bool is_js_array = from_map->instance_type() == JS_ARRAY_TYPE;
    llvm::Value* map = MoveHeapObject(to_map);
    TransitionElementsKindStub stub(isolate(), from_kind, to_kind, is_js_array);

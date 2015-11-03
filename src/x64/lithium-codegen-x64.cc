@@ -1072,7 +1072,6 @@ void LCodeGen::DoModByConstI(LModByConstI* instr) {
 
 void LCodeGen::DoModI(LModI* instr) {
   HMod* hmod = instr->hydrogen();
-
   Register left_reg = ToRegister(instr->left());
   DCHECK(left_reg.is(rax));
   Register right_reg = ToRegister(instr->right());

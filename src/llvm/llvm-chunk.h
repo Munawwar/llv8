@@ -631,6 +631,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
   llvm::Value* GetContext();
   llvm::Value* GetNan();
+  void int3();
   llvm::Value* LoadRoot(Heap::RootListIndex index);
   llvm::Value* CompareRoot(llvm::Value* val, Heap::RootListIndex index,
                            llvm::CmpInst::Predicate = llvm::CmpInst::ICMP_EQ);
