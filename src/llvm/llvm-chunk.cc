@@ -1263,10 +1263,8 @@ llvm::Value* LLVMChunkBuilder::GetContext() {
 }
 
 llvm::Value* LLVMChunkBuilder::GetNan() {
-  // Is this NaN OK? :) I see it might be slow...
-  // TODO(llvm): use 0/0 or llvm NaN for better performance
-  return __ CreateBitCast(LoadRoot(Heap::kNanValueRootIndex), Types::float64);
-  //  return __ CreateSIToFP(__ getInt64(0), Types::float64); // 0 for debug
+  auto zero = llvm::ConstantFP::get(Types::float64, 0);
+  return __ CreateFDiv(zero, zero);
 }
 
 LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
