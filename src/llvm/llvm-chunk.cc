@@ -2198,8 +2198,31 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
   }
 }
 
+llvm::CallingConv::ID LLVMChunkBuilder::GetCallingConv(CallInterfaceDescriptor descriptor) {
+  if (descriptor.GetRegisterParameterCount() == 4) {
+    if (descriptor.GetRegisterParameter(0).is(rdi) &&
+        descriptor.GetRegisterParameter(1).is(rbx) &&
+        descriptor.GetRegisterParameter(2).is(rcx) &&
+        descriptor.GetRegisterParameter(3).is(rdx)) return llvm::CallingConv::X86_64_V8_S1;
+   return -1;
+  }
+  if (descriptor.GetRegisterParameterCount() == 3) {
+    //FIXME: // Change CallingConv
+    if (descriptor.GetRegisterParameter(0).is(rdi) &&
+        descriptor.GetRegisterParameter(1).is(rax) &&
+        descriptor.GetRegisterParameter(2).is(rbx)) return llvm::CallingConv::X86_64_V8_S1;
+  }
+  if (descriptor.GetRegisterParameterCount() == 1) {
+    if (descriptor.GetRegisterParameter(0).is(rax)) return llvm::CallingConv::X86_64_V8_S11;
+    return -1;
+  }
+  return -1;
+}
+
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   CallInterfaceDescriptor descriptor = instr->descriptor();
+  llvm::CallingConv::ID conversion = GetCallingConv(descriptor);
+  if (conversion == -1) UNIMPLEMENTED();
 
   //TODO: Do wee need this check here?
   if (descriptor.GetRegisterParameterCount() != instr->OperandCount() - 2) UNIMPLEMENTED();
@@ -2227,7 +2250,7 @@ void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
       Handle<Object> handle = HConstant::cast(target)->handle(isolate());
       Handle<Code> code = Handle<Code>::cast(handle);
       // TODO(llvm, gc): reloc info mode of the code (CODE_TARGET)...
-      llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S1, params);
+      llvm::Value* call = CallCode(code, conversion, params);
       instr->set_llvm_value(call);
     } else {
       UNIMPLEMENTED();

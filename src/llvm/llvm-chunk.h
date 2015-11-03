@@ -625,6 +625,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   // space is full. // FIXME(llvm): the comment
   llvm::Value* AllocateHeapNumber();
   void DirtyHack(int arg_count);
+  llvm::CallingConv::ID GetCallingConv(CallInterfaceDescriptor descriptor);
   llvm::Value* CallRuntime(const Runtime::Function*);
   llvm::Value* CallRuntimeViaId(Runtime::FunctionId id);
   llvm::Value* CallRuntimeFromDeferred(Runtime::FunctionId id, llvm::Value* context, std::vector<llvm::Value*>);
