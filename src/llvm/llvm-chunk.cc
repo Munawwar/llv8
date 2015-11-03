@@ -4320,7 +4320,20 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
-  HValue* dividend = instr->left();
+  int32_t divisor_val = (HConstant::cast(
+                                          instr->right()))->Integer32Value();
+  if (divisor_val == 0) {
+    UNIMPLEMENTED();
+  }
+  auto left = Use(instr->left());
+  auto right = __ getInt32(divisor_val);
+  auto result = __ CreateSRem(left, right);
+  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+     UNIMPLEMENTED();
+  }
+  instr->set_llvm_value(result);
+
+/*  HValue* dividend = instr->left();
   llvm::Value* l_dividend = Use(dividend);
   llvm::Value* l_rax = nullptr;
   llvm::Value* l_rdx = nullptr;
@@ -4365,7 +4378,7 @@ void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
     __ CreateBr(remainder_not_zero);
     __ SetInsertPoint(remainder_not_zero);
   }
-  instr->set_llvm_value(l_rax);
+  instr->set_llvm_value(l_rax);*/
 }
 
 void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
