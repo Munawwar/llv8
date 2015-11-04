@@ -5878,7 +5878,66 @@ void LLVMChunkBuilder::DoLoadGlobalViaContext(HLoadGlobalViaContext* instr) {
 }
 
 void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
-  UNIMPLEMENTED();
+  //TODO: not tested, 3d-cube.js in functions MMulti
+  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::BasicBlock* deferred = NewBlock("MaybeGrowElements deferred");
+  llvm::BasicBlock* done = NewBlock("MaybeGrowElements done");
+  llvm::Value* result = Use(instr->elements());
+  llvm::Value* result_from_deferred = nullptr;
+  HValue* key = instr->key();
+  HValue* current_capacity = instr->current_capacity();
+  DCHECK(instr->key()->representation().IsInteger32());
+  DCHECK(instr->current_capacity()->representation().IsInteger32());
+  if (key->IsConstant() && current_capacity->IsConstant()) {
+    UNIMPLEMENTED();
+  } else if (key->IsConstant()) {
+    UNIMPLEMENTED();
+  } else if (current_capacity->IsConstant()) {
+    UNIMPLEMENTED();
+  } else {
+    llvm::Value* cmp = __ CreateICmpSGE(Use(key), Use(current_capacity));
+    __ CreateCondBr(cmp, deferred, done);
+  }
+
+  __ SetInsertPoint(deferred);
+  std::vector<llvm::Value*> params;
+  //PushSafepointRegistersScope scope(this);
+  if (instr->object()->IsConstant()) {
+    UNIMPLEMENTED();
+  } else {
+    llvm::Value* object = Use(instr->object());
+    params.push_back(object);
+  }
+
+  if (key->IsConstant()) {
+    UNIMPLEMENTED();
+  } else {
+    llvm::Value* smi_key = __ CreateShl(Use(key), kSmiShift);
+    params.push_back(smi_key);
+  }
+
+  llvm::Value* context = Use(instr->context());
+  params.push_back(context);
+  GrowArrayElementsStub stub(isolate(), instr->is_js_array(),
+                             instr->kind());
+
+  AllowHandleAllocation allow_handle;
+  AllowHeapAllocation allow_heap;
+  result_from_deferred = CallCode(stub.GetCode(),
+                                  llvm::CallingConv::X86_64_V8_CES,
+                                  params);
+//  RecordSafepointWithLazyDeopt(instr, RECORD_SAFEPOINT_WITH_REGISTERS, 0);
+  // __ StoreToSafepointRegisterSlot(result, result);
+  llvm::Value* is_smi = SmiCheck(result_from_deferred, false);
+  DeoptimizeIf(is_smi, true);
+  __ CreateBr(done);
+
+  __ SetInsertPoint(done);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(result, insert);
+  phi->addIncoming(result_from_deferred, deferred);
+  instr->set_llvm_value(phi);
+  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoPrologue(HPrologue* instr) {
