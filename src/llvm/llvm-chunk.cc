@@ -1182,9 +1182,15 @@ llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
     if (isolate()->heap()->InNewSpace(*object)) {
       Handle<Cell> new_cell = isolate()->factory()->NewCell(object);
       llvm::Value* value = Move(new_cell, RelocInfo::CELL);
-      llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
-      
-      return  __ CreateLoad(ptr);
+      llvm::BasicBlock* current_block = __ GetInsertBlock();
+      auto last_instr = current_block-> getTerminator();
+      // if block has terminator we must insert before instruction it
+      if (!last_instr) {
+        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
+        return  __ CreateLoad(ptr);
+      }
+      llvm::Value* ptr = new llvm::IntToPtrInst(value, Types::ptr_i64, "", last_instr);
+      return  new llvm::LoadInst(ptr, "", last_instr);
     } else {
       return Move(object, RelocInfo::EMBEDDED_OBJECT);
     }
@@ -1837,7 +1843,7 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
   // if block has terminator we must insert before instruction it
   if (!last_instr) 
     return __ CreateCall(inline_asm, __ getInt64(intptr_value));
-  auto call = llvm::CallInst::Create(inline_asm, __ getInt64(intptr_value), "realoc", last_instr);
+  auto call = llvm::CallInst::Create(inline_asm, __ getInt64(intptr_value), "reloc", last_instr);
   //call->insertBefore(last_instr);
   return call;
 }
@@ -2055,6 +2061,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
 
   DCHECK(check_blocks.size() > 1);
   unsigned cur_block = 0;
+  llvm::BasicBlock* next = check_blocks[cur_block];
   __ CreateBr(check_blocks[cur_block]);
 
   if (expected.Contains(ToBooleanStub::UNDEFINED)) {
@@ -2062,10 +2069,11 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // undefined -> false.
     auto is_undefined = CompareRoot(value, Heap::kUndefinedValueRootIndex);
     __ CreateCondBr(is_undefined, false_target, check_blocks[++cur_block]);
+    next = check_blocks[cur_block];
   }
 
   if (expected.Contains(ToBooleanStub::BOOLEAN)) {
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     // true -> true.
     auto is_true = CompareRoot(value, Heap::kTrueValueRootIndex);
     llvm::BasicBlock* bool_second = NewBlock("BranchTagged Boolean Second Check");
@@ -2074,17 +2082,19 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ SetInsertPoint(bool_second);
     auto is_false = CompareRoot(value, Heap::kFalseValueRootIndex);
     __ CreateCondBr(is_false, false_target, check_blocks[++cur_block]);
+    next =  check_blocks[cur_block];
   }
 
   if (expected.Contains(ToBooleanStub::NULL_TYPE)) {
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     // 'null' -> false.
     auto is_null = CompareRoot(value, Heap::kNullValueRootIndex);
     __ CreateCondBr(is_null, false_target, check_blocks[++cur_block]);
+    next = check_blocks[cur_block];
   }
   // TODO: Test (till the end) 3d-cube.js DrawQube
   if (expected.Contains(ToBooleanStub::SMI)) {
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     // Smis: 0 -> false, all other -> true.
     llvm::BasicBlock* not_zero = NewBlock("BranchTagged Smi Non Zero");
     auto cmp_zero = __ CreateICmpEQ(value, __ getInt64(0));
@@ -2092,32 +2102,36 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ SetInsertPoint(not_zero);
     llvm::Value* smi_cond = SmiCheck(value, false);
     __ CreateCondBr(smi_cond, true_target, check_blocks[++cur_block]);
+    next = check_blocks[++cur_block]; 
  
   } else if (expected.NeedsMap()) {
     // If we need a map later and have a Smi -> deopt.
     //TODO: Not tested, string-fasta fastaRandom
+    __ SetInsertPoint(next);
     auto smi_and = __ CreateAnd(value, __ getInt64(kSmiTagMask));
     auto is_smi = __ CreateICmpEQ(smi_and, __ getInt64(0));
-    DeoptimizeIf(is_smi);
+    next = NewBlock("BranchTagged NeedsMapCont");
+    DeoptimizeIf(is_smi, false, next);
   }
 
   llvm::Value* map = nullptr;
   if (expected.NeedsMap()) {
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     map = LoadFieldOperand(value, HeapObject::kMapOffset);
     if (expected.CanBeUndetectable()) {
       auto map_bit_offset = LoadFieldOperand(map, Map::kBitFieldOffset);
       auto map_detach = __ getInt64(1 << Map::kIsUndetectable);
       auto test = __ CreateAnd(map_bit_offset, map_detach);
       auto cmp_zero = __ CreateICmpEQ(test, __ getInt64(0));
-      __ CreateCondBr(cmp_zero, check_blocks[++cur_block], false_target);
+      next = NewBlock("BracnhTagged NonUndetachable");
+      __ CreateCondBr(cmp_zero, next, false_target);
     }
   }
 
   if (expected.Contains(ToBooleanStub::SPEC_OBJECT)) {
     // spec object -> true.
     DCHECK(map); //FIXME: map can be null here
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     llvm::Value* cmp_instance = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset),
                                             __ getInt64(static_cast<int8_t>(FIRST_SPEC_OBJECT_TYPE)));
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);    
