@@ -2244,8 +2244,8 @@ llvm::CallingConv::ID LLVMChunkBuilder::GetCallingConv(CallInterfaceDescriptor d
 
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   CallInterfaceDescriptor descriptor = instr->descriptor();
-  llvm::CallingConv::ID conversion = GetCallingConv(descriptor);
-  if (conversion == -1) UNIMPLEMENTED();
+  llvm::CallingConv::ID conv = GetCallingConv(descriptor);
+  if (conv == -1) UNIMPLEMENTED();
 
   //TODO: Do wee need this check here?
   if (descriptor.GetRegisterParameterCount() != instr->OperandCount() - 2) UNIMPLEMENTED();
@@ -2273,7 +2273,7 @@ void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
       Handle<Object> handle = HConstant::cast(target)->handle(isolate());
       Handle<Code> code = Handle<Code>::cast(handle);
       // TODO(llvm, gc): reloc info mode of the code (CODE_TARGET)...
-      llvm::Value* call = CallCode(code, conversion, params);
+      llvm::Value* call = CallCode(code, conv, params);
       instr->set_llvm_value(call);
     } else {
       UNIMPLEMENTED();
@@ -2315,7 +2315,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   args[0] = target_context;
   args[1] = function_object;
   args[2] = __ getInt64(0);
-  //FIXME: This case needs farther investigation. Do we need new Calling Conversion here?
+  //FIXME: This case needs farther investigation. Do we need new Calling Convention here?
   //args[3] = __ getInt64(instr->argument_count());
   DCHECK(pending_pushed_args_.length() + actual_arg_count == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
