@@ -472,7 +472,7 @@ class LLVMChunk final : public LowChunk {
   StackMaps GetStackMaps();
   void SetUpDeoptimizationData(Handle<Code> code, StackMaps& stackmaps);
   void SetUpSafepointTables(Handle<Code> code, StackMaps& stackmaps);
-  Vector<byte> GetRelocationData(CodeDesc& code_desc);
+  Vector<byte> GetFullRelocationInfo(CodeDesc& code_desc);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env,
                           StackMaps::Record& stackmap,

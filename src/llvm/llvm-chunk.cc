@@ -64,27 +64,7 @@ Handle<Code> LLVMChunk::Codegen() {
       code_desc.buffer, code_desc.buffer + code_desc.instr_size);
 #endif
 
-  // Relocation info comes from 2 sources:
-  // 1) reloc info already present in reloc_data_;
-  // 2) patchpoints (CODE_TARGET reloc info has to be extracted from them).
-  std::vector<RelocInfo> reloc_data_2 = SetUpRelativeCalls(code_desc.buffer);
-  std::vector<RelocInfo> reloc_data_1 = LLVMGranularity::getInstance().Patch(
-      code_desc.buffer, code_desc.buffer + code_desc.instr_size,
-      reloc_data_->reloc_map());
-  RelocInfoBuffer buffer_writer(8, code_desc.buffer);
-  // Mege reloc infos, sort all of them by pc_ and write to the buffer.
-  std::vector<RelocInfo> reloc_data_merged;
-  reloc_data_merged.insert(reloc_data_merged.end(),
-                           reloc_data_1.begin(), reloc_data_1.end());
-  reloc_data_merged.insert(reloc_data_merged.end(),
-                           reloc_data_2.begin(), reloc_data_2.end());
-  std::sort(reloc_data_merged.begin(), reloc_data_merged.end(),
-            [](const RelocInfo a, const RelocInfo b) {
-              return a.pc() < b.pc();
-            });
-  for (auto r : reloc_data_merged) buffer_writer.Write(&r);
-  v8::internal::Vector<byte> reloc_bytevector = buffer_writer.GetResult();
-  // TODO(llvm): what's up with setting reloc_info's host_ to *code?
+  Vector<byte> reloc_bytevector = GetFullRelocationInfo(code_desc);
 
   // Allocate and install the code.
   if (info()->IsStub()) UNIMPLEMENTED(); // Probably different flags for stubs.
@@ -405,6 +385,31 @@ StackMaps LLVMChunk::GetStackMaps() {
 
 void LLVMChunk::SetUpSafepointTables(Handle<Code> code, StackMaps& stackmaps) {
 
+}
+
+Vector<byte> LLVMChunk::GetFullRelocationInfo(CodeDesc& code_desc) {
+  // Relocation info comes from 2 sources:
+  // 1) reloc info already present in reloc_data_;
+  // 2) patchpoints (CODE_TARGET reloc info has to be extracted from them).
+  std::vector<RelocInfo> reloc_data_2 = SetUpRelativeCalls(code_desc.buffer);
+  std::vector<RelocInfo> reloc_data_1 = LLVMGranularity::getInstance().Patch(
+      code_desc.buffer, code_desc.buffer + code_desc.instr_size,
+      reloc_data_->reloc_map());
+  RelocInfoBuffer buffer_writer(8, code_desc.buffer);
+  // Mege reloc infos, sort all of them by pc_ and write to the buffer.
+  std::vector<RelocInfo> reloc_data_merged;
+  reloc_data_merged.insert(reloc_data_merged.end(),
+                           reloc_data_1.begin(), reloc_data_1.end());
+  reloc_data_merged.insert(reloc_data_merged.end(),
+                           reloc_data_2.begin(), reloc_data_2.end());
+  std::sort(reloc_data_merged.begin(), reloc_data_merged.end(),
+            [](const RelocInfo a, const RelocInfo b) {
+              return a.pc() < b.pc();
+            });
+  for (auto r : reloc_data_merged) buffer_writer.Write(&r);
+  v8::internal::Vector<byte> reloc_bytevector = buffer_writer.GetResult();
+  // TODO(llvm): what's up with setting reloc_info's host_ to *code?
+  return reloc_bytevector;
 }
 
 void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
