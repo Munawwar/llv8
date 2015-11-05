@@ -94,7 +94,9 @@ Handle<Code> LLVMChunk::Codegen() {
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
-  SetUpDeoptimizationData(code);
+  StackMaps stackmaps = GetStackMaps();
+  SetUpDeoptimizationData(code, stackmaps);
+  SetUpSafepointTables(code, stackmaps);
   // TODO(llvm): it is not thread-safe. It's not anything-safe.
   // We assume a new function gets attention after the previous one
   // has been fully processed by llv8.
@@ -369,10 +371,15 @@ std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
   return result;
 }
 
-void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
+StackMaps LLVMChunk::GetStackMaps() {
   List<byte*>& stackmap_list =
       LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
-  if (stackmap_list.length() == 0) return;
+
+  if (stackmap_list.length() == 0) {
+    StackMaps empty;
+    return empty;
+  }
+
   DCHECK(stackmap_list.length() == 1);
 
   StackMaps stackmaps;
@@ -382,16 +389,28 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code) {
   stackmaps.dumpMultiline(std::cerr, "  ");
 #endif
 
-  uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
-      llvm_function_id_);
-  // I suspect stackmaps.stack_sizes.size() = 1 and the below search is useless.
-  auto it = std::find_if(stackmaps.stack_sizes.begin(),
-                         stackmaps.stack_sizes.end(),
-                         [address](const StackMaps::StackSize& s) {
-                           return s.functionOffset ==  address;
-                         });
-  DCHECK(it != std::end(stackmaps.stack_sizes));
-  int stacksize_size = IntHelper::AsInt(it->size);
+  // Because we only have one function. This could change in the future.
+  DCHECK(stackmaps.stack_sizes.size() == 1);
+
+//  uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
+//      llvm_function_id_);
+//  auto it = std::find_if(stackmaps.stack_sizes.begin(),
+//                         stackmaps.stack_sizes.end(),
+//                         [address](const StackMaps::StackSize& s) {
+//                           return s.functionOffset ==  address;
+//                         });
+//  DCHECK(it != std::end(stackmaps.stack_sizes));
+  return stackmaps;
+}
+
+void LLVMChunk::SetUpSafepointTables(Handle<Code> code, StackMaps& stackmaps) {
+
+}
+
+void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
+                                        StackMaps& stackmaps) {
+  if (stackmaps.stack_sizes.size() < 1) return;
+  int stacksize_size = IntHelper::AsInt(stackmaps.stack_sizes[0].size);
   DCHECK(stacksize_size / kStackSlotSize - kPhonySpillCount >= 0);
   code->set_stack_slots(stacksize_size / kStackSlotSize - kPhonySpillCount);
 
@@ -5967,6 +5986,18 @@ void LLVMEnvironment::AddValue(llvm::Value* value,
   if (representation.IsDouble()) {
     is_double_.Add(values_.length() - 1, zone());
   }
+}
+
+void LLVMRelocationData::DumpSafepointIds() {
+#ifdef DEBUG
+  std::cerr << "< Safepoint ids begin: \n";
+  for (GrowableBitVector::Iterator it(&is_safepoint_, zone_);
+       !it.Done();
+       it.Advance()) {
+    std::cerr << it.Current() << " ";
+  }
+  std::cerr << "Safepoint ids end >\n";
+#endif
 }
 
 #undef __

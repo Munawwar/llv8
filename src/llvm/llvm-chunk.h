@@ -82,6 +82,8 @@ class LLVMRelocationData : public ZoneObject {
 
   void transfer() { is_transferred_ = true; }
 
+  void DumpSafepointIds();
+
  private:
   // TODO(llvm): re-think the design and probably use ZoneHashMap
   RelocMap reloc_map_;
@@ -449,6 +451,7 @@ class LLVMChunk final : public LowChunk {
   }
   void set_reloc_data(LLVMRelocationData* reloc_data) {
     reloc_data_ = reloc_data;
+    reloc_data->DumpSafepointIds();
     reloc_data->transfer();
   }
   Assembler& masm() { return masm_; }
@@ -460,12 +463,15 @@ class LLVMChunk final : public LowChunk {
     inlined_closures_.Add(closure, zone());
   }
   int GetParameterStackSlot(int index) const;
+
  private:
   static const int kStackSlotSize = kPointerSize;
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi
 
   std::vector<RelocInfo> SetUpRelativeCalls(Address start);
-  void SetUpDeoptimizationData(Handle<Code> code);
+  StackMaps GetStackMaps();
+  void SetUpDeoptimizationData(Handle<Code> code, StackMaps& stackmaps);
+  void SetUpSafepointTables(Handle<Code> code, StackMaps& stackmaps);
   Vector<byte> GetRelocationData(CodeDesc& code_desc);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env,
