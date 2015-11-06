@@ -2551,7 +2551,36 @@ void LLVMChunkBuilder::DoCallRuntime(HCallRuntime* instr) {
 }
 
 void LLVMChunkBuilder::DoCallStub(HCallStub* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* context = Use(instr->context());
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+      params.push_back(pending_pushed_args_[i]);
+    pending_pushed_args_.Clear();
+  switch (instr->major_key()) {
+    case CodeStub::RegExpExec: {
+      RegExpExecStub stub(isolate());
+      AllowHandleAllocation allow_handle;
+      llvm::Value* call = CallCode(stub.GetCode(), 
+                                   llvm::CallingConv::X86_64_V8_Stub,
+                                   params);
+      llvm::Value* result =  __ CreatePtrToInt(call, Types::i64);
+      instr->set_llvm_value(result);
+      break;
+    }
+    case CodeStub::SubString: {
+      SubStringStub stub(isolate());
+      AllowHandleAllocation allow_handle;
+      llvm::Value* call = CallCode(stub.GetCode(),
+                                   llvm::CallingConv::X86_64_V8_Stub,
+                                   params);
+      llvm::Value* result =  __ CreatePtrToInt(call, Types::i64);
+      instr->set_llvm_value(result);
+      break;
+    }
+    default:
+      UNREACHABLE();
+  }
 }
 
 void LLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
@@ -3736,16 +3765,17 @@ void LLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr) {
-   if (!instr->value()->type().IsHeapObject()) {
-     llvm::Value* smi_cond = SmiCheck(Use(instr->value()), false); 
-      __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1))); 
-   }
-   llvm::Value* map = LoadFieldOperand(Use(instr->value()), HeapObject::kMapOffset); 
-   llvm::Value* bitFiledOffset = LoadFieldOperand(map, Map::kBitFieldOffset);
-   llvm::Value* test = __ CreateICmp(llvm::CmpInst::ICMP_EQ, bitFiledOffset, __ getInt64(1 << Map::kIsUndetectable));
-   llvm::Value* result = __ CreateCondBr(test, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-   instr->set_llvm_value(result);
-
+  if (!instr->value()->type().IsHeapObject()) {
+    llvm::BasicBlock* after_check_smi = NewBlock("IsUndetectableAndBranch after check smi");
+    llvm::Value* smi_cond = SmiCheck(Use(instr->value()), false); 
+     __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), after_check_smi);
+     __ SetInsertPoint(after_check_smi);
+  }
+  llvm::Value* map = LoadFieldOperand(Use(instr->value()), HeapObject::kMapOffset); 
+  llvm::Value* bitFiledOffset = LoadFieldOperand(map, Map::kBitFieldOffset);
+  llvm::Value* test = __ CreateICmpEQ(bitFiledOffset, __ getInt64(1 << Map::kIsUndetectable));
+  llvm::Value* result = __ CreateCondBr(test, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
@@ -5599,33 +5629,28 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   llvm::Value* input = Use(instr->value());
   Factory* factory = isolate()->factory();
   llvm::BasicBlock* not_smi = NewBlock("DoTypeofIsAndBranch NotSmi");
-  llvm::BranchInst* branch = nullptr;
+//  llvm::BranchInst* branch = nullptr;
   Handle<String> type_name = instr->type_literal();
   if (String::Equals(type_name, factory->number_string())) {
-    llvm::Value* smi_cond = SmiCheck(input);
-    branch = __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(0)), not_smi);
-    __ SetInsertPoint(not_smi);
-
-    llvm::Value* root = LoadFieldOperand(input, HeapObject::kMapOffset);
-    llvm::Value* cmp_root = CompareRoot(root, Heap::kHeapNumberMapRootIndex);
-    branch = __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-    instr->set_llvm_value(branch);
-  } else if (String::Equals(type_name, factory->string_string())) {
-    llvm::BasicBlock* continue_ = NewBlock("DoTypeofIsAndBranch continue");
     llvm::Value* smi_cond = SmiCheck(input);
     __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
     __ SetInsertPoint(not_smi);
 
+    llvm::Value* root = LoadFieldOperand(input, HeapObject::kMapOffset);
+    llvm::Value* cmp_root = CompareRoot(root, Heap::kHeapNumberMapRootIndex);
+     __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)),
+                     Use(instr->SuccessorAt(1)));
+  } else if (String::Equals(type_name, factory->string_string())) {
+    llvm::Value* smi_cond = SmiCheck(input);
+    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
+
+    __ SetInsertPoint(not_smi);
     llvm::Value* map = LoadFieldOperand(input, HeapObject::kMapOffset);
     auto imm = static_cast<int8_t>(FIRST_NONSTRING_TYPE);
-    llvm::Value* cond = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset), __ getInt64(imm));
-    __ CreateCondBr(cond, Use(instr->SuccessorAt(1)), continue_);
-    __ SetInsertPoint(continue_);
-    llvm::Value* test = __ CreateAnd(LoadFieldOperand(input, Map::kBitFieldOffset), 
-                                     __ getInt64(1 << Map::kIsUndetectable));
-    llvm::Value* cond_zero = __ CreateICmpEQ(test, __ getInt64(0));
-    branch = __ CreateCondBr(cond_zero, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-    instr->set_llvm_value(branch);
+    llvm::Value* type_offset = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+    llvm::Value* cond = __ CreateICmpUGE(type_offset, __ getInt64(imm));
+    __ CreateCondBr(cond, Use(instr->SuccessorAt(0)),
+                    Use(instr->SuccessorAt(1)));
   } else if (String::Equals(type_name, factory->symbol_string())) {
     UNIMPLEMENTED();
   } else if (String::Equals(type_name, factory->boolean_string())) {
@@ -5633,7 +5658,20 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   } else if (String::Equals(type_name, factory->undefined_string())) {
     UNIMPLEMENTED();
   } else if (String::Equals(type_name, factory->function_string())) {
-    UNIMPLEMENTED();
+    llvm::Value* smi_cond = SmiCheck(input);
+    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
+
+    __ SetInsertPoint(not_smi);
+    llvm::Value* map_offset = LoadFieldOperand(input, HeapObject::kMapOffset);
+    llvm::Value* bit_field = LoadFieldOperand(map_offset, Map::kBitFieldOffset);
+    llvm::Value* input_chenged = __ CreateAnd(bit_field, __ getInt64(0x000000ff));     //movzxbl
+    llvm::Value* imm = __ getInt64((1 << Map::kIsCallable) | 
+                                   (1 << Map::kIsUndetectable));
+    llvm::Value* result = __ CreateAnd(input_chenged,imm);
+    llvm::Value* cmp = __ CreateICmpEQ(result,
+                                       __ getInt64(1 << Map::kIsCallable));
+    __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
+                    Use(instr->SuccessorAt(1)));
   } else if (String::Equals(type_name, factory->object_string())) {
     UNIMPLEMENTED();
   } else {
