@@ -4105,20 +4105,33 @@ void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
   llvm::Value* context = Use(instr->context());
   llvm::Value*  key = Use(instr->key());
   
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(obj);
+  params.push_back(key);
   if (instr->HasVectorAndSlot()) {
-    UNIMPLEMENTED();
+    AllowDeferredHandleDereference vector_structure_check;
+    Handle<TypeFeedbackVector> handle_vector = instr->feedback_vector();
+    llvm::Value* vector = MoveHeapObject(handle_vector);
+    FeedbackVectorSlot feedback_slot = instr->slot();
+    int index = handle_vector->GetIndex(feedback_slot);
+    Smi* smi = Smi::FromInt(index);
+    llvm::Value* slot = ValueFromSmi(smi);
+    params.push_back(vector);
+    params.push_back(slot);
   }
  
   AllowHandleAllocation allow_handles;
   Handle<Code> ic = CodeFactory::KeyedLoadICInOptimizedCode(
                         isolate(), instr->language_mode(),
                         instr->initialization_state()).code();
-  std::vector<llvm::Value*> params;
-  params.push_back(context);
-  params.push_back(obj);
-  params.push_back(key);
-  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S5,
-                         params);
+
+  llvm::Value* result = nullptr;
+  if (instr->HasVectorAndSlot()) {
+    result = CallCode(ic, llvm::CallingConv::X86_64_V8_S9, params);
+  } else {
+    result = CallCode(ic, llvm::CallingConv::X86_64_V8_S5, params);
+  }
   llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
   instr->set_llvm_value(return_val);
 }
@@ -4815,7 +4828,7 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
   }
 
   if (key->IsConstant()) {
-    uint32_t const_val = (HConstant::cast(key))->Integer32Value();
+    int32_t const_val = (HConstant::cast(key))->Integer32Value();
     address = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
   } else {
      UNIMPLEMENTED();
@@ -5111,13 +5124,11 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     Handle<Map> transition = instr->transition_map();
     AddDeprecationDependency(transition);
     if (!instr->NeedsWriteBarrierForMap()) {
-      UNIMPLEMENTED();
-      // TODO : Maybe MoveHeapObj
-      llvm::Value* store_address = FieldOperand(Use(instr->object()), 
-                                                 HeapObject::kMapOffset);
-      llvm::Value* address = __ getInt64(
-                             reinterpret_cast<uint64_t>(transition.location()));
-      __ CreateStore(store_address, address);
+      llvm::Value* heap_treansition = MoveHeapObject(transition);
+      llvm::Value* ptr = __ CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
+      llvm::Value* address =  __ CreateGEP(ptr, __ getInt32(HeapObject::kMapOffset));
+      llvm::Value* casted_address = __ CreateBitCast(address, Types::ptr_tagged);
+      __ CreateStore(heap_treansition, casted_address);
     } else {
       llvm::Value* scratch = MoveHeapObject(transition);
       llvm::Value* obj_addr = FieldOperand(Use(instr->object()),
@@ -5953,7 +5964,10 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
   if (key->IsConstant() && current_capacity->IsConstant()) {
     UNIMPLEMENTED();
   } else if (key->IsConstant()) {
-    UNIMPLEMENTED();
+    int32_t constant_key = (HConstant::cast(key))->Integer32Value();
+    llvm::Value* capacity = Use(instr->current_capacity());
+    llvm::Value* cmp = __ CreateICmpSLE(capacity, __ getInt32(constant_key));
+    __ CreateCondBr(cmp, deferred, done);
   } else if (current_capacity->IsConstant()) {
     UNIMPLEMENTED();
   } else {
@@ -5965,14 +5979,24 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
   std::vector<llvm::Value*> params;
   //PushSafepointRegistersScope scope(this);
   if (instr->object()->IsConstant()) {
-    UNIMPLEMENTED();
+    HConstant* constant_object = HConstant::cast(instr->object());
+    if (instr->object()->representation().IsSmi()) {
+      UNIMPLEMENTED();
+    } else {
+      Handle<Object> handle_value = constant_object->handle(isolate());
+      llvm::Value* object = MoveHeapObject(handle_value);
+      params.push_back(object);
+    }
   } else {
     llvm::Value* object = Use(instr->object());
     params.push_back(object);
   }
 
   if (key->IsConstant()) {
-    UNIMPLEMENTED();
+    HConstant* constant = HConstant::cast(key);
+    Smi* smi_key = Smi::FromInt(constant->Integer32Value());
+    llvm::Value* smi = ValueFromSmi(smi_key);
+    params.push_back(smi);
   } else {
     llvm::Value* smi_key = __ CreateShl(Use(key), kSmiShift);
     params.push_back(smi_key);
