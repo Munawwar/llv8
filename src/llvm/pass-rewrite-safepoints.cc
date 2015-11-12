@@ -156,8 +156,10 @@ static void computeLiveInValues(llvm::DominatorTree& DT,
                         gc_collected_pointers);
 
 #ifdef DEBUG
-    for (llvm::Value* Kill : Data.KillSet[&BB])
+    for (llvm::Value* Kill : Data.KillSet[&BB]) {
+      USE(Kill);
       assert(!Data.LiveSet[&BB].count(Kill) && "live set contains kill");
+    }
 #endif
 
     Data.LiveOut[&BB] = llvm::DenseSet<llvm::Value*>();

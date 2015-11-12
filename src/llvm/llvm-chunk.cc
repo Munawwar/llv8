@@ -3451,7 +3451,7 @@ void LLVMChunkBuilder::DoDiv(HDiv* instr) {
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* dividend = instr->left();
     HValue* divisor = instr->right();
-    llvm::Value* Div = __ CreateUDiv(Use(dividend), Use(divisor),"");
+    llvm::Value* Div = __ CreateSDiv(Use(dividend), Use(divisor),"");
     instr->set_llvm_value(Div);
   } else if (instr->representation().IsDouble()) {
     DCHECK(instr->representation().IsDouble());
