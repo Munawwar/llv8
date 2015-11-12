@@ -2226,7 +2226,16 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
     llvm::BranchInst* branch = __ CreateCondBr(compare,
                                                true_target, false_target);
     instr->set_llvm_value(branch);
-  } else if (r.IsTagged()) {
+  } else if (r.IsSmi()) {
+    UNIMPLEMENTED();
+  } else if (r.IsDouble()) {
+    llvm::Value* zero = llvm::ConstantFP::get(Types::float64, 0);
+    llvm::Value* compare = __ CreateFCmpUNE(Use(value), zero);
+    llvm::BranchInst* branch = __ CreateCondBr(compare,
+                                               true_target, false_target);
+    instr->set_llvm_value(branch);
+  } else {
+    DCHECK(r.IsTagged());
     llvm::Value* value = Use(instr->value());
     if (type.IsBoolean()) {
       DCHECK(!info()->IsStub());
@@ -2240,8 +2249,6 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
       ToBooleanStub::Types expected = instr->expected_input_types();
       BranchTagged(instr, expected, true_target, false_target);
     }
-  } else {
-    UNIMPLEMENTED();
   }
 }
 
@@ -2261,6 +2268,7 @@ llvm::CallingConv::ID LLVMChunkBuilder::GetCallingConv(CallInterfaceDescriptor d
   }
   if (descriptor.GetRegisterParameterCount() == 1) {
     if (descriptor.GetRegisterParameter(0).is(rax)) return llvm::CallingConv::X86_64_V8_S11;
+    if (descriptor.GetRegisterParameter(0).is(rbx)) return llvm::CallingConv::X86_64_V8_S8;
     return -1;
   }
   return -1;
