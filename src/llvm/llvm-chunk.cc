@@ -2126,7 +2126,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ SetInsertPoint(not_zero);
     llvm::Value* smi_cond = SmiCheck(value, false);
     __ CreateCondBr(smi_cond, true_target, check_blocks[++cur_block]);
-    next = check_blocks[++cur_block]; 
+    next = check_blocks[cur_block];
  
   } else if (expected.NeedsMap()) {
     // If we need a map later and have a Smi -> deopt.
