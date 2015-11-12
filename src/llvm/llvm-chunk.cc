@@ -2339,16 +2339,17 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
                                          JSFunction::kContextOffset,
                                          "target_context");
 
-  int actual_arg_count = 3; //rax (holds parameter count), rsi, rdi, rbx (OSR)
+  int actual_arg_count = 4; //rax (holds parameter count), rsi, rdi, rbx (OSR)
   auto argument_count = instr->argument_count() + actual_arg_count;
-
+  if (instr->id() == 172) int3();
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   args[0] = target_context;
   args[1] = function_object;
   args[2] = __ getInt64(0);
   //FIXME: This case needs farther investigation. Do we need new Calling Convention here?
-  //args[3] = __ getInt64(instr->argument_count());
+  // crypto-aes AESDecryptCtr fails without this
+  args[3] = __ getInt64(instr->argument_count()-1);
   DCHECK(pending_pushed_args_.length() + actual_arg_count == argument_count);
   // The order is reverse because X86_64_V8 is not implemented quite right.
   for (int i = 0; i < pending_pushed_args_.length(); i++) {
@@ -2357,7 +2358,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   pending_pushed_args_.Clear();
 
   bool record_safepoint = true;
-  auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8, args,
+  auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8_E, args,
                       record_safepoint);
   instr->set_llvm_value(call);
 }
