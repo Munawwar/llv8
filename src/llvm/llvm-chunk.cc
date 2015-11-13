@@ -2254,7 +2254,7 @@ llvm::CallingConv::ID LLVMChunkBuilder::GetCallingConv(CallInterfaceDescriptor d
     //FIXME: // Change CallingConv
     if (descriptor.GetRegisterParameter(0).is(rdi) &&
         descriptor.GetRegisterParameter(1).is(rax) &&
-        descriptor.GetRegisterParameter(2).is(rbx)) return llvm::CallingConv::X86_64_V8_S1;
+        descriptor.GetRegisterParameter(2).is(rbx)) return llvm::CallingConv::X86_64_V8_S3;
   }
   if (descriptor.GetRegisterParameterCount() == 1) {
     if (descriptor.GetRegisterParameter(0).is(rax)) return llvm::CallingConv::X86_64_V8_S11;
