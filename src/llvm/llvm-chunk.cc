@@ -2341,6 +2341,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 
   int actual_arg_count = 4; //rsi, rdi, rbx (OSR), rax
   auto argument_count = instr->argument_count() + actual_arg_count;
+  //TODO:// get rid of this
   DirtyHack(pending_pushed_args_.length());
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
