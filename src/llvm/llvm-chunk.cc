@@ -744,16 +744,6 @@ void LLVMChunkBuilder::ResolvePhis(HBasicBlock* block) {
   }
 }
 
-void LLVMChunkBuilder::int3() {
-  LLVMContext& context1 = LLVMGranularity::getInstance().context();
-  llvm::ArrayRef<llvm::Type*>FuncTy_3_args;
-  llvm::FunctionType* FuncTy_3 = llvm::FunctionType::get(
-  llvm::Type::getVoidTy(context1), FuncTy_3_args, false);
-  llvm::ArrayRef<llvm::Value*> pRef;
-  llvm::InlineAsm* ptr_12 = llvm::InlineAsm::get(FuncTy_3,
-                            "int3", "~{dirflag},~{fpsr},~{flags}",true);
-  llvm_ir_builder_->CreateCall(ptr_12,pRef);
-}
 
 llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
   switch (r.kind()) {
