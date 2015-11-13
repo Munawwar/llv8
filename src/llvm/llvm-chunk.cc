@@ -1091,7 +1091,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntime(const Runtime::Function* function) {
   // 1) emit relative 32 call to index which would follow the calling convention
   // 2) record reloc info when we know the pc offset (RelocInfo::CODE...)
 
-  DirtyHack(arg_count);
+  // DirtyHack(arg_count);
 
   auto llvm_nargs = __ getInt64(arg_count);
   auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
@@ -1134,7 +1134,7 @@ llvm::Value* LLVMChunkBuilder::CallRuntimeFromDeferred(Runtime::FunctionId id,
   }
 
   // bool is_var_arg = false;
-  DirtyHack(arg_count);
+  // DirtyHack(arg_count);
   auto llvm_nargs = __ getInt64(arg_count);
   auto target_temp = __ getInt64(reinterpret_cast<uint64_t>(rt_target));
   auto llvm_rt_target = __ CreateIntToPtr(target_temp, Types::ptr_i8);
@@ -2271,7 +2271,7 @@ void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
 
   //TODO: Do wee need this check here?
   if (descriptor.GetRegisterParameterCount() != instr->OperandCount() - 2) UNIMPLEMENTED();
-
+  // DirtyHack(pending_pushed_args_.length());
   HValue* target = instr->target();
   // TODO(llvm): how  about a zone list?
   std::vector<llvm::Value*> params;
@@ -2332,7 +2332,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
   int actual_arg_count = 4; //rsi, rdi, rbx (OSR), rax
   auto argument_count = instr->argument_count() + actual_arg_count;
   //TODO:// get rid of this
-  DirtyHack(pending_pushed_args_.length());
+  // DirtyHack(pending_pushed_args_.length());
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   args[0] = target_context;
@@ -2479,7 +2479,8 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
       for (int i = pending_pushed_args_.length()-1; i >=0; --i)
         params.push_back(pending_pushed_args_[i]);
       pending_pushed_args_.Clear();
-      std::string arg_offset = std::to_string(2 * 8);
+      // TODO://Delete after test
+      /*std::string arg_offset = std::to_string(2 * 8);
       std::string asm_string1 = "sub $$";
       std::string asm_string2 = ", %rsp";
       std::string final_strig = asm_string1 + arg_offset + asm_string2;
@@ -2487,7 +2488,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
                                                                false);
       llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-      __ CreateCall(inline_asm);
+      __ CreateCall(inline_asm);*/
       llvm::Value* call = CallCode(code,
                                     llvm::CallingConv::X86_64_V8_S3, params);
       result_packed_elem = __ CreatePtrToInt(call, Types::i64);
@@ -2517,7 +2518,8 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    std::string arg_offset = std::to_string(2 * 8);
+    // TODO://Delete after test
+    /*std::string arg_offset = std::to_string(2 * 8);
     std::string asm_string1 = "sub $$";
     std::string asm_string2 = ", %rsp";
     std::string final_strig = asm_string1 + arg_offset + asm_string2;
@@ -2525,7 +2527,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
                                                                false);
     llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-    __ CreateCall(inline_asm);
+    __ CreateCall(inline_asm); */
     llvm::Value* call = CallCode(code,
                                     llvm::CallingConv::X86_64_V8_S3, params);
     llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
@@ -2555,8 +2557,8 @@ void LLVMChunkBuilder::DoCallStub(HCallStub* instr) {
   std::vector<llvm::Value*> params;
   params.push_back(context);
   for (int i = pending_pushed_args_.length()-1; i >=0; --i)
-      params.push_back(pending_pushed_args_[i]);
-    pending_pushed_args_.Clear();
+     params.push_back(pending_pushed_args_[i]);
+  pending_pushed_args_.Clear();
   switch (instr->major_key()) {
     case CodeStub::RegExpExec: {
       RegExpExecStub stub(isolate());
