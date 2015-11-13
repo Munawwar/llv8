@@ -2339,9 +2339,9 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
                                          JSFunction::kContextOffset,
                                          "target_context");
 
-  int actual_arg_count = 4; //rax (holds parameter count), rsi, rdi, rbx (OSR)
+  int actual_arg_count = 4; //rsi, rdi, rbx (OSR), rax
   auto argument_count = instr->argument_count() + actual_arg_count;
-  if (instr->id() == 172) int3();
+  DirtyHack(pending_pushed_args_.length());
   // Set up the actual arguments
   std::vector<llvm::Value*> args(argument_count, nullptr);
   args[0] = target_context;
