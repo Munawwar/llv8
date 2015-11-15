@@ -2451,6 +2451,8 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
   if (arity == 0) {
     UNIMPLEMENTED();
   } else if (arity == 1) {
+    //FIXME: This implementation seems worng
+    UNIMPLEMENTED();
     llvm::BasicBlock* done = nullptr;  
     llvm::BasicBlock* packed_case = NewBlock("CALL NEW ARRAY PACKED CASE");
     if (IsFastPackedElementsKind(kind)) {
@@ -2540,6 +2542,15 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
       phi->addIncoming(result_packed_elem, packed_continue);
     }
     instr->set_llvm_value(phi);
+  } else {
+    UNIMPLEMENTED();
+    std::vector<llvm::Value*> params;
+    params.push_back(Use(instr->context()));
+    params.push_back(Use(instr->constructor()));
+    params.push_back(arity_val);
+    ArrayNArgumentsConstructorStub stub(isolate(), kind, override_mode);
+    //FIXME: Wrong Conv
+    CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_S3, params);
   }
 }
 
