@@ -6006,19 +6006,17 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
     llvm::Value* smi = ValueFromSmi(smi_key);
     params.push_back(smi);
   } else {
-    llvm::Value* smi_key = __ CreateShl(Use(key), kSmiShift);
+    llvm::Value* smi_key = Integer32ToSmi(key);
     params.push_back(smi_key);
   }
 
-  llvm::Value* context = Use(instr->context());
-  params.push_back(context);
   GrowArrayElementsStub stub(isolate(), instr->is_js_array(),
                              instr->kind());
 
   AllowHandleAllocation allow_handle;
   AllowHeapAllocation allow_heap;
   result_from_deferred = CallCode(stub.GetCode(),
-                                  llvm::CallingConv::X86_64_V8_CES,
+                                  llvm::CallingConv::X86_64_V8_S12,
                                   params);
 //  RecordSafepointWithLazyDeopt(instr, RECORD_SAFEPOINT_WITH_REGISTERS, 0);
   // __ StoreToSafepointRegisterSlot(result, result);
