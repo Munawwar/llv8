@@ -5297,12 +5297,17 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
 
   __ SetInsertPoint(cons_str_cont);
   llvm::BasicBlock* indirect_string_loaded = NewBlock("StringCharCodeAt Indirect String");
-  llvm::Value* ptr_string = __ CreateIntToPtr(str, Types::ptr_i8);
-  llvm::Value* gep_string = __ CreateGEP(ptr_string,
-                                        __ getInt64(kSmiShift / kBitsPerByte));
+  llvm::Value* load = LoadFieldOperand(str, SlicedString::kOffsetOffset);
+  llvm::Value* address = FieldOperand(load, kSmiShift / kBitsPerByte);
+  llvm::Value* casted_address = __ CreatePointerCast(address,
+                                                     Types::ptr_i32);
+//  llvm::Value* ptr_string = __ CreateIntToPtr(str, Types::ptr_i8);
+//  llvm::Value* gep_string = __ CreateGEP(ptr_string,
+//                                        __ getInt64(kSmiShift / kBitsPerByte));
   // TODO(Jivan) //Do wee need ptr_i32 here?
-  llvm::Value* casted_cons = __ CreateBitCast(gep_string, Types::ptr_i32);
-  llvm::Value* cons_load = __ CreateLoad(casted_cons);
+//  llvm::Value* casted_cons = __ CreateBitCast(gep_string, Types::ptr_i32);
+//  llvm::Value* cons_load = __ CreateLoad(casted_cons);
+  llvm::Value* cons_load = __ CreateLoad(casted_address);
   llvm::Value* cons_index = __ CreateAdd(index, cons_load);
   llvm::Value* cons_string = LoadFieldOperand(str, SlicedString::kParentOffset);
   __ CreateBr(indirect_string_loaded);
@@ -5461,7 +5466,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
 
   __ SetInsertPoint(deferred);
   llvm::PHINode* str_phi_deferred = __ CreatePHI(Types::i64, 2);
-  str_phi_deferred->addIncoming(string_second_offset, cons_str);
+  str_phi_deferred->addIncoming(str, insert);
   str_phi_deferred->addIncoming(phi_str, cont_inside_seq);
 
   std::vector<llvm::Value*> params;
