@@ -2451,10 +2451,9 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
   if (arity == 0) {
     UNIMPLEMENTED();
   } else if (arity == 1) {
-    //FIXME: This implementation seems worng
-    UNIMPLEMENTED();
     llvm::BasicBlock* done = nullptr;  
     llvm::BasicBlock* packed_case = NewBlock("CALL NEW ARRAY PACKED CASE");
+    load_root = MoveHeapObject(instr->site());
     if (IsFastPackedElementsKind(kind)) {
       packed_continue = NewBlock("CALL NEW ARRAY PACKED CASE CONTINUE");
       llvm::Value* first_arg = pending_pushed_args_[0];
@@ -2473,7 +2472,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
         // FIXME(llvm,gc): respect reloc info mode...
       }
       std::vector<llvm::Value*> params;
-      params.push_back(GetContext());
+      params.push_back(Use(instr->context()));
       for (int i = 1; i < instr->OperandCount(); ++i)
         params.push_back(Use(instr->OperandAt(i)));
       params.push_back(arity_val);
@@ -2481,16 +2480,6 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
       for (int i = pending_pushed_args_.length()-1; i >=0; --i)
         params.push_back(pending_pushed_args_[i]);
       pending_pushed_args_.Clear();
-      // TODO://Delete after test
-      /*std::string arg_offset = std::to_string(2 * 8);
-      std::string asm_string1 = "sub $$";
-      std::string asm_string2 = ", %rsp";
-      std::string final_strig = asm_string1 + arg_offset + asm_string2;
-      llvm::FunctionType* inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(),
-                                                               false);
-      llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
-      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-      __ CreateCall(inline_asm);*/
       llvm::Value* call = CallCode(code,
                                     llvm::CallingConv::X86_64_V8_S3, params);
       result_packed_elem = __ CreatePtrToInt(call, Types::i64);
@@ -2512,7 +2501,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
       // FIXME(llvm,gc): respect reloc info mode...
     }
     std::vector<llvm::Value*> params;
-    params.push_back(GetContext()); 
+    params.push_back(Use(instr->context())); 
     for (int i = 1; i < instr->OperandCount(); ++i)
       params.push_back(Use(instr->OperandAt(i)));
     params.push_back(arity_val);
@@ -2520,16 +2509,6 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    // TODO://Delete after test
-    /*std::string arg_offset = std::to_string(2 * 8);
-    std::string asm_string1 = "sub $$";
-    std::string asm_string2 = ", %rsp";
-    std::string final_strig = asm_string1 + arg_offset + asm_string2;
-    llvm::FunctionType* inl_asm_f_type = llvm::FunctionType::get(__ getVoidTy(),
-                                                               false);
-    llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
-      inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
-    __ CreateCall(inline_asm); */
     llvm::Value* call = CallCode(code,
                                     llvm::CallingConv::X86_64_V8_S3, params);
     llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
@@ -2543,14 +2522,25 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     }
     instr->set_llvm_value(phi);
   } else {
-    UNIMPLEMENTED();
     std::vector<llvm::Value*> params;
     params.push_back(Use(instr->context()));
     params.push_back(Use(instr->constructor()));
     params.push_back(arity_val);
+    params.push_back(load_root);
+    for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+       params.push_back(pending_pushed_args_[i]);
+    pending_pushed_args_.Clear();
+ 
     ArrayNArgumentsConstructorStub stub(isolate(), kind, override_mode);
-    //FIXME: Wrong Conv
-    CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_S3, params);
+    Handle<Code> code = Handle<Code>::null();
+    {
+      AllowHandleAllocation allow_handles;
+      AllowHeapAllocation allow_heap;
+      code = stub.GetCode();
+    }
+    //DCHECK(code)
+    auto result = CallCode(code, llvm::CallingConv::X86_64_V8_S3, params);
+    instr->set_llvm_value(result);
   }
 }
 
@@ -5101,19 +5091,24 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
 }
 
 void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
-  UNIMPLEMENTED();
   DCHECK(instr->object()->representation().IsTagged());
   DCHECK(instr->key()->representation().IsTagged());
   DCHECK(instr->value()->representation().IsTagged());
+  if (instr->HasVectorAndSlot()) {
+    UNIMPLEMENTED();
+  }
 
   Handle<Code> ic = CodeFactory::KeyedStoreICInOptimizedCode(
                         isolate(), instr->language_mode(),
                         instr->initialization_state()).code();
 
-  // TODO(llvm): RecordSafepointWithLazyDeopt (and reloc info) + MarkAsCall
 
-  std::vector<llvm::Value*> no_params;
-  auto result = CallCode(ic, llvm::CallingConv::C, no_params);
+  std::vector<llvm::Value*> params;
+  params.push_back(Use(instr->context()));
+  params.push_back(Use(instr->object()));
+  params.push_back(Use(instr->value()));
+  params.push_back(Use(instr->key()));
+  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S7, params);
   instr->set_llvm_value(result);
 }
 
