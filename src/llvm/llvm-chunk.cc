@@ -4791,7 +4791,27 @@ void LLVMChunkBuilder::DoStoreCodeEntry(HStoreCodeEntry* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
-  UNIMPLEMENTED();
+  //TODO: not tested
+  llvm::Value* context = Use(instr->context());
+  llvm::Value* value = Use(instr->value());
+  int offset = instr->slot_index() + kHeapObjectTag;
+
+  if (instr->RequiresHoleCheck()) {
+    UNIMPLEMENTED();
+  }
+
+  llvm::Value* target = FieldOperand(context, offset);
+  llvm::Value* casted_address = __ CreateBitCast(target, Types::ptr_tagged);
+   __ CreateStore(value, casted_address);
+  if (instr->NeedsWriteBarrier()) {
+  int slot_offset = Context::SlotOffset(instr->slot_index());
+  enum SmiCheck check_needed =
+    instr->value()->type().IsHeapObject()
+          ? OMIT_SMI_CHECK : INLINE_SMI_CHECK;
+  USE(check_needed);
+  USE(slot_offset);
+    UNIMPLEMENTED();
+  }
 }
 
 void LLVMChunkBuilder::DoStoreFrameContext(HStoreFrameContext* instr) {
@@ -5675,7 +5695,25 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   } else if (String::Equals(type_name, factory->boolean_string())) {
     UNIMPLEMENTED();
   } else if (String::Equals(type_name, factory->undefined_string())) {
-    UNIMPLEMENTED();
+    //TODO: not tested
+    llvm::BasicBlock* after_cmp_root = NewBlock("DoTypeofIsAndBranch"
+                                          "after compare root");
+    llvm::Value* cmp_root = CompareRoot(input, Heap::kUndefinedValueRootIndex);
+    __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), after_cmp_root);
+
+    __ SetInsertPoint(after_cmp_root);
+    llvm::BasicBlock* after_check_smi = NewBlock("DoTypeofIsAndBranch"
+                                                 "after check smi");
+    llvm::Value* smi_cond = SmiCheck(input, false);
+    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), after_check_smi);
+
+    __ SetInsertPoint(after_check_smi);
+    llvm::Value* map_offset = LoadFieldOperand(input, HeapObject::kMapOffset);
+    llvm::Value* is_undetectable = __ getInt64(1 << Map::kIsUndetectable);
+    llvm::Value* result = LoadFieldOperand(map_offset, Map::kBitFieldOffset);
+    llvm::Value* test = __ CreateAnd(result, is_undetectable);
+    llvm::Value* cmp = __ CreateICmpNE(test, __ getInt64(0));
+    __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
   } else if (String::Equals(type_name, factory->function_string())) {
     llvm::Value* smi_cond = SmiCheck(input);
     __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
