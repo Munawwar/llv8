@@ -5470,7 +5470,6 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   str_phi_deferred->addIncoming(phi_str, cont_inside_seq);
 
   std::vector<llvm::Value*> params;
-  params.push_back(str_phi_deferred);
   //TODO : implement non constant case
   STATIC_ASSERT(String::kMaxLength <= Smi::kMaxValue);
   if (instr->index()->IsConstant()) {
@@ -5479,6 +5478,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
     llvm::Value* const_index = Integer32ToSmi(instr->index());
     params.push_back(const_index);
   }
+  params.push_back(str_phi_deferred);
   llvm::Value* call = CallRuntimeFromDeferred(Runtime::kStringCharCodeAtRT,
                                                Use(instr->context()),
                                                params);
