@@ -42,6 +42,10 @@ class IntHelper : public AllStatic {
     DCHECK(is_uint32(x));
     return static_cast<uint32_t>(x);
   }
+  static int AsInt32(int64_t x) {
+    DCHECK(is_int32(x));
+    return static_cast<int32_t>(x);
+  }
 };
 
 // ZoneObject is probably a better approach than the fancy
@@ -76,6 +80,7 @@ class LLVMRelocationData : public ZoneObject {
   int32_t GetNextDeoptPathcpointId();
   int32_t GetNextSafepointPathcpointId();
   int32_t GetNextRelocPathcpointId();
+  int32_t GetNextDeoptRelocPathcpointId();
   bool IsPatchpointIdDeopt(int32_t patchpoint_id);
   bool IsPatchpointIdSafepoint(int32_t patchpoint_id);
   bool IsPatchpointIdReloc(int32_t patchpoint_id);
@@ -433,11 +438,13 @@ class LLVMChunk final : public LowChunk {
       llvm_function_id_(-1),
       reloc_data_(nullptr),
       deopt_data_(nullptr),
-      masm_(nullptr, nullptr, 0),
+      masm_(info->isolate(), nullptr, 0),
       target_index_for_ppid_(),
+      deopt_target_offset_for_ppid_(),
       inlined_closures_(1, info->zone()) {}
 
   using PpIdToIndexMap = std::map<int32_t, uint32_t>;
+  using PpIdToOffsetMap = std::map<int32_t, std::ptrdiff_t>;
 
   static LLVMChunk* NewChunk(HGraph *graph);
 
@@ -457,6 +464,9 @@ class LLVMChunk final : public LowChunk {
   Assembler& masm() { return masm_; }
   PpIdToIndexMap& target_index_for_ppid() {
     return target_index_for_ppid_;
+  }
+  PpIdToOffsetMap& deopt_target_offset_for_ppid() {
+    return deopt_target_offset_for_ppid_;
   }
 
   void AddInlinedClosure(Handle<JSFunction> closure) {
@@ -503,6 +513,7 @@ class LLVMChunk final : public LowChunk {
   // (this map allocates keys on the heap and doesn't die).
   // Map patchpointId -> index in masm_.code_targets_
   PpIdToIndexMap target_index_for_ppid_;
+  PpIdToOffsetMap deopt_target_offset_for_ppid_;
   ZoneList<Handle<JSFunction> > inlined_closures_;
 };
 

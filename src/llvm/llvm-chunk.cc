@@ -342,10 +342,18 @@ std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
 
     auto pc_offset = start + record.instructionOffset;
     *pc_offset++ = 0xE8; // Call relative offset.
-    // TODO(llvm): it's always CODE_TARGET for now.
-    RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
-    result.push_back(reloc_info);
-    Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
+
+    if (reloc_data_->IsPatchpointIdDeopt(id)) {
+      RelocInfo reloc_info(pc_offset, RelocInfo::RUNTIME_ENTRY, 0, nullptr);
+      result.push_back(reloc_info);
+      auto delta = deopt_target_offset_for_ppid_[id];
+      Memory::int32_at(pc_offset) = IntHelper::AsInt32(delta);
+    } else {
+      // TODO(llvm): it's always CODE_TARGET for now.
+      RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
+      result.push_back(reloc_info);
+      Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
+    }
   }
 
   return result;
@@ -620,6 +628,12 @@ int32_t LLVMRelocationData::GetNextSafepointPathcpointId() {
 int32_t LLVMRelocationData::GetNextRelocPathcpointId() {
   int32_t next_id = ++last_patchpoint_id_;
   is_reloc_.Add(next_id, zone_);
+  return next_id;
+}
+
+int32_t LLVMRelocationData::GetNextDeoptRelocPathcpointId() {
+  auto next_id = GetNextRelocPathcpointId();
+  is_deopt_.Add(next_id, zone_);
   return next_id;
 }
 
@@ -1310,7 +1324,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
                                     bool negate,
                                     llvm::BasicBlock* next_block) {
   LLVMEnvironment* environment = AssignEnvironment();
-  auto patchpoint_id = reloc_data_->GetNextDeoptPathcpointId();
+  auto patchpoint_id = reloc_data_->GetNextDeoptRelocPathcpointId();
   deopt_data_->Add(environment, patchpoint_id);
 
   if (!next_block) next_block = NewBlock("BlockCont");
@@ -1354,9 +1368,16 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
   std::vector<llvm::Value*> mapped_values;
   for (auto val : *environment->values())
     mapped_values.push_back(val);
-  CallStackMap(patchpoint_id, mapped_values);
 
-  CallVoid(entry);
+  // Store offset relative to the Code Range start. It always fits in 32 bits.
+  // Will be fixed up later (in Code::CopyFrom).
+  Address start = isolate()->code_range()->start();
+  chunk()->deopt_target_offset_for_ppid()[patchpoint_id] = entry - start;
+
+  std::vector<llvm::Value*> empty;
+  int nop_size = 5; // Call relative i32 takes 5 bytes: `e8` + i32
+  auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
+  CallPatchPoint(patchpoint_id, llvm_null, empty, mapped_values, nop_size);
   __ CreateUnreachable();
 
   __ SetInsertPoint(saved_insert_point);
@@ -1819,8 +1840,9 @@ llvm::CallInst* LLVMChunkBuilder::CallPatchPoint(
   auto call = __ CreateCall(patchpoint, patchpoint_args);
 
   // FIXME(llvm): [safepoints] temp. We need a safepoint there.
+  // (Maybe not always).
   call->addAttribute(llvm::AttributeSet::FunctionIndex,
-                       "no-statepoint-please", "true");
+                     "no-statepoint-please", "true");
   return call;
 }
 

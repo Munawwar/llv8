@@ -6,6 +6,8 @@
 #include "src/allocation.h"
 #include "src/base/logging.h"
 #include "src/base/platform/platform.h"
+// FIXME(llvm): we only need IntHelper from there. Move it to a separate file.
+#include "llvm-chunk.h"
 
 #include <cstdbool>
 #include <cstdint>
@@ -46,24 +48,19 @@ byte* MCJITMemoryManager::allocateCodeSection(uintptr_t size,
       << section_name.str() << " section id == "
       << section_id << std::endl;
 #endif
-  CHECK(alignment <= base::OS::AllocateAlignment());
-  int size_as_int = static_cast<int>(size);
-  CHECK_EQ(size_as_int, size);
-//  size_t actual_size;
-//  uint8_t* buffer =
-//      static_cast<uint8_t*>(base::OS::Allocate(size, &actual_size, true));
-  // FIXME(llvm): this is wrong understanding of the alignment parameter.
-  // The commented code above is better (so TODO: use it) + at least CHECK()
-  // if alignment is right. Ditto for allocateDataSection.
-  byte* buffer = NewArray<byte>(RoundUp(size, alignment));
+  // Note: we don't care for the executable attribute here.
+  // Because before being executed the code gets copied to another place.
+  byte* buffer = NewArray<byte>(size);
+  CHECK(alignment == 0 ||
+        (reinterpret_cast<uintptr_t>(buffer) &
+        static_cast<uintptr_t>(alignment - 1)) == 0);
   CodeDesc desc;
   desc.buffer = buffer;
-  desc.buffer_size = RoundUp(size_as_int, alignment);
-  desc.instr_size = size_as_int;
+  desc.buffer_size = IntHelper::AsInt(size);
+  desc.instr_size = IntHelper::AsInt(size);
   desc.reloc_size = 0;
   desc.origin = nullptr;
   allocated_code_.Add(desc);
-  DCHECK_EQ(size_as_int, size);
   return buffer;
 }
 
@@ -86,6 +83,9 @@ byte* MCJITMemoryManager::allocateDataSection(uintptr_t size,
   }
   // FIXME(llvm): who frees that memory?
   // The destructor here does. Not sure if it is supposed to.
+
+  // FIXME(llvm): this is wrong understanding of the alignment parameter.
+  // see allocateCodeSection.
   byte* buffer = NewArray<byte>(RoundUp(size, alignment));
   allocated_data_.Add(buffer);
   if (section_name.equals(".llvm_stackmaps"))
