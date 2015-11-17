@@ -2907,11 +2907,12 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
       llvm::Value* addr = FieldOperand(value , Map::kInstanceTypeOffset);
       llvm::Value* cast_to_int = __ CreateBitCast(addr, Types::ptr_i64);
       llvm::Value* val = __ CreateLoad(cast_to_int);
+      llvm::Value* test = __ CreateAnd(val, __ getInt64(mask));
       llvm::Value* cmp = nullptr;
       if (tag == 0) {
-        cmp = __ CreateICmpNE(val, __ getInt64(mask));
+        cmp = __ CreateICmpNE(test, __ getInt64(0));
       } else {
-        cmp = __ CreateICmpEQ(val, __ getInt64(mask));
+        cmp = __ CreateICmpEQ(test, __ getInt64(0));
       }
       DeoptimizeIf(cmp, true); 
     } else {
@@ -5253,10 +5254,9 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
     // FIXME(llvm,gc): respect reloc info mode...
   }
   std::vector<llvm::Value*> params;
-  params.push_back(GetContext());
+  params.push_back(Use(instr->context()));
   for (int i = 1; i < instr->OperandCount() ; ++i)
     params.push_back(Use(instr->OperandAt(i)));
-  pending_pushed_args_.Clear();
   llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S10, params);
   llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
   instr->set_llvm_value(return_val); 
