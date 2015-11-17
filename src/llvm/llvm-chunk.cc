@@ -4679,19 +4679,19 @@ void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
   //TODO: not tested string-validate-input.js in doTest
   llvm::BasicBlock* materialized = NewBlock("DoRegExpLiteral materialized");
   llvm::BasicBlock* near = NewBlock("DoRegExpLiteral near");
-  llvm::Value* zero = __ getInt64(0);
   llvm::BasicBlock* input = __ GetInsertBlock();
-
   int literal_offset =
       FixedArray::OffsetOfElementAt(instr->literal_index());
   llvm::Value* literals = MoveHeapObject(instr->literals());
   llvm::Value* fild_literal = LoadFieldOperand(literals, literal_offset);
-  auto cmp_root = CompareRoot(fild_literal ,Heap::kUndefinedValueRootIndex);
+  auto cmp_root = CompareRoot(fild_literal, Heap::kUndefinedValueRootIndex,
+                              llvm::CmpInst::ICMP_NE);
   __ CreateCondBr(cmp_root, materialized, near);
   __ SetInsertPoint(near);
   DCHECK(pending_pushed_args_.is_empty());
+  Smi* index = Smi::FromInt(literal_offset);
   pending_pushed_args_.Add(literals, info()->zone());
-  pending_pushed_args_.Add(__ getInt64(literal_offset), info()->zone());
+  pending_pushed_args_.Add(ValueFromSmi(index), info()->zone());
   pending_pushed_args_.Add(MoveHeapObject(instr->pattern()), info()->zone());
   pending_pushed_args_.Add(MoveHeapObject(instr->flags()), info()->zone());
   llvm::Value* call_result = CallRuntimeViaId(Runtime::kMaterializeRegExpLiteral);
@@ -4704,10 +4704,12 @@ void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
   //                    jmp(&allocated, Label::kNear);
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(call_result, near);
-  phi->addIncoming(zero, input);
+  phi->addIncoming(fild_literal, input);
+
+  Smi* smi_size = Smi::FromInt(size);
   DCHECK(pending_pushed_args_.is_empty());
+  pending_pushed_args_.Add(ValueFromSmi(smi_size), info()->zone());
   pending_pushed_args_.Add(phi, info()->zone());
-  pending_pushed_args_.Add(__ getInt64(size), info()->zone());
   llvm::Value* result = CallRuntimeViaId(Runtime::kAllocateInNewSpace);
   llvm::Value* value = __ CreateBitOrPointerCast(result, Types::i64);
   llvm::Value* temp = nullptr;    //rdx
