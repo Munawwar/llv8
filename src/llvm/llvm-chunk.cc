@@ -4829,15 +4829,14 @@ void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
 
   llvm::Value* target = FieldOperand(context, offset);
   llvm::Value* casted_address = __ CreateBitCast(target, Types::ptr_tagged);
-   __ CreateStore(value, casted_address);
+  __ CreateStore(value, casted_address);
   if (instr->NeedsWriteBarrier()) {
-  int slot_offset = Context::SlotOffset(instr->slot_index());
-  enum SmiCheck check_needed =
-    instr->value()->type().IsHeapObject()
-          ? OMIT_SMI_CHECK : INLINE_SMI_CHECK;
-  USE(check_needed);
-  USE(slot_offset);
-    UNIMPLEMENTED();
+    int slot_offset = Context::SlotOffset(instr->slot_index());
+    RecordWriteField(context,
+                     value,
+                     slot_offset + kHeapObjectTag,
+                     kPointersToHereMaybeInteresting,
+                     EMIT_REMEMBERED_SET);
   }
 }
 
