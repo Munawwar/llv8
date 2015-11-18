@@ -4428,8 +4428,10 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
       DoModI(instr);
     }
   } else if (instr->representation().IsDouble()) {
-    UNIMPLEMENTED();
-    //return DoArithmeticD(Token::MOD, instr);
+    llvm::Value* left = Use(instr->left());
+    llvm::Value* right = Use(instr->right());
+    llvm::Value* result = __ CreateFRem(left, right);
+    instr->set_llvm_value(result);
   } else {
     UNIMPLEMENTED();
     //return DoArithmeticT(Token::MOD, instr);
