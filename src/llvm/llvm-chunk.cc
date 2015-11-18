@@ -2401,7 +2401,8 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     params.push_back(context);
     params.push_back(function);
     params.push_back(vector);
-    params.push_back(__ getInt64(index));
+    Smi* smi_index = Smi::FromInt(index);
+    params.push_back(ValueFromSmi(smi_index));
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
@@ -2418,7 +2419,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    result = CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8,
+    result = CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_S13,
                              params);
     return_val = __ CreatePtrToInt(result, Types::i64);
   }
