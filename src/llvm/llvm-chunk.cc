@@ -4867,7 +4867,7 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
   //TODO: not tested string-validate-input.js in doTest
   ElementsKind elements_kind = instr->elements_kind();
   int shift_size = ElementsKindToShiftSize(elements_kind);
-  uint32_t inst_offset = instr->base_offset();
+  uint32_t offset = instr->base_offset();
   llvm::Value*  address= nullptr;
   llvm::Value* casted_address = nullptr;
   llvm::Value* store = nullptr;
@@ -4885,25 +4885,16 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
 
   if (key->IsConstant()) {
     int32_t const_val = (HConstant::cast(key))->Integer32Value();
-    address = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + inst_offset);
+    address = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + offset);
   } else {
-     UNIMPLEMENTED();
-/*   llvm::Value* lkey = Use(key);
-     llvm::Value* scale = nullptr;
-     llvm::Value* offset = nullptr;
-     if (key->representation().IsInteger32()) {
-       scale = __ getInt32(8);
-       offset = __ getInt32(inst_offset);
-     } else {
-       scale = __ getInt64(8); //TODO: Scale_factor
-       offset = __ getInt64(inst_offset);
-     }
-     llvm::Value* mul = __ CreateMul(lkey, scale);
-     llvm::Value* add = __ CreateAdd(mul, offset);
+     Representation key_representation =
+        instr->key()->representation();
+     DCHECK(key_representation.IsInteger32());
+     llvm::Value* mul = __ CreateMul(Use(key), __ getInt32(shift_size));
+     llvm::Value* add = __ CreateAdd(mul, __ getInt32(offset));
      llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
                                               Types::ptr_i8);
      address = __ CreateGEP(int_ptr, add);
-*/
   }
 
   if (elements_kind == FLOAT32_ELEMENTS) {
@@ -4914,9 +4905,13 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
     switch (elements_kind) {
       case INT8_ELEMENTS:
       case UINT8_ELEMENTS:
-      case UINT8_CLAMPED_ELEMENTS:
-        UNIMPLEMENTED();
+      case UINT8_CLAMPED_ELEMENTS: {
+        casted_address = __ CreateBitCast(address, Types::ptr_i8);
+        auto result = __ CreateTruncOrBitCast(Use(instr->value()), Types::i8);
+        store = __ CreateStore(result, casted_address);
+        instr->set_llvm_value(store);
         break;
+      }
       case INT16_ELEMENTS:
       case UINT16_ELEMENTS:
         UNIMPLEMENTED();
