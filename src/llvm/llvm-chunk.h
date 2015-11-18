@@ -486,16 +486,16 @@ class LLVMChunk final : public LowChunk {
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env,
                           StackMaps::Record& stackmap,
-                          const StackMaps& stackmaps);
+                          const std::vector<StackMaps::Constant> constants);
   void WriteTranslation(LLVMEnvironment* environment,
                         StackMaps::Record& stackmap,
                         Translation* translation,
-                        const StackMaps& stackmaps);
+                        const std::vector<StackMaps::Constant> constants);
   void AddToTranslation(LLVMEnvironment* environment,
                         Translation* translation,
                         llvm::Value* op, //change
                         StackMaps::Location& location,
-                        const StackMaps& stackmaps,
+                        const std::vector<StackMaps::Constant> constants,
                         bool is_tagged,
                         bool is_uint32,
                         bool is_double,

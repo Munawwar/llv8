@@ -100,10 +100,11 @@ Handle<Code> LLVMChunk::Codegen() {
   return code;
 }
 
-void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
-                                 StackMaps::Record& stackmap,
-                                 Translation* translation,
-                                 const StackMaps& stackmaps) {
+void LLVMChunk::WriteTranslation(
+    LLVMEnvironment* environment,
+    StackMaps::Record& stackmap_record,
+    Translation* translation,
+    const std::vector<StackMaps::Constant> constants) {
   if (environment == nullptr) return;
 
   // The translation includes one command per value in the environment.
@@ -111,7 +112,8 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   // The output frame height does not include the parameters.
   int height = translation_size - environment->parameter_count();
 
-  WriteTranslation(environment->outer(), stackmap, translation, stackmaps);
+  WriteTranslation(environment->outer(),
+                   stackmap_record, translation, constants);
 
   int shared_id;
   if (environment->entry())
@@ -139,28 +141,29 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   int object_index = 0;
   int dematerialized_index = 0;
 
-  if (translation_size != stackmap.locations.size()) {
+  if (translation_size != stackmap_record.locations.size()) {
     // To support inlining (environment -> outer != NULL)
     // we probably should introduce some mapping between llvm::Value* and
     // Location number in a StackMap.
     UNIMPLEMENTED();
   }
   for (int i = 0; i < translation_size; ++i) {
-    // FIXME(llvm): (probably when adding inlining support)
-    // Here we assume the i-th stackmap's Location corresponds
-    // to the i-th llvm::Value which is not a very safe assumption in general.
+    // i-th Location in a stackmap record Location corresponds to the i-th
+    // llvm::Value*. Here's an excerpt from the doc:
+    // > The runtime must be able to interpret the stack map record given only
+    // > the ID, offset, and the order of the locations, *which LLVM preserves*.
 
-    // Also, it seems we cannot really use llvm::Value* here, because
+    // FIXME(llvm): It seems we cannot really use llvm::Value* here, because
     // since we generated them optimization has happened
     // (therefore those values are now invalid).
 
     llvm::Value* value = environment->values()->at(i);
-    StackMaps::Location location = stackmap.locations[i];
+    StackMaps::Location location = stackmap_record.locations[i];
     AddToTranslation(environment,
                      translation,
                      value,
                      location,
-                     stackmaps,
+                     constants,
                      environment->HasTaggedValueAt(i),
                      environment->HasUint32ValueAt(i),
                      environment->HasDoubleValueAt(i),
@@ -187,16 +190,18 @@ static int FpRelativeOffsetToIndex(int32_t offset) {
   return index;
 }
 
-void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
-                                 Translation* translation,
-                                 llvm::Value* op,
-                                 StackMaps::Location& location,
-                                 const StackMaps& stackmaps,
-                                 bool is_tagged,
-                                 bool is_uint32,
-                                 bool is_double,
-                                 int* object_index_pointer,
-                                 int* dematerialized_index_pointer) {
+void LLVMChunk::AddToTranslation(
+    LLVMEnvironment* environment,
+    Translation* translation,
+    llvm::Value* op,
+    StackMaps::Location& location,
+    const std::vector<StackMaps::Constant> constants,
+    bool is_tagged,
+    bool is_uint32,
+    bool is_double,
+    int* object_index_pointer,
+    int* dematerialized_index_pointer) {
+
   if (op == LLVMEnvironment::materialization_marker()) {
     UNIMPLEMENTED();
   }
@@ -244,7 +249,7 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
   } else if (location.kind == StackMaps::Location::kConstantIndex) {
     // FIXME(llvm): We assume large constant is a heap object address
     // this block has not really been thoroughly tested
-    auto value = stackmaps.constants[location.offset].integer;
+    auto value = constants[location.offset].integer;
 
     if (reloc_data_->reloc_map().count(value)) {
       auto pair = reloc_data_->reloc_map()[value];
@@ -267,9 +272,11 @@ void LLVMChunk::AddToTranslation(LLVMEnvironment* environment,
   }
 }
 
-int LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
-                                   StackMaps::Record& stackmap,
-                                   const StackMaps& stackmaps) {
+int LLVMChunk::WriteTranslationFor(
+    LLVMEnvironment* env,
+    StackMaps::Record& stackmap,
+    const std::vector<StackMaps::Constant> constants) {
+
   int frame_count = 0;
   int jsframe_count = 0;
   for (LLVMEnvironment* e = env; e != NULL; e = e->outer()) {
@@ -280,7 +287,7 @@ int LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
   }
   Translation translation(&deopt_data_->translations(), frame_count,
                           jsframe_count, zone());
-  WriteTranslation(env, stackmap, &translation, stackmaps);
+  WriteTranslation(env, stackmap, &translation, constants);
   return translation.index();
 }
 
@@ -454,12 +461,11 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
     // It's important. It seems something expects deopt entries to be stored
     // is the same order they were added.
     int deopt_entry_number = IntHelper::AsInt(it - sorted_ids.begin());
-    // The corresponding Environment is stored in the array by index = id.
     LLVMEnvironment* env = deopt_data_->GetEnvironmentByPatchpointId(
         stackmap_id);
     int translation_index = WriteTranslationFor(env,
                                                 stackmap_record,
-                                                stackmaps);
+                                                stackmaps.constants);
     data->SetAstId(deopt_entry_number, env->ast_id());
     data->SetTranslationIndex(deopt_entry_number,
                               Smi::FromInt(translation_index));
@@ -2419,8 +2425,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    result = CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_S13,
-                             params);
+    result = CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_S13, params);
     return_val = __ CreatePtrToInt(result, Types::i64);
   }
   instr->set_llvm_value(return_val);
