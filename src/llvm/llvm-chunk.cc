@@ -1959,8 +1959,9 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
     DCHECK(instr->IsConsistentExternalRepresentation());
     CHECK(!instr->CheckFlag(HValue::kCanOverflow));
 
-    llvm::Value* left = Use(instr->left());
-    llvm::Value* right = Use(instr->right());
+    //FIXME: possibly wrong
+    llvm::Value* left = __ CreateZExt(Use(instr->left()), Types::i64);
+    llvm::Value* right = __ CreateZExt(Use(instr->right()), Types::i64);
 
     llvm::Value* sum = __ CreateAdd(left, right);
     instr->set_llvm_value(sum);
@@ -5230,14 +5231,17 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       __ CreateStore(casted_value, casted_adderss);
     } else {
       DCHECK(hValue->IsConstant());
-      HConstant* constant = HConstant::cast(instr->value());
-      Handle<Object> handle_value = constant->handle(isolate());
-      llvm::Value* store_address = ConstructAddress(obj_arg,
-                                                    offset);
-      llvm::Value* casted_adderss = __ CreateBitCast(store_address,
-                                                     Types::ptr_i64);
-      auto llvm_val = MoveHeapObject(handle_value);
-      __ CreateStore(llvm_val, casted_adderss);
+      {
+        AllowHandleAllocation allow_handles; //TODO: Why we need this?
+        HConstant* constant = HConstant::cast(instr->value());
+        Handle<Object> handle_value = constant->handle(isolate());
+        llvm::Value* store_address = ConstructAddress(obj_arg,
+                                                      offset);
+        llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                       Types::ptr_i64);
+        auto llvm_val = MoveHeapObject(handle_value);
+        __ CreateStore(llvm_val, casted_adderss);
+      }
 
     }
   }
