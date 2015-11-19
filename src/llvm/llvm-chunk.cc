@@ -3224,9 +3224,13 @@ void LLVMChunkBuilder::DoCompareHoleAndBranch(HCompareHoleAndBranch* instr) {
 
 void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   Token::Value op = instr->token();
-  Handle<Code> ic = CodeFactory::CompareIC(isolate(), op, instr->strength()).
-      code();
-
+  Handle<Code> ic = Handle<Code>::null();
+  {
+     AllowHandleAllocation allow_handles;
+     AllowHeapAllocation allow_heap;
+     ic = CodeFactory::CompareIC(isolate(), op,
+                                           instr->strength()).code();
+   }
   auto context = Use(instr->context());
   auto left = Use(instr->left());
   auto right = Use(instr->right());
