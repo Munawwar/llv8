@@ -142,6 +142,9 @@ void LLVMChunk::WriteTranslation(
   int dematerialized_index = 0;
 
   if (translation_size != stackmap_record.locations.size()) {
+    std::cerr << "\n" << "translation_size = " << translation_size << "\n";
+    std::cerr << "stackmap_record.locations.size() = "
+        << stackmap_record.locations.size() << "\n";
     // To support inlining (environment -> outer != NULL)
     // we probably should introduce some mapping between llvm::Value* and
     // Location number in a StackMap.
@@ -274,7 +277,7 @@ void LLVMChunk::AddToTranslation(
 
 int LLVMChunk::WriteTranslationFor(
     LLVMEnvironment* env,
-    StackMaps::Record& stackmap,
+    StackMaps::Record& stackmap_record,
     const std::vector<StackMaps::Constant> constants) {
 
   int frame_count = 0;
@@ -287,7 +290,7 @@ int LLVMChunk::WriteTranslationFor(
   }
   Translation translation(&deopt_data_->translations(), frame_count,
                           jsframe_count, zone());
-  WriteTranslation(env, stackmap, &translation, constants);
+  WriteTranslation(env, stackmap_record, &translation, constants);
   return translation.index();
 }
 
@@ -437,7 +440,6 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
   std::vector<uint32_t> sorted_ids;
   for (auto i = 0; i < stackmaps.records.size(); i++) {
     auto id = stackmaps.records[i].patchpointID;
-    // Check it's a stackmap record corresponding to a deopt, not a reloc.
     if (reloc_data_->IsPatchpointIdDeopt(id)) sorted_ids.push_back(id);
   }
   std::sort(sorted_ids.begin(), sorted_ids.end());
@@ -448,10 +450,9 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
 
   if (true_deopt_count == 0) return;
 
-  for (auto i = 0; i < stackmaps.records.size(); i++) {
-    auto stackmap_record = stackmaps.records[i];
-    auto stackmap_id = stackmap_record.patchpointID;
-    if (!reloc_data_->IsPatchpointIdDeopt(stackmap_id)) continue;
+  for (auto stackmap_id : sorted_ids) {
+    auto stackmap_record = stackmaps.computeRecordMap()[stackmap_id];
+    CHECK(reloc_data_->IsPatchpointIdDeopt(stackmap_id));
 
     // stackmap_id s are unique so we'll find exactly one.
     auto it = std::lower_bound(sorted_ids.begin(),
@@ -474,8 +475,8 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
     // pc offset can be obtained from the stackmap TODO(llvm):
     // but we do not support lazy deopt yet (and for eager it should be -1)
     data->SetPc(deopt_entry_number, Smi::FromInt(-1));
-    data->SetOsrPcOffset(Smi::FromInt(-1));
   }
+  data->SetOsrPcOffset(Smi::FromInt(-1));
 
   auto literals_len = deopt_data_->deoptimization_literals().length();
   Handle<FixedArray> literals = isolate()->factory()->NewFixedArray(
