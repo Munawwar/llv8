@@ -2195,6 +2195,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
 
   if (expected.Contains(ToBooleanStub::SYMBOL)) {
     // Symbol value -> true.
+    __ SetInsertPoint(check_blocks[cur_block]);
     DCHECK(map); //FIXME: map can be null here
     llvm::Value* cmp_instance = __ CreateICmpEQ(LoadFieldOperand(map, Map::kInstanceTypeOffset),
                                             __ getInt64(static_cast<int8_t>(SYMBOL_TYPE)));
@@ -2204,6 +2205,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
   if (expected.Contains(ToBooleanStub::HEAP_NUMBER)) {
     // heap number -> false iff +0, -0, or NaN.
     DCHECK(map); //FIXME: map can be null here
+    __ SetInsertPoint(check_blocks[cur_block]);
     llvm::BasicBlock* is_heap_bb = NewBlock("BranchTagged ToBoolString IsHeapNumber");
     auto cmp_root = CompareRoot(map, Heap::kHeapNumberMapRootIndex, llvm::CmpInst::ICMP_NE); 
     __ CreateCondBr(cmp_root, merge_block, is_heap_bb);
@@ -2228,6 +2230,9 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
 
     // Since we deoptimize on True the continue block is never reached.
     __ CreateUnreachable();
+  } else {
+     // TODO(llvm): not sure
+     __ CreateUnreachable();
   }
 }
 
