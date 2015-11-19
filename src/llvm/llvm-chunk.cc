@@ -4009,7 +4009,9 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
         UNIMPLEMENTED();
         break;
       case INT32_ELEMENTS:
-        UNIMPLEMENTED();
+        casted_address = __ CreateBitCast(address, Types::ptr_i32);
+        load = __ CreateLoad(casted_address);
+        instr->set_llvm_value(load);
         break;
       case UINT32_ELEMENTS:
         casted_address = __ CreateBitCast(address, Types::ptr_i32);
