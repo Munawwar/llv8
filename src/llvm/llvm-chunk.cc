@@ -4889,6 +4889,7 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
      Representation key_representation =
         instr->key()->representation();
      DCHECK(key_representation.IsInteger32());
+     USE(key_representation);
      llvm::Value* mul = __ CreateMul(Use(key), __ getInt32(shift_size));
      llvm::Value* add = __ CreateAdd(mul, __ getInt32(offset));
      llvm::Value* int_ptr = __ CreateIntToPtr(Use(instr->elements()),
