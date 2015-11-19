@@ -450,18 +450,16 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
 
   if (true_deopt_count == 0) return;
 
-  for (auto stackmap_id : sorted_ids) {
+  // It's important. It seems something expects deopt entries to be stored
+  // is the same order they were added.
+  for (auto deopt_entry_number = 0;
+      deopt_entry_number < sorted_ids.size();
+      deopt_entry_number++) {
+
+    auto stackmap_id = sorted_ids[deopt_entry_number];
     auto stackmap_record = stackmaps.computeRecordMap()[stackmap_id];
     CHECK(reloc_data_->IsPatchpointIdDeopt(stackmap_id));
 
-    // stackmap_id s are unique so we'll find exactly one.
-    auto it = std::lower_bound(sorted_ids.begin(),
-                               sorted_ids.end(),
-                               stackmap_id);
-
-    // It's important. It seems something expects deopt entries to be stored
-    // is the same order they were added.
-    int deopt_entry_number = IntHelper::AsInt(it - sorted_ids.begin());
     LLVMEnvironment* env = deopt_data_->GetEnvironmentByPatchpointId(
         stackmap_id);
     int translation_index = WriteTranslationFor(env,
