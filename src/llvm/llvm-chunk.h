@@ -316,6 +316,7 @@ class LLVMEnvironment final : public ZoneObject {
         frame_type_(frame_type),
         arguments_stack_height_(argument_count),
         deoptimization_index_(Safepoint::kNoDeoptimizationIndex),
+        translation_index_(-1),
         ast_id_(ast_id),
         translation_size_(value_count),
         parameter_count_(parameter_count),
@@ -344,6 +345,9 @@ class LLVMEnvironment final : public ZoneObject {
   // Marker value indicating a de-materialized object.
   static llvm::Value* materialization_marker() { return nullptr; }
 
+  bool has_been_used() const { return has_been_used_; }
+  void set_has_been_used() { has_been_used_ = true; }
+
   void AddValue(llvm::Value* value,
                 Representation representation,
                 bool is_uint32);
@@ -360,10 +364,20 @@ class LLVMEnvironment final : public ZoneObject {
     return is_double_.Contains(index);
   }
 
+  void Register(int deoptimization_index,
+                int translation_index,
+                int pc_offset) {
+    DCHECK(!HasBeenRegistered());
+    deoptimization_index_ = deoptimization_index;
+    translation_index_ = translation_index;
+    pc_offset_ = pc_offset;
+  }
+  bool HasBeenRegistered() const {
+    return deoptimization_index_ != Safepoint::kNoDeoptimizationIndex;
+  }
+
   ~LLVMEnvironment() { // FIXME(llvm): remove unused fields.
-    USE(deoptimization_index_);
     USE(pc_offset_);
-    USE(has_been_used_);
   }
 
  private:
@@ -371,6 +385,7 @@ class LLVMEnvironment final : public ZoneObject {
   FrameType frame_type_;
   int arguments_stack_height_;
   int deoptimization_index_;
+  int translation_index_;
   BailoutId ast_id_;
   int translation_size_;
   int parameter_count_;
@@ -403,12 +418,14 @@ class LLVMDeoptData {
      : deoptimizations_(MatchFunForInts,
                         ZoneHashMap::kDefaultHashMapCapacity,
                         ZoneAllocationPolicy(zone)),
+       reverse_deoptimizations_(),
        translations_(zone),
        deoptimization_literals_(8, zone),
        zone_(zone) {}
 
   void Add(LLVMEnvironment* environment, int32_t patchpoint_id);
   LLVMEnvironment* GetEnvironmentByPatchpointId(int32_t patchpoint_id);
+  int32_t GetPatchpointIdByEnvironment(LLVMEnvironment* env);
 
   TranslationBuffer& translations() { return translations_; }
   ZoneList<Handle<Object> >& deoptimization_literals() {
@@ -424,6 +441,9 @@ class LLVMDeoptData {
   uint32_t GetHash(int32_t patchpoint_id);
   // Patchpoint_id -> LLVMEnvironment*
   ZoneHashMap deoptimizations_;
+  // LLVMEnvironment* -> Patchpoint_id
+  // FIXME(llvm): consistency: this one is stdmap and the one above is ZoneHMap.
+  std::map<LLVMEnvironment*, int32_t> reverse_deoptimizations_;
   TranslationBuffer translations_;
   ZoneList<Handle<Object> > deoptimization_literals_;
 
@@ -484,13 +504,12 @@ class LLVMChunk final : public LowChunk {
   void SetUpSafepointTables(Handle<Code> code, StackMaps& stackmaps);
   Vector<byte> GetFullRelocationInfo(CodeDesc& code_desc);
   // Returns translation index of the newly generated translation
-  int WriteTranslationFor(LLVMEnvironment* env,
-                          StackMaps::Record& stackmap,
-                          const std::vector<StackMaps::Constant> constants);
+  int WriteTranslationFor(LLVMEnvironment* env, const StackMaps& stackmaps);
   void WriteTranslation(LLVMEnvironment* environment,
-                        StackMaps::Record& stackmap,
                         Translation* translation,
-                        const std::vector<StackMaps::Constant> constants);
+                        const StackMaps& stackmaps,
+                        int32_t patchpoint_id,
+                        int start_index);
   void AddToTranslation(LLVMEnvironment* environment,
                         Translation* translation,
                         llvm::Value* op, //change
@@ -579,6 +598,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                                                    bool is_double = false);
   static bool HasTaggedValue(HValue* value);
 
+  void GetAllEnvironmentValues(LLVMEnvironment* environment,
+                               std::vector<llvm::Value*>& mapped_values);
   void CreateSafepointPollFunction();
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);

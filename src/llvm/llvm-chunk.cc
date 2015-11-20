@@ -100,26 +100,30 @@ Handle<Code> LLVMChunk::Codegen() {
   return code;
 }
 
-void LLVMChunk::WriteTranslation(
-    LLVMEnvironment* environment,
-    StackMaps::Record& stackmap_record,
-    Translation* translation,
-    const std::vector<StackMaps::Constant> constants) {
-  if (environment == nullptr) return;
+void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
+                                 Translation* translation,
+                                 const StackMaps& stackmaps,
+                                 int32_t patchpoint_id,
+                                 int start_index) {
+  if (!environment) return;
+
+  if (environment->outer()) {
+    WriteTranslation(environment->outer(), translation, stackmaps, patchpoint_id,
+                     start_index - environment->outer()->translation_size());
+  }
+
+  // TODO(llvm): this isn't very good performance-wise. Esp. considering
+  // the result of this call is the same across recursive invocations.
+  auto stackmap_record = stackmaps.computeRecordMap()[patchpoint_id];
 
   // The translation includes one command per value in the environment.
   int translation_size = environment->translation_size();
   // The output frame height does not include the parameters.
   int height = translation_size - environment->parameter_count();
 
-  WriteTranslation(environment->outer(),
-                   stackmap_record, translation, constants);
-
-  int shared_id;
-  if (environment->entry())
-    UNIMPLEMENTED();
-  else
-    shared_id = deopt_data_->DefineDeoptimizationLiteral(info()->shared_info());
+  int shared_id = deopt_data_->DefineDeoptimizationLiteral(
+      environment->entry() ? environment->entry()->shared()
+                           : info()->shared_info());
 
   // WriteTranslationFrame
   switch (environment->frame_type()) {
@@ -141,15 +145,8 @@ void LLVMChunk::WriteTranslation(
   int object_index = 0;
   int dematerialized_index = 0;
 
-  if (translation_size != stackmap_record.locations.size()) {
-    std::cerr << "\n" << "translation_size = " << translation_size << "\n";
-    std::cerr << "stackmap_record.locations.size() = "
-        << stackmap_record.locations.size() << "\n";
-    // To support inlining (environment -> outer != NULL)
-    // we probably should introduce some mapping between llvm::Value* and
-    // Location number in a StackMap.
-    UNIMPLEMENTED();
-  }
+  DCHECK_LE(start_index + translation_size - 1,
+            stackmap_record.locations.size());
   for (int i = 0; i < translation_size; ++i) {
     // i-th Location in a stackmap record Location corresponds to the i-th
     // llvm::Value*. Here's an excerpt from the doc:
@@ -161,12 +158,12 @@ void LLVMChunk::WriteTranslation(
     // (therefore those values are now invalid).
 
     llvm::Value* value = environment->values()->at(i);
-    StackMaps::Location location = stackmap_record.locations[i];
+    StackMaps::Location location = stackmap_record.locations[i + start_index];
     AddToTranslation(environment,
                      translation,
                      value,
                      location,
-                     constants,
+                     stackmaps.constants,
                      environment->HasTaggedValueAt(i),
                      environment->HasUint32ValueAt(i),
                      environment->HasDoubleValueAt(i),
@@ -194,7 +191,7 @@ static int FpRelativeOffsetToIndex(int32_t offset) {
 }
 
 void LLVMChunk::AddToTranslation(
-    LLVMEnvironment* environment,
+    LLVMEnvironment* environment, // TODO(llvm): unused?
     Translation* translation,
     llvm::Value* op,
     StackMaps::Location& location,
@@ -275,11 +272,8 @@ void LLVMChunk::AddToTranslation(
   }
 }
 
-int LLVMChunk::WriteTranslationFor(
-    LLVMEnvironment* env,
-    StackMaps::Record& stackmap_record,
-    const std::vector<StackMaps::Constant> constants) {
-
+int LLVMChunk::WriteTranslationFor(LLVMEnvironment* env,
+                                   const StackMaps& stackmaps) {
   int frame_count = 0;
   int jsframe_count = 0;
   for (LLVMEnvironment* e = env; e != NULL; e = e->outer()) {
@@ -290,7 +284,18 @@ int LLVMChunk::WriteTranslationFor(
   }
   Translation translation(&deopt_data_->translations(), frame_count,
                           jsframe_count, zone());
-  WriteTranslation(env, stackmap_record, &translation, constants);
+
+  // All of the LLVMEnvironments (closure of env by ->outer())
+  // share the same associated patchpoint_id.
+  auto patchpoint_id = deopt_data_->GetPatchpointIdByEnvironment(env);
+  // But they have different start indices in the corresponding
+  // Stack Map record. Layout of the Stack Map record (order of Locations)
+  // is the same as that of the TranslationBuffer i.e. the most outer first.
+  auto stackmap_record = stackmaps.computeRecordMap()[patchpoint_id];
+  auto total_size = IntHelper::AsInt(stackmap_record.locations.size());
+  auto start_index_inner = total_size - env->translation_size();
+  WriteTranslation(
+      env, &translation, stackmaps, patchpoint_id, start_index_inner);
   return translation.index();
 }
 
@@ -321,6 +326,8 @@ void LLVMDeoptData::Add(LLVMEnvironment* environment, int32_t patchpoint_id) {
   auto entry = deoptimizations_.LookupOrInsert(key, hash,
                                                ZoneAllocationPolicy(zone_));
   entry->value = environment;
+
+  reverse_deoptimizations_[environment] = patchpoint_id;
 }
 
 LLVMEnvironment* LLVMDeoptData::GetEnvironmentByPatchpointId(
@@ -330,6 +337,11 @@ LLVMEnvironment* LLVMDeoptData::GetEnvironmentByPatchpointId(
   auto entry = deoptimizations_.Lookup(key, hash);
   return static_cast<LLVMEnvironment*>(entry->value);
 }
+
+int32_t LLVMDeoptData::GetPatchpointIdByEnvironment(LLVMEnvironment* env) {
+  return reverse_deoptimizations_[env];
+}
+
 
 std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
   std::vector<RelocInfo> result;
@@ -457,24 +469,25 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
       deopt_entry_number++) {
 
     auto stackmap_id = sorted_ids[deopt_entry_number];
-    auto stackmap_record = stackmaps.computeRecordMap()[stackmap_id];
     CHECK(reloc_data_->IsPatchpointIdDeopt(stackmap_id));
 
-    LLVMEnvironment* env = deopt_data_->GetEnvironmentByPatchpointId(
-        stackmap_id);
-    int translation_index = WriteTranslationFor(env,
-                                                stackmap_record,
-                                                stackmaps.constants);
+    auto env = deopt_data_->GetEnvironmentByPatchpointId(stackmap_id);
+
+    env->set_has_been_used();
+    if (env->HasBeenRegistered()) continue;
+
+    int translation_index = WriteTranslationFor(env, stackmaps);
+    // pc offset can be obtained from the stackmap TODO(llvm):
+    // but we do not support lazy deopt yet (and for eager it should be -1)
+    env->Register(deopt_entry_number, translation_index, -1);
+
     data->SetAstId(deopt_entry_number, env->ast_id());
     data->SetTranslationIndex(deopt_entry_number,
                               Smi::FromInt(translation_index));
     data->SetArgumentsStackHeight(deopt_entry_number,
                                   Smi::FromInt(env->arguments_stack_height()));
-    // pc offset can be obtained from the stackmap TODO(llvm):
-    // but we do not support lazy deopt yet (and for eager it should be -1)
     data->SetPc(deopt_entry_number, Smi::FromInt(-1));
   }
-  data->SetOsrPcOffset(Smi::FromInt(-1));
 
   auto literals_len = deopt_data_->deoptimization_literals().length();
   Handle<FixedArray> literals = isolate()->factory()->NewFixedArray(
@@ -501,7 +514,6 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
     data->SetSharedFunctionInfo(Smi::FromInt(0));
   }
   data->SetWeakCellCache(Smi::FromInt(0)); // I don't know what this is.
-
   data->SetOsrAstId(Smi::FromInt(info()->osr_ast_id().ToInt()));
   // TODO(llvm): OSR entry point
   data->SetOsrPcOffset(Smi::FromInt(6));
@@ -1325,6 +1337,14 @@ LLVMEnvironment* LLVMChunkBuilder::AssignEnvironment() {
       hydrogen_env, &argument_index_accumulator, &objects_to_materialize);
 }
 
+void LLVMChunkBuilder::GetAllEnvironmentValues(
+    LLVMEnvironment* environment, std::vector<llvm::Value*>& mapped_values) {
+  if (!environment) return;
+  GetAllEnvironmentValues(environment->outer(), mapped_values);
+  for (auto val : *environment->values())
+    mapped_values.push_back(val);
+}
+
 void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
                                     bool negate,
                                     llvm::BasicBlock* next_block) {
@@ -1371,8 +1391,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
   __ SetInsertPoint(deopt_block);
 
   std::vector<llvm::Value*> mapped_values;
-  for (auto val : *environment->values())
-    mapped_values.push_back(val);
+  GetAllEnvironmentValues(environment, mapped_values);
 
   // Store offset relative to the Code Range start. It always fits in 32 bits.
   // Will be fixed up later (in Code::CopyFrom).
