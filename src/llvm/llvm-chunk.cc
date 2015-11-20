@@ -5779,17 +5779,16 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
-  llvm::BasicBlock* is_negative = NewBlock("INTEGER CANDIDATE IS NEGATIVE");
-  llvm::BasicBlock* is_positive = NewBlock("INTEGER CANDIDATE IS POSITIVE");
+  llvm::BasicBlock* is_negative = NewBlock("ABS INTEGER CANDIDATE IS NEGATIVE");
+  llvm::BasicBlock* is_positive = NewBlock("ABS INTEGER CANDIDATE IS POSITIVE");
 
   llvm::Value* zero = __ getInt32(0);
   llvm::Value* cmp =  __ CreateICmpSLT(Use(instr->value()), zero);
   __ CreateCondBr(cmp, is_negative, is_positive);
   __ SetInsertPoint(is_negative);
   llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
-  bool negate_condition = true;
-  DeoptimizeIf(cmp,  negate_condition);
-  __ CreateBr(is_positive);
+  llvm::Value* is_neg = __ CreateICmpSLT(neg_val, zero);
+  DeoptimizeIf(is_neg, false, is_positive);
   __ SetInsertPoint(is_positive);
   llvm::Value* val = Use(instr->value());
   llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
@@ -5799,18 +5798,18 @@ void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
 }
 
 void LLVMChunkBuilder::DoSmiMathAbs(HUnaryMathOperation* instr) {
-  llvm::BasicBlock* is_negative = NewBlock("SMI CANDIDATE IS NEGATIVE");
-  llvm::BasicBlock* return_block = NewBlock("RETURN");
+  llvm::BasicBlock* is_negative = NewBlock("ABS SMI CANDIDATE IS NEGATIVE");
+  llvm::BasicBlock* is_positive = NewBlock("ABS SMI CANDIDATE IS POSITIVE");
 
   llvm::BasicBlock* insert_block = __ GetInsertBlock();
   llvm::Value* value = Use(instr->value());
   llvm::Value* cmp =  __ CreateICmpSLT(Use(instr->value()), __ getInt64(0));
-  __ CreateCondBr(cmp, is_negative, return_block);
+  __ CreateCondBr(cmp, is_negative, is_positive);
   __ SetInsertPoint(is_negative);
   llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
-  DeoptimizeIf(cmp, true);
-  __ CreateBr(return_block);
-  __ SetInsertPoint(return_block);
+  llvm::Value* is_neg = __ CreateICmpSLT(neg_val, __ getInt64(0));
+  DeoptimizeIf(is_neg, false, is_positive);
+  __ SetInsertPoint(is_positive);
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(neg_val, is_negative);
   phi->addIncoming(value, insert_block);
@@ -5820,8 +5819,8 @@ void LLVMChunkBuilder::DoSmiMathAbs(HUnaryMathOperation* instr) {
 void LLVMChunkBuilder::DoMathAbs(HUnaryMathOperation* instr) {
   Representation r = instr->representation();
   if (r.IsDouble()) {
-    llvm::Function* fabs_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::fabs, Types::float64);
+    llvm::Function* fabs_intrinsic = llvm::Intrinsic::
+          getDeclaration(module_.get(), llvm::Intrinsic::fabs, Types::float64);
     std::vector<llvm::Value*> params;
     params.push_back(Use(instr->value()));
     llvm::Value* f_abs = __ CreateCall(fabs_intrinsic, params);
