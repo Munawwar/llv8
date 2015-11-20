@@ -871,8 +871,8 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
     }
   }
 
-//  argument_count_ += current->argument_delta();
-//  DCHECK(argument_count_ >= 0);
+  argument_count_ += current->argument_delta();
+  DCHECK(argument_count_ >= 0);
 
   current_instruction_ = old_current;
 }
