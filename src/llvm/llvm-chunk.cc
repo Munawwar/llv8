@@ -489,6 +489,14 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
     data->SetPc(deopt_entry_number, Smi::FromInt(-1));
   }
 
+  auto length_before = deopt_data_->deoptimization_literals().length();
+  for (auto function : inlined_functions()) {
+    deopt_data_->DefineDeoptimizationLiteral(function);
+  }
+  auto inlined_function_count = deopt_data_->deoptimization_literals().length()
+      - length_before;
+  data->SetInlinedFunctionCount(Smi::FromInt(inlined_function_count));
+
   auto literals_len = deopt_data_->deoptimization_literals().length();
   Handle<FixedArray> literals = isolate()->factory()->NewFixedArray(
       literals_len, TENURED);
@@ -503,8 +511,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
   Handle<ByteArray> translations =
       deopt_data_->translations().CreateByteArray(isolate()->factory());
   data->SetTranslationByteArray(*translations);
-  // FIXME(llvm):  inlined function count
-  data->SetInlinedFunctionCount(Smi::FromInt(0));
+
   data->SetOptimizationId(Smi::FromInt(info()->optimization_id()));
   if (info()->IsOptimizing()) {
     // Reference to shared function info does not change between phases.
@@ -3556,7 +3563,7 @@ void LLVMChunkBuilder::DoEnterInlined(HEnterInlined* instr) {
   inner->BindContext(instr->closure_context());
   inner->set_entry(instr);
   current_block_->UpdateEnvironment(inner);
-  chunk()->AddInlinedClosure(instr->closure());
+  chunk()->AddInlinedFunction(instr->shared());
 }
 
 void LLVMChunkBuilder::DoEnvironmentMarker(HEnvironmentMarker* instr) {

@@ -461,7 +461,7 @@ class LLVMChunk final : public LowChunk {
       masm_(info->isolate(), nullptr, 0),
       target_index_for_ppid_(),
       deopt_target_offset_for_ppid_(),
-      inlined_closures_(1, info->zone()) {}
+      inlined_functions_(1, info->zone()) {}
 
   using PpIdToIndexMap = std::map<int32_t, uint32_t>;
   using PpIdToOffsetMap = std::map<int32_t, std::ptrdiff_t>;
@@ -472,6 +472,10 @@ class LLVMChunk final : public LowChunk {
 
   void set_llvm_function_id(int id) { llvm_function_id_ = id; }
   int llvm_function_id() { return llvm_function_id_; }
+
+  const ZoneList<Handle<SharedFunctionInfo>>& inlined_functions() const {
+    return inlined_functions_;
+  }
 
   void set_deopt_data(std::unique_ptr<LLVMDeoptData> deopt_data) {
     deopt_data_ = std::move(deopt_data);
@@ -489,8 +493,8 @@ class LLVMChunk final : public LowChunk {
     return deopt_target_offset_for_ppid_;
   }
 
-  void AddInlinedClosure(Handle<JSFunction> closure) {
-    inlined_closures_.Add(closure, zone());
+  void AddInlinedFunction(Handle<SharedFunctionInfo> closure) {
+    inlined_functions_.Add(closure, zone());
   }
   int GetParameterStackSlot(int index) const;
 
@@ -533,7 +537,8 @@ class LLVMChunk final : public LowChunk {
   // Map patchpointId -> index in masm_.code_targets_
   PpIdToIndexMap target_index_for_ppid_;
   PpIdToOffsetMap deopt_target_offset_for_ppid_;
-  ZoneList<Handle<JSFunction> > inlined_closures_;
+  // TODO(llvm): hoist to base class.
+  ZoneList<Handle<SharedFunctionInfo>> inlined_functions_;
 };
 
 class LLVMChunkBuilder final : public LowChunkBuilderBase {
