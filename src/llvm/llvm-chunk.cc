@@ -3086,6 +3086,9 @@ void LLVMChunkBuilder::DoClampToUint8(HClampToUint8* instr) {
 }
 
 void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
+  UNIMPLEMENTED();
+  // search test what it use this case
+  // because I think what loop is not correctly
   llvm::Value* input = Use(instr->value());
   llvm::Value* temp = nullptr; 
   llvm::Value* temp2 = nullptr;
@@ -3766,7 +3769,45 @@ void LLVMChunkBuilder::DoInstanceOf(HInstanceOf* instr) {
 
 void LLVMChunkBuilder::DoHasInPrototypeChainAndBranch(
     HHasInPrototypeChainAndBranch* instr) {
-  UNIMPLEMENTED();
+  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::Value* object = Use(instr->object());
+  llvm::Value* prototype = Use(instr->prototype());
+  if (instr->ObjectNeedsSmiCheck()) {
+    llvm::BasicBlock* check_smi = NewBlock("DoHasInPrototypeChainAndBranch"
+                                           " after check smi");
+    llvm::Value* is_smi = SmiCheck(object, false);
+    __ CreateCondBr(is_smi, Use(instr->SuccessorAt(1)), check_smi);
+
+    __ SetInsertPoint(check_smi);
+  }
+
+  llvm::BasicBlock* loop = NewBlock("DoHasInPrototypeChainAndBranch loop");
+  llvm::Value* object_map = LoadFieldOperand(object, HeapObject::kMapOffset);
+  llvm::BasicBlock* after_compare_root = NewBlock("DoHasInPrototypeChainAndBranch"
+                                                  " after compare root");
+  llvm::Value* load_object_map = __ getInt64(0); //fictiv value, use in phi
+  __ CreateBr(loop);
+  __ SetInsertPoint(loop);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(object_map, insert);
+  phi->addIncoming(load_object_map, after_compare_root);
+
+  llvm::Value* object_prototype = LoadFieldOperand(phi,
+                                                   Map::kPrototypeOffset);
+  llvm::Value* cmp = __ CreateICmpEQ(object_prototype, prototype);
+  llvm::BasicBlock* compare_root = NewBlock("DoHasInPrototypeChainAndBranch"
+                                           " compare root");
+  __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), compare_root);
+
+  __ SetInsertPoint(compare_root);
+  llvm::Value* cmp_root = CompareRoot(object_prototype,
+                                      Heap::kNullValueRootIndex);
+  __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(1)), after_compare_root);
+
+  __ SetInsertPoint(after_compare_root);
+  load_object_map = LoadFieldOperand(object_prototype, HeapObject::kMapOffset);
+  __ CreateBr(loop);
+//  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
@@ -5987,8 +6028,15 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
       DoMathRound(instr);
       break;
     }
-    case kMathFround:
-      UNIMPLEMENTED();
+    case kMathFround:{
+        llvm::Function* fround_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::round, Types::float64);
+        std::vector<llvm::Value*> params;
+        params.push_back(Use(instr->value()));
+        llvm::Value* fround = __ CreateCall(fround_intrinsic, params);
+        instr->set_llvm_value(fround);
+      }
+      //UNIMPLEMENTED();
     case kMathLog: {
       //UNIMPLEMENTED();
       DoMathLog(instr);
