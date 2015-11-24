@@ -5646,8 +5646,22 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     HValue* right = instr->right();
     llvm::Value* fSub =  __ CreateFSub(Use(left), Use(right), "");
     instr->set_llvm_value(fSub);  
-   }
-  else {
+  } else if(instr->representation().IsTagged()) {
+    llvm::Value* context = Use(instr->context());
+    llvm::Value* left = Use(instr->left());
+    llvm::Value* right = Use(instr->right());
+    UNIMPLEMENTED();
+    std::vector<llvm::Value*> params;
+    params.push_back(context);
+    params.push_back(left);
+    params.push_back(right);
+    AllowHandleAllocation allow_handles;
+    Handle<Code> code =
+        CodeFactory::BinaryOpIC(isolate(), Token::SUB,
+                                instr->strength()).code();
+    llvm::Value* sub = CallCode(code, llvm::CallingConv::X86_64_V8_S10, params);
+    instr->set_llvm_value(sub);
+  } else {
     UNIMPLEMENTED();
   }
 }
