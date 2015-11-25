@@ -4711,16 +4711,38 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
     HValue* right = instr->right();
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
+    bool can_overflow =
+      instr->CheckFlag(HValue::kCanOverflow);
+    llvm::Value* overflow = nullptr;
     if (instr->representation().IsSmi()) {
       // FIXME (llvm):
-      // 1) overflow check?
+      // 1) Minus Zero?? Important
       // 2) see if we can refactor using SmiToInteger32() or the like
+      auto type = Types::i64;
       llvm::Value* shift = __ CreateAShr(llvm_left, 32);
-      llvm::Value* Mul = __ CreateNSWMul(shift, llvm_right, "");
-      instr->set_llvm_value(Mul);
+      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+                                     llvm::Intrinsic::smul_with_overflow, type);
+
+      llvm::Value* params[] = { shift, llvm_right };
+      llvm::Value* call = __ CreateCall(intrinsic, params);
+
+      llvm::Value* mul = __ CreateExtractValue(call, 0);
+      overflow = __ CreateExtractValue(call, 1);
+      instr->set_llvm_value(mul);
     } else {
-      llvm::Value* Mul = __ CreateNSWMul(llvm_left, llvm_right, "");
-      instr->set_llvm_value(Mul);
+      auto type = Types::i32;
+      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+                                     llvm::Intrinsic::smul_with_overflow, type);
+
+      llvm::Value* params[] = { llvm_left, llvm_right };
+      llvm::Value* call = __ CreateCall(intrinsic, params);
+
+      llvm::Value* mul = __ CreateExtractValue(call, 0);
+      overflow = __ CreateExtractValue(call, 1);
+      instr->set_llvm_value(mul);
+    }
+    if (can_overflow) {
+      DeoptimizeIf(overflow);
     }
   } else if (instr->representation().IsDouble()) {
     DCHECK(instr->representation().IsDouble());
