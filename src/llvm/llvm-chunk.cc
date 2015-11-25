@@ -631,7 +631,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
       .NormalizePhis()
       .PlaceStatePoints()
       .RewriteStatePoints()
-     // .Optimize()
+      .Optimize()
       .Create();
   if (chunk == NULL) return NULL;
   return chunk;
