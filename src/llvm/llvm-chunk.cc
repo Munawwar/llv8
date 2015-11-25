@@ -1091,6 +1091,14 @@ llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
   call_inst->setCallingConv(calling_conv);
   // Map pp_id -> index in code_targets_.
   chunk()->target_index_for_ppid()[pp_id] = index;
+  if (code->kind() == Code::BINARY_OP_IC ||
+      code->kind() == Code::COMPARE_IC) {
+    // This will be optimized out anyway
+    llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+       llvm::Intrinsic::donothing);
+    __ CreateCall(intrinsic);
+  }
+
   return call_inst;
 }
 
@@ -3239,14 +3247,15 @@ void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
      AllowHeapAllocation allow_heap;
      ic = CodeFactory::CompareIC(isolate(), op,
                                            instr->strength()).code();
-   }
+  }
+  llvm::CmpInst::Predicate pred = TokenToPredicate(op, false, false);
   auto context = Use(instr->context());
   auto left = Use(instr->left());
   auto right = Use(instr->right());
   std::vector<llvm::Value*> params = { context, left, right };
-  auto result = CallCode(ic, llvm::CallingConv::C, params);
+  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S10, params);
   // Lithium comparison is a little strange, I think mine is all right.
-  auto compare_result = __ CreateICmpNE(result, __ getInt64(0));
+  auto compare_result = __ CreateICmp(pred, result, __ getInt64(0));
   auto compare_true = NewBlock("generic comparison true");
   auto compare_false = NewBlock("generic comparison false");
   llvm::Value* true_value = nullptr;
@@ -3267,7 +3276,7 @@ void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   phi->addIncoming(true_value, compare_true);
   phi->addIncoming(false_value, compare_false);
   instr->set_llvm_value(phi);
-  UNIMPLEMENTED(); // calling convention should be v8_ic
+  //UNIMPLEMENTED(); // calling convention should be v8_ic
 }
 
 void LLVMChunkBuilder::DoCompareMinusZeroAndBranch(HCompareMinusZeroAndBranch* instr) {
