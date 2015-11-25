@@ -371,10 +371,20 @@ std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
       auto delta = deopt_target_offset_for_ppid_[id];
       Memory::int32_at(pc_offset) = IntHelper::AsInt32(delta);
     } else {
-      // TODO(llvm): it's always CODE_TARGET for now.
-      RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
-      result.push_back(reloc_info);
-      Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
+      if (reloc_data_->IsPatchpointIdRelocNop(id)) {
+        // TODO(llvm): it's always CODE_TARGET for now.
+        RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
+        result.push_back(reloc_info);
+        Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
+        pc_offset = pc_offset+4;
+        *pc_offset++ = 0x90; //nop
+      }
+      else {
+        // TODO(llvm): it's always CODE_TARGET for now.
+        RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
+        result.push_back(reloc_info);
+        Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
+      }
     }
   }
 
@@ -655,6 +665,12 @@ int32_t LLVMRelocationData::GetNextRelocPathcpointId() {
   return next_id;
 }
 
+int32_t LLVMRelocationData::GetNextRelocNopPathcpointId() {
+int32_t next_id = GetNextRelocPathcpointId();
+  is_reloc_with_nop_.Add(next_id, zone_);
+  return next_id;
+}
+
 int32_t LLVMRelocationData::GetNextDeoptRelocPathcpointId() {
   auto next_id = GetNextRelocPathcpointId();
   is_deopt_.Add(next_id, zone_);
@@ -672,6 +688,11 @@ bool LLVMRelocationData::IsPatchpointIdSafepoint(int32_t patchpoint_id) {
 bool LLVMRelocationData::IsPatchpointIdReloc(int32_t patchpoint_id) {
   return is_reloc_.Contains(patchpoint_id);
 }
+
+bool LLVMRelocationData::IsPatchpointIdRelocNop(int32_t patchpoint_id) {
+  return is_reloc_with_nop_.Contains(patchpoint_id);
+}
+
 
 // TODO(llvm): I haven't yet decided if it's profitable to use llvm statepoint
 // mechanism to place safepoint polls. This function should either be used
@@ -1081,10 +1102,18 @@ llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
                                         llvm::CallingConv::ID calling_conv,
                                         std::vector<llvm::Value*>& params) {
   auto index = chunk()->masm().GetCodeTargetIndex(code);
+  int nop_size;
+  int32_t pp_id;
+  if (code->kind() == Code::BINARY_OP_IC ||
+      code->kind() == Code::COMPARE_IC) {
+    pp_id = reloc_data_->GetNextRelocNopPathcpointId();
+    nop_size = 6; // call relative i32 takes 5 bytes: `e8` + i32 + nop
+  } else {
+    nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
+    pp_id = reloc_data_->GetNextRelocPathcpointId();
+  }
 
-  int32_t pp_id = reloc_data_->GetNextRelocPathcpointId();
   auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
-  auto nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
   std::vector<llvm::Value*> empty_live_values;
   auto call_inst = CallPatchPoint(pp_id, llvm_null, params, empty_live_values,
                                   nop_size);

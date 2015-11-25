@@ -63,6 +63,7 @@ class LLVMRelocationData : public ZoneObject {
      : reloc_map_(),
        last_patchpoint_id_(-1),
        is_reloc_(8, zone),
+       is_reloc_with_nop_(8, zone),
        is_deopt_(8, zone),
        is_safepoint_(8, zone),
        is_transferred_(false),
@@ -80,10 +81,12 @@ class LLVMRelocationData : public ZoneObject {
   int32_t GetNextDeoptPathcpointId();
   int32_t GetNextSafepointPathcpointId();
   int32_t GetNextRelocPathcpointId();
+  int32_t GetNextRelocNopPathcpointId();
   int32_t GetNextDeoptRelocPathcpointId();
   bool IsPatchpointIdDeopt(int32_t patchpoint_id);
   bool IsPatchpointIdSafepoint(int32_t patchpoint_id);
   bool IsPatchpointIdReloc(int32_t patchpoint_id);
+  bool IsPatchpointIdRelocNop(int32_t patchpoint_id);
 
   void transfer() { is_transferred_ = true; }
 
@@ -96,6 +99,7 @@ class LLVMRelocationData : public ZoneObject {
   // FIXME(llvm): not totally sure those belong here:
   // Patchpoint ids belong to one of the following:
   GrowableBitVector is_reloc_;
+  GrowableBitVector is_reloc_with_nop_;
   GrowableBitVector is_deopt_;
   GrowableBitVector is_safepoint_;
   bool is_transferred_;

@@ -861,9 +861,7 @@ void PatchInlinedSmiCode(Address address, InlinedSmiCheck check) {
   // If the instruction following the call is not a test al, nothing
   // was inlined.
   if (*test_instruction_address != Assembler::kTestAlByte) {
-    // TODO(llvm): We cannot afford this check when compiling with llvm
-    // nop instruction will be optimized out
-    //DCHECK(*test_instruction_address == Assembler::kNopByte);
+    DCHECK(*test_instruction_address == Assembler::kNopByte);
     return;
   }
 
