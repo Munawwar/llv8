@@ -631,7 +631,7 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
       .NormalizePhis()
       .PlaceStatePoints()
       .RewriteStatePoints()
-      .Optimize()
+     // .Optimize()
       .Create();
   if (chunk == NULL) return NULL;
   return chunk;
@@ -2778,7 +2778,8 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   llvm::Value* cond = SmiCheck(Use(val));
 
   llvm::BasicBlock* is_smi = NewBlock("is Smi fast case");
-  llvm::BasicBlock* not_smi = NewBlock("'deferred' case");
+  llvm::BasicBlock* not_smi = NewBlock("is smi 'deferred' case");
+  llvm::BasicBlock* zero_block = nullptr;
   llvm::BasicBlock* merge_and_ret = NewBlock(
       std::string("merge and ret ") + std::to_string(instr->id()));
   llvm::BasicBlock* not_smi_merge = nullptr;
@@ -2791,6 +2792,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
 
   __ SetInsertPoint(not_smi);
   llvm::Value* relult_for_not_smi = nullptr;
+  llvm::Value* minus_zero_result = nullptr;
   bool truncating = instr->CanTruncateToInt32();
 
   llvm::Value* vals_map = LoadFieldOperand(Use(val), HeapObject::kMapOffset);
@@ -2842,38 +2844,45 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     // Convert the double to int32; convert it back do double and
     // see it the 2 doubles are equal and neither is a NaN.
     // If not, deopt (kLostPrecision or kNaN)
-    auto int32 = __ CreateFPToSI(double_val, Types::i32);
-    auto double_2 = __ CreateSIToFP(int32, Types::float64);
-    auto ordered_and_equal = __ CreateFCmpOEQ(double_val, double_2);
+    relult_for_not_smi = __ CreateFPToSI(double_val, Types::i32);
+    auto converted_double = __ CreateSIToFP(relult_for_not_smi, Types::float64);
+    auto ordered_and_equal = __ CreateFCmpOEQ(double_val, converted_double);
     negate = true;
     DeoptimizeIf(ordered_and_equal, negate);
     if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) {
-      llvm::BasicBlock* not_zero = NewBlock("NOT ZERO");
-      llvm::BasicBlock* done = NewBlock("DONE");
-      llvm::Value* zero_val = llvm::ConstantFP::get(Types::float64, 0);
-      auto not_equal_ = __ CreateFCmpONE(double_val, zero_val);
-      __ CreateCondBr(not_equal_, not_zero, done);
-      __ SetInsertPoint(not_zero);
-      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+      zero_block = NewBlock("TaggedToISlow ZERO");
+      auto equal_ = __ CreateICmpEQ(relult_for_not_smi, __ getInt32(0));
+      __ CreateCondBr(equal_, zero_block, merge_and_ret);
+      __ SetInsertPoint(zero_block);
+      InsertDebugTrap();
+      minus_zero_result = __ getInt32(0);
+      // __ CreateBr(not_smi_merge);
+      /*llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
              llvm::Intrinsic::x86_sse2_movmsk_pd);
-      llvm::Value* input_val = __ CreateSIToFP(Use(val), Types::float64);
       llvm::Value* param_vect = __ CreateVectorSplat(2, input_val);
       __ CreateInsertElement(param_vect, double_val, __ getInt32(0));
       llvm::Value* call = __ CreateCall(intrinsic, param_vect);
-      __ CreateAnd(call, __ getInt32(1));
-      DeoptimizeIf(not_equal_, true);
-      __ CreateBr(done);
-      __ SetInsertPoint(done);
+      __ CreateAnd(call, __ getInt32(1)); //FIXME(llvm)://Possibly wrong
+      auto is_zero = __ CreateICmpEQ(call, __ getInt64(0));
+      DeoptimizeIf(is_zero, false, merge_and_ret); */
     }
-    relult_for_not_smi = int32;
     not_smi_merge =  __ GetInsertBlock();
   }
   __ CreateBr(merge_and_ret);
 
   __ SetInsertPoint(merge_and_ret);
-  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
-  phi->addIncoming(relult_for_smi, is_smi);
-  phi->addIncoming(relult_for_not_smi, not_smi_merge);
+  llvm::PHINode* phi = nullptr;
+  if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) {
+    phi = __ CreatePHI(Types::i32, 3);
+    phi->addIncoming(minus_zero_result, zero_block);
+    phi->addIncoming(relult_for_smi, is_smi);
+    phi->addIncoming(relult_for_not_smi, not_smi_merge);
+  }
+  else { 
+    phi = __ CreatePHI(Types::i32, 2);
+    phi->addIncoming(relult_for_smi, is_smi);
+    phi->addIncoming(relult_for_not_smi, not_smi_merge);
+  }
   instr->set_llvm_value(phi);
 }
 
