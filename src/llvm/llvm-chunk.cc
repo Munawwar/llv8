@@ -6135,6 +6135,7 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
       break;
     }
     case kMathFround:{
+        UNIMPLEMENTED();
         llvm::Value* value = Use(instr->value());
         llvm::Value* trunc_fp = __ CreateFPToSI(value, Types::i32);
         llvm::Value* result = __ CreateSIToFP(trunc_fp, Types::float64);
