@@ -3950,20 +3950,40 @@ void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
-  llvm::Value* value = Use(instr->value());
-  llvm::Value* address = nullptr ;
-  llvm::Value* result = nullptr;
-  
-  llvm::Value* int_ptr = __ CreateIntToPtr(value, Types::ptr_i8);
-  auto off = Context::kHeaderSize + instr->slot_index() * kPointerSize - kHeapObjectTag;
-  llvm::Value* offset = __ getInt32(off);
-  address = __ CreateGEP(int_ptr, offset);
-  address = __ CreateBitCast(address, Types::ptr_i64);
-  result = __ CreateLoad(address);
+  llvm::Value* context = Use(instr->value());
+  llvm::BasicBlock* insert = __ GetInsertBlock(); 
+  auto offset = Context::kHeaderSize + instr->slot_index() * kPointerSize;
+  llvm::Value* result = LoadFieldOperand(context, offset);
+  llvm::Value* root = nullptr;
+  llvm::BasicBlock* load_root = nullptr;
+ 
+  int count = 1;
   if (instr->RequiresHoleCheck()) {
-    UNIMPLEMENTED();
+    llvm::Value* cmp_root = CompareRoot(result, Heap::kTheHoleValueRootIndex);
+    if (instr->DeoptimizesOnHole()) {
+      UNIMPLEMENTED();
+    } else {
+      load_root = NewBlock("DoLoadContextSlot load root");
+      llvm::BasicBlock* is_not_hole = NewBlock("DoLoadContextSlot" 
+                                               "is not hole");
+      count = 2;
+      __ CreateCondBr(cmp_root, load_root, is_not_hole);
+      __ SetInsertPoint(load_root);
+      root = LoadRoot(Heap::kUndefinedValueRootIndex);
+      __ CreateBr(is_not_hole);
+
+      __ SetInsertPoint(is_not_hole);
+    }
   }
+  
+  if(count == 1) {
   instr->set_llvm_value(result);
+  } else {
+    llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+    phi->addIncoming(result, insert);
+    phi->addIncoming(root, load_root);
+    instr->set_llvm_value(phi);
+  }
 }
 
 void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
@@ -6111,19 +6131,16 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
       break;
     }
     case kMathRound: {
-     // UNIMPLEMENTED();
       DoMathRound(instr);
       break;
     }
     case kMathFround:{
-        llvm::Function* fround_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::round, Types::float64);
-        std::vector<llvm::Value*> params;
-        params.push_back(Use(instr->value()));
-        llvm::Value* fround = __ CreateCall(fround_intrinsic, params);
-        instr->set_llvm_value(fround);
+        llvm::Value* value = Use(instr->value());
+        llvm::Value* trunc_fp = __ CreateFPToSI(value, Types::i32);
+        llvm::Value* result = __ CreateSIToFP(trunc_fp, Types::float64);
+        instr->set_llvm_value(result);
+       break;
       }
-      //UNIMPLEMENTED();
     case kMathLog: {
       //UNIMPLEMENTED();
       DoMathLog(instr);
