@@ -22,6 +22,7 @@ const char* LLVMChunkBuilder::kGcStrategyName = "v8-gc";
 llvm::Type* Types::i8 = nullptr;
 llvm::Type* Types::i32 = nullptr;
 llvm::Type* Types::i64 = nullptr;
+llvm::Type* Types::float32 = nullptr;
 llvm::Type* Types::float64 = nullptr;
 llvm::PointerType* Types::ptr_i8 = nullptr;
 llvm::PointerType* Types::ptr_i16 = nullptr;
@@ -6134,11 +6135,11 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
       DoMathRound(instr);
       break;
     }
-    case kMathFround:{
-        UNIMPLEMENTED();
+    case kMathFround: {
+        //FIXME(llvm): Is this right?
         llvm::Value* value = Use(instr->value());
-        llvm::Value* trunc_fp = __ CreateFPToSI(value, Types::i32);
-        llvm::Value* result = __ CreateSIToFP(trunc_fp, Types::float64);
+        llvm::Value* trunc_fp = __ CreateFPTrunc(value, Types::float32);
+        llvm::Value* result = __ CreateFPExt(trunc_fp, Types::float64);
         instr->set_llvm_value(result);
        break;
       }

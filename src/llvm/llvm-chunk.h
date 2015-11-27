@@ -276,6 +276,7 @@ struct Types final : public AllStatic {
    static llvm::Type* i8;
    static llvm::Type* i32;
    static llvm::Type* i64;
+   static llvm::Type* float32;
    static llvm::Type* float64;
 
    static llvm::PointerType* ptr_i8;
@@ -289,6 +290,7 @@ struct Types final : public AllStatic {
     i8 = ir_builder->getInt8Ty();
     i32 = ir_builder->getInt32Ty();
     i64 = ir_builder->getInt64Ty();
+    float32 = ir_builder->getFloatTy();
     float64 = ir_builder->getDoubleTy();
 
     auto address_space = 0;
