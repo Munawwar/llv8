@@ -6207,7 +6207,7 @@ void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(
                                                    JSArrayBuffer::kBitFieldOffset);
   llvm::Value* shift = __ getInt64(1 << JSArrayBuffer::WasNeutered::kShift);
   llvm::Value* test = __ CreateAnd(bit_field_offset, shift);
-  llvm::Value* cmp = __ CreateICmpEQ(test, __ getInt64(0));
+  llvm::Value* cmp = __ CreateICmpNE(test, __ getInt64(0));
   DeoptimizeIf(cmp);
   //UNIMPLEMENTED();
 }
