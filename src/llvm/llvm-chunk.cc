@@ -3837,13 +3837,11 @@ void LLVMChunkBuilder::DoHasInPrototypeChainAndBranch(
   llvm::Value* object_map = LoadFieldOperand(object, HeapObject::kMapOffset);
   llvm::BasicBlock* after_compare_root = NewBlock("DoHasInPrototypeChainAndBranch"
                                                   " after compare root");
-  llvm::Value* load_object_map = __ getInt64(0); //fictiv value, use in phi
+  llvm::Value* load_object_map;
   __ CreateBr(loop);
   __ SetInsertPoint(loop);
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(object_map, insert);
-  phi->addIncoming(load_object_map, after_compare_root);
-
   llvm::Value* object_prototype = LoadFieldOperand(phi,
                                                    Map::kPrototypeOffset);
   llvm::Value* cmp = __ CreateICmpEQ(object_prototype, prototype);
@@ -3858,8 +3856,9 @@ void LLVMChunkBuilder::DoHasInPrototypeChainAndBranch(
 
   __ SetInsertPoint(after_compare_root);
   load_object_map = LoadFieldOperand(object_prototype, HeapObject::kMapOffset);
+  phi->addIncoming(load_object_map, after_compare_root);
+
   __ CreateBr(loop);
-//  UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
