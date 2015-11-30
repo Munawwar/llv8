@@ -125,7 +125,8 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   int shared_id = deopt_data_->DefineDeoptimizationLiteral(
       environment->entry() ? environment->entry()->shared()
                            : info()->shared_info());
-
+  int closure_id = deopt_data_->DefineDeoptimizationLiteral(
+      environment->closure());
   // WriteTranslationFrame
   switch (environment->frame_type()) {
     case JS_FUNCTION:
@@ -134,17 +135,16 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
       if (info()->closure().is_identical_to(environment->closure())) {
         translation->StoreJSFrameFunction();
       } else {
-        int closure_id = deopt_data_->DefineDeoptimizationLiteral(
-            environment->closure());
         translation->StoreLiteral(closure_id);
       }
       break;
     case ARGUMENTS_ADAPTOR: {
-      //int shared_id = DefineDeoptimizationLiteral(
-        //  environment->entry() ? environment->entry()->shared()
-           //                    : info()->shared_info());
-      //USE(shared_id);
-      UNIMPLEMENTED();
+      translation->BeginArgumentsAdaptorFrame(shared_id, translation_size);
+      if (info()->closure().is_identical_to(environment->closure())) {
+        translation->StoreJSFrameFunction();
+      } else {
+        translation->StoreLiteral(closure_id);
+      }
       break;
     }
     default:
