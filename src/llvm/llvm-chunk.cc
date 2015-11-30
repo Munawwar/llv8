@@ -139,6 +139,14 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
         translation->StoreLiteral(closure_id);
       }
       break;
+    case ARGUMENTS_ADAPTOR: {
+      //int shared_id = DefineDeoptimizationLiteral(
+        //  environment->entry() ? environment->entry()->shared()
+           //                    : info()->shared_info());
+      //USE(shared_id);
+      UNIMPLEMENTED();
+      break;
+    }
     default:
       UNIMPLEMENTED();
   }
@@ -2329,8 +2337,17 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
       llvm::Value* cmp_root = CompareRoot(value, Heap::kTrueValueRootIndex);
       llvm::BranchInst* branch =  __ CreateCondBr(cmp_root, true_target, false_target);
       instr->set_llvm_value(branch);
-    } else if (type.IsSmi() || type.IsJSArray()
-              || type.IsHeapNumber() || type.IsString()) {
+    } else if (type.IsString()) {
+      DCHECK(!info()->IsStub());
+      llvm::Value* zero = __ getInt64(0);
+      llvm::Value* length = LoadFieldOperand(value, String::kLengthOffset);
+      llvm::Value* compare = __ CreateICmpNE(length, zero);
+      llvm::BranchInst* branch = __ CreateCondBr(compare, true_target,
+                                                 false_target);
+      instr->set_llvm_value(branch);
+    }
+      else if (type.IsSmi() || type.IsJSArray()
+              || type.IsHeapNumber()) {
       UNIMPLEMENTED();
     } else {
       ToBooleanStub::Types expected = instr->expected_input_types();
@@ -3140,9 +3157,9 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
   llvm::Value* temp = nullptr; 
   llvm::Value* temp2 = nullptr;
   Handle<String> class_name = instr->class_name();
-  llvm::BasicBlock* not_smi = NewBlock("DoClassOfTestAndBranch NotSmi");
+  llvm::BasicBlock* not_smi = NewBlock("DoClassOfTestAndBranch input  NotSmi");
   llvm::BasicBlock* continue_ = NewBlock("DoClassOfTestAndBranch Continue");
-
+  llvm::BasicBlock* insert = __ GetInsertBlock();
   llvm::Value* smi_cond = SmiCheck(input);
   __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
   __ SetInsertPoint(not_smi);
@@ -3157,10 +3174,13 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
     UNIMPLEMENTED();
   } else {
     temp = LoadFieldOperand(input, HeapObject::kMapOffset);
-    temp2 = LoadFieldOperand(temp, Map::kInstanceTypeOffset);
-    llvm::Value* load = __ CreateZExt(temp2, Types::i64);
-    llvm::Value* sub = __ CreateSub(load, __ getInt64(FIRST_NONCALLABLE_SPEC_OBJECT_TYPE));
-    auto imm = LAST_NONCALLABLE_SPEC_OBJECT_TYPE - FIRST_NONCALLABLE_SPEC_OBJECT_TYPE;
+    llvm::Value* instance_type = LoadFieldOperand(temp,
+                                                  Map::kInstanceTypeOffset);
+    temp2 = __ CreateAnd(instance_type, __ getInt64(0x000000ff));
+//    llvm::Value* casted = __ CreateTruncOrBitCast(temp2, Types::i32);
+//    llvm::Value* load = __ CreateZExt(temp2, Types::i64);
+    llvm::Value* sub = __ CreateSub(temp2, __ getInt64(FIRST_NONCALLABLE_SPEC_OBJECT_TYPE));
+    int imm = LAST_NONCALLABLE_SPEC_OBJECT_TYPE - FIRST_NONCALLABLE_SPEC_OBJECT_TYPE;
     llvm::Value* cmp = __ CreateICmpUGE(sub, __ getInt64(imm));
     __ CreateCondBr(cmp, Use(instr->SuccessorAt(1)), continue_);
     __ SetInsertPoint(continue_);
@@ -3172,35 +3192,37 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
   llvm::BasicBlock* done = NewBlock("DoClassOfTestAndBranch done");
 
   llvm::Value* map = LoadFieldOperand(temp, Map::kConstructorOrBackPointerOffset);
-
   __ CreateBr(loop);
   __ SetInsertPoint(loop);
-  llvm::Value* zero = __ getInt64(0);
-  llvm::Value* map_is_smi = SmiCheck(map);
+  llvm::PHINode* phi_map = __ CreatePHI(Types::i64, 2);
+  phi_map->addIncoming(map, insert); 
+  llvm::Value* map_is_smi = SmiCheck(phi_map);
   __ CreateCondBr(map_is_smi, done, near);
+
   __ SetInsertPoint(near);
-
-  llvm::Value* other_map = LoadFieldOperand(map, HeapObject::kMapOffset);
-  llvm::Value* scratch = LoadFieldOperand(other_map, Map::kInstanceTypeOffset);
-  llvm::Value* type_cmp = __ CreateICmpNE(scratch, __ getInt64(static_cast<int8_t>(MAP_TYPE)));
+  InsertDebugTrap();
+  llvm::Value* scratch = LoadFieldOperand(phi_map, HeapObject::kMapOffset);
+  llvm::Value* other_map = LoadFieldOperand(scratch, Map::kInstanceTypeOffset);
+  llvm::Value* type_cmp = __ CreateICmpNE(other_map, __ getInt64(static_cast<int>(MAP_TYPE)));
   __ CreateCondBr(type_cmp, done, equal);
+
   __ SetInsertPoint(equal);
-
-  llvm::Value*  new_map = LoadFieldOperand(map, Map::kConstructorOrBackPointerOffset);
-  USE(new_map);
+  llvm::Value*  new_map = LoadFieldOperand(phi_map, Map::kConstructorOrBackPointerOffset);
+  phi_map->addIncoming(new_map, equal);
   __ CreateBr(loop);
+
+  //TODO: need solv dominate all uses for other_map
+  llvm::Value* zero = __ getInt64(0);
   __ SetInsertPoint(done);
-
   llvm::PHINode* phi_instance = __ CreatePHI(Types::i64, 2);
-  phi_instance->addIncoming(zero, loop);
-  phi_instance->addIncoming(scratch, near);
+  phi_instance->addIncoming(zero, insert);
+  phi_instance->addIncoming(other_map, near);
 
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
-  phi->addIncoming(map, loop);
-  phi->addIncoming(other_map, near);
-    
-  llvm::Value* CmpInstance = __ CreateICmpNE(LoadFieldOperand(phi_instance, Map::kInstanceTypeOffset),
-                                            __ getInt64(static_cast<int8_t>(JS_FUNCTION_TYPE)));
+  llvm::Value* instace = LoadFieldOperand(phi_instance, Map::kInstanceTypeOffset);
+  llvm::Value* func_type = __ getInt64(static_cast<int>(JS_FUNCTION_TYPE));
+  llvm::Value* CmpInstance = __ CreateICmpNE(instace, func_type);
+//  llvm::Value* CmpInstance = __ CreateICmpNE(LoadFieldOperand(phi_instance, Map::kInstanceTypeOffset),
+  //                                          __ getInt64(static_cast<int8_t>(JS_FUNCTION_TYPE)));
   llvm::BasicBlock* InstanceNear = NewBlock("DoClassOfTestAndBranch near CmpInstance");
   if (String::Equals(class_name, isolate()->factory()->Object_string())) {
     __ CreateCondBr(CmpInstance, Use(instr->SuccessorAt(0)), InstanceNear);
@@ -3210,7 +3232,7 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
     __ SetInsertPoint(InstanceNear);
   }
   
-  llvm::Value* shared_info = LoadFieldOperand(phi, JSFunction::kSharedFunctionInfoOffset);
+  llvm::Value* shared_info = LoadFieldOperand(phi_map, JSFunction::kSharedFunctionInfoOffset);
   llvm::Value* instance_class_name = LoadFieldOperand(shared_info, SharedFunctionInfo::kInstanceClassNameOffset);
 
   DCHECK(class_name->IsInternalizedString());
@@ -4130,7 +4152,9 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
   if (kind == FLOAT32_ELEMENTS) {
     UNIMPLEMENTED();
   } else if (kind == FLOAT64_ELEMENTS) {
-    UNIMPLEMENTED();
+    casted_address = __ CreateBitCast(address, Types::ptr_float64);
+    load = __ CreateLoad(casted_address);
+    instr->set_llvm_value(load);
   } else {
     switch (kind) {
       case INT8_ELEMENTS:
