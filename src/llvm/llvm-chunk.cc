@@ -131,14 +131,27 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
   switch (environment->frame_type()) {
     case JS_FUNCTION:
       translation->BeginJSFrame(environment->ast_id(), shared_id, height);
-
       if (info()->closure().is_identical_to(environment->closure())) {
         translation->StoreJSFrameFunction();
       } else {
         translation->StoreLiteral(closure_id);
       }
       break;
-    case ARGUMENTS_ADAPTOR: {
+    case JS_CONSTRUCT:
+      translation->BeginConstructStubFrame(shared_id, translation_size);
+      if (info()->closure().is_identical_to(environment->closure())) {
+        translation->StoreJSFrameFunction();
+      } else {
+        translation->StoreLiteral(closure_id);
+      }
+      break;
+    case JS_GETTER:
+      UNIMPLEMENTED();
+      break;
+    case JS_SETTER:
+      UNIMPLEMENTED();
+      break;
+    case ARGUMENTS_ADAPTOR:
       translation->BeginArgumentsAdaptorFrame(shared_id, translation_size);
       if (info()->closure().is_identical_to(environment->closure())) {
         translation->StoreJSFrameFunction();
@@ -146,7 +159,9 @@ void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
         translation->StoreLiteral(closure_id);
       }
       break;
-    }
+    case STUB:
+      UNIMPLEMENTED();
+      break;
     default:
       UNIMPLEMENTED();
   }
