@@ -3165,19 +3165,20 @@ void LLVMChunkBuilder::DoClampToUint8(HClampToUint8* instr) {
 }
 
 void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
-  UNIMPLEMENTED();
+  //  UNIMPLEMENTED();
   // search test what it use this case
   // because I think what loop is not correctly
   llvm::Value* input = Use(instr->value());
   llvm::Value* temp = nullptr; 
   llvm::Value* temp2 = nullptr;
   Handle<String> class_name = instr->class_name();
-  llvm::BasicBlock* not_smi = NewBlock("DoClassOfTestAndBranch input  NotSmi");
+  llvm::BasicBlock* input_not_smi = NewBlock("DoClassOfTestAndBranch"
+                                             "input NotSmi");
   llvm::BasicBlock* continue_ = NewBlock("DoClassOfTestAndBranch Continue");
   llvm::BasicBlock* insert = __ GetInsertBlock();
   llvm::Value* smi_cond = SmiCheck(input);
-  __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
-  __ SetInsertPoint(not_smi);
+  __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), input_not_smi);
+  __ SetInsertPoint(input_not_smi);
 
   if (String::Equals(isolate()->factory()->Function_string(), class_name)) {
     STATIC_ASSERT(NUM_OF_CALLABLE_SPEC_OBJECT_TYPES == 2);
@@ -3192,37 +3193,39 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
     llvm::Value* instance_type = LoadFieldOperand(temp,
                                                   Map::kInstanceTypeOffset);
     temp2 = __ CreateAnd(instance_type, __ getInt64(0x000000ff));
-//    llvm::Value* casted = __ CreateTruncOrBitCast(temp2, Types::i32);
-//    llvm::Value* load = __ CreateZExt(temp2, Types::i64);
-    llvm::Value* sub = __ CreateSub(temp2, __ getInt64(FIRST_NONCALLABLE_SPEC_OBJECT_TYPE));
-    int imm = LAST_NONCALLABLE_SPEC_OBJECT_TYPE - FIRST_NONCALLABLE_SPEC_OBJECT_TYPE;
-    llvm::Value* cmp = __ CreateICmpUGE(sub, __ getInt64(imm));
+    llvm::Value* obj_type = __ getInt64(FIRST_NONCALLABLE_SPEC_OBJECT_TYPE);
+    llvm::Value* sub = __ CreateSub(temp2, obj_type);
+    llvm::Value* imm = __ getInt64(LAST_NONCALLABLE_SPEC_OBJECT_TYPE - 
+                                   FIRST_NONCALLABLE_SPEC_OBJECT_TYPE);
+    llvm::Value* cmp = __ CreateICmpUGE(sub, imm);
     __ CreateCondBr(cmp, Use(instr->SuccessorAt(1)), continue_);
     __ SetInsertPoint(continue_);
   }
   
   llvm::BasicBlock* loop = NewBlock("DoClassOfTestAndBranch loop");
-  llvm::BasicBlock* near = NewBlock("DoClassOfTestAndBranch loop near");
+  llvm::BasicBlock* loop_not_smi = NewBlock("DoClassOfTestAndBranch "
+                                            "loop not_smi");
   llvm::BasicBlock* equal = NewBlock("DoClassOfTestAndBranch loop type equal");
   llvm::BasicBlock* done = NewBlock("DoClassOfTestAndBranch done");
-
-  llvm::Value* map = LoadFieldOperand(temp, Map::kConstructorOrBackPointerOffset);
+  llvm::Value* map = LoadFieldOperand(temp,
+                                      Map::kConstructorOrBackPointerOffset);
+  llvm::Value* new_map = nullptr;
   __ CreateBr(loop);
+
   __ SetInsertPoint(loop);
   llvm::PHINode* phi_map = __ CreatePHI(Types::i64, 2);
   phi_map->addIncoming(map, insert); 
   llvm::Value* map_is_smi = SmiCheck(phi_map);
-  __ CreateCondBr(map_is_smi, done, near);
+  __ CreateCondBr(map_is_smi, done, loop_not_smi);
 
-  __ SetInsertPoint(near);
-  InsertDebugTrap();
+  __ SetInsertPoint(loop_not_smi);
   llvm::Value* scratch = LoadFieldOperand(phi_map, HeapObject::kMapOffset);
   llvm::Value* other_map = LoadFieldOperand(scratch, Map::kInstanceTypeOffset);
   llvm::Value* type_cmp = __ CreateICmpNE(other_map, __ getInt64(static_cast<int>(MAP_TYPE)));
   __ CreateCondBr(type_cmp, done, equal);
 
   __ SetInsertPoint(equal);
-  llvm::Value*  new_map = LoadFieldOperand(phi_map, Map::kConstructorOrBackPointerOffset);
+  new_map = LoadFieldOperand(phi_map, Map::kConstructorOrBackPointerOffset);
   phi_map->addIncoming(new_map, equal);
   __ CreateBr(loop);
 
@@ -3231,25 +3234,25 @@ void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
   __ SetInsertPoint(done);
   llvm::PHINode* phi_instance = __ CreatePHI(Types::i64, 2);
   phi_instance->addIncoming(zero, insert);
-  phi_instance->addIncoming(other_map, near);
+  phi_instance->addIncoming(other_map, loop_not_smi);
 
-  llvm::Value* instace = LoadFieldOperand(phi_instance, Map::kInstanceTypeOffset);
   llvm::Value* func_type = __ getInt64(static_cast<int>(JS_FUNCTION_TYPE));
-  llvm::Value* CmpInstance = __ CreateICmpNE(instace, func_type);
-//  llvm::Value* CmpInstance = __ CreateICmpNE(LoadFieldOperand(phi_instance, Map::kInstanceTypeOffset),
-  //                                          __ getInt64(static_cast<int8_t>(JS_FUNCTION_TYPE)));
-  llvm::BasicBlock* InstanceNear = NewBlock("DoClassOfTestAndBranch near CmpInstance");
+  llvm::Value* CmpInstance = __ CreateICmpNE(phi_instance, func_type);
+  llvm::BasicBlock* after_cmp_instance = NewBlock("DoClassOfTestAndBranch after "
+                                                  "CmpInstance");
   if (String::Equals(class_name, isolate()->factory()->Object_string())) {
-    __ CreateCondBr(CmpInstance, Use(instr->SuccessorAt(0)), InstanceNear);
-    __ SetInsertPoint(InstanceNear);
+    __ CreateCondBr(CmpInstance, Use(instr->SuccessorAt(0)),
+                                 after_cmp_instance);
+    __ SetInsertPoint(after_cmp_instance);
   } else {
-    __ CreateCondBr(CmpInstance, Use(instr->SuccessorAt(1)), InstanceNear);
-    __ SetInsertPoint(InstanceNear);
+    __ CreateCondBr(CmpInstance, Use(instr->SuccessorAt(1)),
+                                 after_cmp_instance);
+    __ SetInsertPoint(after_cmp_instance);
   }
   
   llvm::Value* shared_info = LoadFieldOperand(phi_map, JSFunction::kSharedFunctionInfoOffset);
-  llvm::Value* instance_class_name = LoadFieldOperand(shared_info, SharedFunctionInfo::kInstanceClassNameOffset);
-
+  llvm::Value* instance_class_name = LoadFieldOperand(shared_info,
+                                     SharedFunctionInfo::kInstanceClassNameOffset);
   DCHECK(class_name->IsInternalizedString());
   llvm::Value* result = nullptr;
   AllowDeferredHandleDereference smi_check;
