@@ -3165,7 +3165,7 @@ void LLVMChunkBuilder::DoClampToUint8(HClampToUint8* instr) {
 }
 
 void LLVMChunkBuilder::DoClassOfTestAndBranch(HClassOfTestAndBranch* instr) {
-  //  UNIMPLEMENTED();
+  UNIMPLEMENTED();
   // search test what it use this case
   // because I think what loop is not correctly
   llvm::Value* input = Use(instr->value());
