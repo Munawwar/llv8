@@ -4051,8 +4051,10 @@ void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
 void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
   llvm::Value* context = Use(instr->value());
   llvm::BasicBlock* insert = __ GetInsertBlock(); 
-  auto offset = Context::kHeaderSize + instr->slot_index() * kPointerSize;
-  llvm::Value* result = LoadFieldOperand(context, offset);
+  auto offset = instr->slot_index();
+  llvm::Value* result_addr = ConstructAddress(context, offset);
+  llvm::Value* result_casted = __ CreateBitCast(result_addr, Types::ptr_i64);
+  llvm::Value* result = __ CreateLoad(result_casted);
   llvm::Value* root = nullptr;
   llvm::BasicBlock* load_root = nullptr;
  
@@ -4075,8 +4077,8 @@ void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
     }
   }
   
-  if(count == 1) {
-  instr->set_llvm_value(result);
+  if (count == 1) {
+    instr->set_llvm_value(result);
   } else {
     llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
     phi->addIncoming(result, insert);
