@@ -1,4 +1,3 @@
-// Copyright 2015 ISP RAS. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -2986,7 +2985,6 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       } else {
         ChangeTaggedToISlow(val, instr);
 
-// TODO(llvm): if (!val->representation().IsSmi()) result = AssignEnvironment(result);
       }
     }
   } else if (from.IsDouble()) {
@@ -3001,15 +2999,29 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     if (to.IsTagged()) {
       if (!instr->CheckFlag(HValue::kCanOverflow)) {
         instr->set_llvm_value(Integer32ToSmi(val));
+      } else if (instr->value()->CheckFlag(HInstruction::kUint32)) {
+        UIntToTag(instr);
       } else {
         UNIMPLEMENTED();
       }
     } else if (to.IsSmi()) {
+      //TODO: not tested
       if (instr->CheckFlag(HValue::kCanOverflow) &&
           instr->value()->CheckFlag(HValue::kUint32)) {
-        UNIMPLEMENTED();
+        llvm::Value* cmp = nullptr;
+        if (SmiValuesAre32Bits()) {
+          //This will check if the high bit is set
+          //If it set we can't convert int to smi
+          cmp = __ CreateICmpSLT(Use(val), __ getInt32(0));
+         } else {
+            UNIMPLEMENTED();
+            DCHECK(SmiValuesAre31Bits());
+         }
+         DeoptimizeIf(cmp);
+         // UNIMPLEMENTED();
       }
-      instr->set_llvm_value(Integer32ToSmi(val));
+      llvm::Value* result = Integer32ToSmi(val);
+      instr->set_llvm_value(result);
       if (instr->CheckFlag(HValue::kCanOverflow) &&
           !instr->value()->CheckFlag(HValue::kUint32)) { 
         UNIMPLEMENTED();
@@ -3021,6 +3033,53 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       //UNIMPLEMENTED();
     }
   }
+}
+void LLVMChunkBuilder::UIntToTag(HChange* instr ){
+
+  llvm::Value* val = Use(instr->value());
+  llvm::Value* cmp = __ CreateICmpUGT(val, __ getInt32(Smi::kMaxValue));
+  llvm::BasicBlock* def_entr = NewBlock("IntToTag Deferred entry");
+  llvm::BasicBlock* cont = NewBlock("IntToTag Continue");
+  llvm::BasicBlock* done = NewBlock("IntToTag Done");
+  __ CreateCondBr(cmp, def_entr, cont);
+
+  __ SetInsertPoint(cont);
+  
+  llvm::Value* result = Integer32ToSmi(val);
+  __ CreateBr(done);
+
+  __ SetInsertPoint(def_entr);
+  
+  if (FLAG_debug_code) {
+    UNIMPLEMENTED();
+  }
+
+  // Trap, wrong implementation.
+  InsertDebugTrap();
+  auto new_heap_number_casted = __ getInt64(0);
+  /*llvm::Value* double_value = __ CreateSIToFP(val, Types::float64);
+  
+  if (FLAG_inline_new) {
+   UNIMPLEMENTED();
+  }
+  
+  llvm::Value* new_heap_number = AllocateHeapNumber();
+  
+  llvm::Value* store_address = FieldOperand(new_heap_number,
+                                            HeapNumber::kValueOffset);
+  llvm::Value* casted_adderss = __ CreateBitCast(store_address,
+                                                 Types::ptr_tagged);
+  llvm::Value* casted_val = __ CreateBitCast(double_value, Types::tagged);
+  __ CreateStore(casted_val, casted_adderss);
+  llvm::Value* new_heap_number_casted = __ CreatePtrToInt(new_heap_number,
+                                                          Types::tagged); */
+  __ CreateBr(done);
+
+  __ SetInsertPoint(done);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(result, cont);
+  phi->addIncoming(new_heap_number_casted, def_entr);
+  instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
