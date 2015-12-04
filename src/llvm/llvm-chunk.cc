@@ -5091,17 +5091,18 @@ void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
   //TODO: not tested
   llvm::Value* context = Use(instr->context());
   llvm::Value* value = Use(instr->value());
-  int offset = instr->slot_index() + kHeapObjectTag;
+  int offset = instr->slot_index(); 
 
   if (instr->RequiresHoleCheck()) {
     UNIMPLEMENTED();
   }
 
-  llvm::Value* target = FieldOperand(context, offset);
-  llvm::Value* casted_address = __ CreateBitCast(target, Types::ptr_tagged);
+  llvm::Value* target = ConstructAddress(context, offset);
+  llvm::Value* casted_address = __ CreateBitCast(target, Types::ptr_i64);
   __ CreateStore(value, casted_address);
   if (instr->NeedsWriteBarrier()) {
     int slot_offset = Context::SlotOffset(instr->slot_index());
+    //FIXME: check_needed argument ?
     RecordWriteField(context,
                      value,
                      slot_offset + kHeapObjectTag,
