@@ -4191,6 +4191,7 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
     UNIMPLEMENTED();
   }
 
+  llvm::Value* elements = Use(instr->elements());
   if (key->IsConstant()) {
     uint32_t const_val = (HConstant::cast(key))->Integer32Value();
     
@@ -4198,9 +4199,17 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
       Abort(kArrayIndexConstantValueTooBig);
     }
 
-    address = ConstructAddress(Use(instr->elements()), (const_val << shift_size) + base_offset);
+    address = ConstructAddress(elements, (const_val << shift_size) + base_offset);
   } else {
-     UNIMPLEMENTED();
+     DCHECK(key->representation().IsInteger32());
+     llvm::Value* scale_factor = __ getInt32(shift_size);
+     llvm::Value* index_scale = __ CreateMul(Use(key), scale_factor);
+     llvm::Value* llvm_base_offset = __ getInt32(base_offset);
+     llvm::Value* offset = __ CreateAdd(index_scale, llvm_base_offset);
+     llvm::Value* base = __ CreateIntToPtr(elements, Types::ptr_i8);
+     address = __ CreateGEP(base, offset);
+     
+   //  UNIMPLEMENTED();
 /*    
      ScaleFactor scale_factor = static_cast<ScaleFactor>(shift_size);
      
@@ -4223,20 +4232,47 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
   }
 
   if (kind == FLOAT32_ELEMENTS) {
-    UNIMPLEMENTED();
+    casted_address = __ CreateBitCast(address, Types::ptr_float32);
+    load = __ CreateLoad(casted_address);
+    auto result = __ CreateFPExt(load, Types::float64);
+    instr->set_llvm_value(result);
+//    UNIMPLEMENTED();
   } else if (kind == FLOAT64_ELEMENTS) {
     casted_address = __ CreateBitCast(address, Types::ptr_float64);
     load = __ CreateLoad(casted_address);
     instr->set_llvm_value(load);
   } else {
     switch (kind) {
-      case INT8_ELEMENTS:
-        UNIMPLEMENTED();
+      case INT8_ELEMENTS: {
+        //movsxbl(result, operand)
+        casted_address = __ CreateBitCast(address, Types::ptr_i8);
+        load = __ CreateLoad(casted_address);
+        llvm::Value* result = __ CreateSExt(load, Types::i32);
+        instr->set_llvm_value(result);
+/*
+        llvm::Value* check_sign = __ CreateAnd(load, __ getInt64(0x80));
+        llvm::Value* cmp = __ CreateICmpSGE(check_sign, __ getInt64(0)); 
+        llvm::BasicBlock* negative = NewBlock("DoLoadKeyedExternalArray" 
+                                              " negative");
+        llvm::BasicBlock* positive = NewBlock("DoLoadKeyedExternalArray"
+                                              " positive");
+        llvm::BasicBlock* merge = NewBlock("DoLoadKeyedExternalArray merge");
+        __ CreateCondBr(cmp, positive, negative);
+        
+        __ SetInsertPoint(positive);
+        llvm::Value* positiv_result = __ CreateAnd()
+*/
         break;
+      }
       case UINT8_ELEMENTS:
-      case UINT8_CLAMPED_ELEMENTS:
-        UNIMPLEMENTED();
+      case UINT8_CLAMPED_ELEMENTS:{
+        //movzxbl(result, operand)
+        casted_address = __ CreateBitCast(address, Types::ptr_i8);
+        load = __ CreateLoad(casted_address);
+        llvm::Value* result = __ CreateZExt(load, Types::i32);
+        instr->set_llvm_value(result);
         break;
+      }
       case INT16_ELEMENTS:
         UNIMPLEMENTED();
         break;
@@ -5163,7 +5199,11 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
   }
 
   if (elements_kind == FLOAT32_ELEMENTS) {
-    UNIMPLEMENTED();
+    casted_address = __ CreateBitCast(address, Types::ptr_float32);
+    auto result = __ CreateFPTrunc(Use(instr->value()), Types::float32);
+    store = __ CreateStore(result, casted_address);
+    instr->set_llvm_value(store);
+    //UNIMPLEMENTED();
   } else if (elements_kind == FLOAT64_ELEMENTS) {
     UNIMPLEMENTED();
   } else {
@@ -5994,6 +6034,8 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
      __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)),
                      Use(instr->SuccessorAt(1)));
   } else if (String::Equals(type_name, factory->string_string())) {
+    UNIMPLEMENTED();
+    //TODO: find test
     llvm::Value* smi_cond = SmiCheck(input);
     __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
 
@@ -6010,13 +6052,13 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
     UNIMPLEMENTED();
   } else if (String::Equals(type_name, factory->undefined_string())) {
     //TODO: not tested
-    llvm::BasicBlock* after_cmp_root = NewBlock("DoTypeofIsAndBranch"
+    llvm::BasicBlock* after_cmp_root = NewBlock("DoTypeofIsAndBranch "
                                           "after compare root");
     llvm::Value* cmp_root = CompareRoot(input, Heap::kUndefinedValueRootIndex);
     __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), after_cmp_root);
 
     __ SetInsertPoint(after_cmp_root);
-    llvm::BasicBlock* after_check_smi = NewBlock("DoTypeofIsAndBranch"
+    llvm::BasicBlock* after_check_smi = NewBlock("DoTypeofIsAndBranch "
                                                  "after check smi");
     llvm::Value* smi_cond = SmiCheck(input, false);
     __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), after_check_smi);
@@ -6044,7 +6086,50 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
     __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)),
                     Use(instr->SuccessorAt(1)));
   } else if (String::Equals(type_name, factory->object_string())) {
-    UNIMPLEMENTED();
+    llvm::Value* smi_cond = SmiCheck(input);
+    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);
+    __ SetInsertPoint(not_smi);
+    llvm::BasicBlock* after_cmp_root = NewBlock("DoTypeofIsAndBranch "
+                                          "after compare root");
+    llvm::Value* cmp_root = CompareRoot(input, Heap::kNullValueRootIndex);
+    __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)), after_cmp_root);
+    
+    __ SetInsertPoint(after_cmp_root);
+    llvm::BasicBlock* after_cmp_type = NewBlock("DoTypeofIsAndBranch "
+                                                "after cmpare type");
+    STATIC_ASSERT(LAST_SPEC_OBJECT_TYPE == LAST_TYPE);
+    llvm::Value* map = LoadFieldOperand(input, HeapObject::kMapOffset);
+    llvm::Value* result  = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+    llvm::Value* type = __ getInt64(static_cast<int>(FIRST_SPEC_OBJECT_TYPE));
+    llvm::Value* cmp = __ CreateICmpULT(result, type);
+    __ CreateCondBr(cmp, Use(instr->SuccessorAt(1)), after_cmp_type);
+    
+    __ SetInsertPoint(after_cmp_type);
+    llvm::Value* bit_field = LoadFieldOperand(map, Map::kBitFieldOffset);
+    llvm::Value* imm = __ getInt64((1 << Map::kIsCallable) |
+                                   (1 << Map::kIsUndetectable));
+    llvm::Value* test = __ CreateAnd(bit_field, imm);
+    llvm::Value* cmp_result = __ CreateICmpNE(test, __ getInt64(0));
+    __ CreateCondBr(cmp_result, Use(instr->SuccessorAt(0)),
+                                Use(instr->SuccessorAt(1))); 
+    
+    // clang-format off
+#define SIMD128_TYPE(TYPE, Type, type, lane_count, lane_type)         \
+  } else if (String::Equals(type_name, factory->type##_string())) {   \
+    llvm::Value* smi_cond = SmiCheck(input);                          \
+    __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), not_smi);   \
+    __ SetInsertPoint(not_smi);                                       \
+    llvm::Value* value = LoadFieldOperand(input,                      \
+                                          HeapObject::kMapOffset);    \
+    llvm::Value* cmp_root =  CompareRoot(value,                       \
+                                    Heap::k##Type##MapRootIndex);     \
+    __ CreateCondBr(cmp_root, Use(instr->SuccessorAt(0)),             \
+                              Use(instr->SuccessorAt(1)));            \
+
+  SIMD128_TYPES(SIMD128_TYPE)
+#undef SIMD128_TYPE
+    // clang-format on   
+
   } else {
     UNIMPLEMENTED();
   }
