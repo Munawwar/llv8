@@ -3889,8 +3889,10 @@ void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* ins
     cond = llvm::CmpInst::ICMP_ULE;
   }
 
-  llvm::Value* cmp = __ CreateICmp(cond, LoadFieldOperand(map, Map::kInstanceTypeOffset), __ getInt64(imm));
-  branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
+  llvm::Value* cmp = __ CreateICmp(cond, LoadFieldOperand(map, 
+                            Map::kInstanceTypeOffset), __ getInt64(imm));
+  branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), 
+                            Use(instr->SuccessorAt(1)));
 
   instr->set_llvm_value(branch);
 }
