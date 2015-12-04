@@ -2536,11 +2536,6 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   // FIXME: don't we need pending_push_args ?
   int arity = instr->argument_count()-1;
   llvm::Value* arity_val = __ getInt64(arity);
-  if (arity == 0) {
-    arity_val = __ CreateXor(arity_val, arity_val);
-  } else if (is_uint32(arity)) {
-    arity_val = __ getInt64(static_cast<uint32_t>(arity));
-  }
   llvm::Value* load_r = LoadRoot(Heap::kUndefinedValueRootIndex);
   CallConstructStub stub(isolate(), NO_CALL_CONSTRUCTOR_FLAGS);
   Handle<Code> code = Handle<Code>::null();
@@ -2548,10 +2543,9 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
     AllowHandleAllocation allow_handles;
     AllowHeapAllocation allow_heap;
     code = stub.GetCode();
-    // FIXME(llvm,gc): respect reloc info mode...
   }
   std::vector<llvm::Value*> params;
-  for (int i = 0; i < instr->OperandCount(); i++)
+  for (int i = 0; i < instr->OperandCount(); ++i)
     params.push_back(Use(instr->OperandAt(i)));
   params.push_back(arity_val);
   params.push_back(load_r);
