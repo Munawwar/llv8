@@ -5821,7 +5821,6 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     llvm::Value* context = Use(instr->context());
     llvm::Value* left = Use(instr->left());
     llvm::Value* right = Use(instr->right());
-    UNIMPLEMENTED();
     std::vector<llvm::Value*> params;
     params.push_back(context);
     params.push_back(left);
