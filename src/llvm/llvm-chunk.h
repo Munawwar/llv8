@@ -620,6 +620,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   void ResolvePhis(HBasicBlock* block);
   void CreateVolatileZero();
   llvm::Value* GetVolatileZero();
+  llvm::Value* BuildFastArrayOperand(HValue*, llvm::Value*,
+                                     ElementsKind, uint32_t);
   llvm::Value* ConstFoldBarrier(llvm::Value* imm);
   llvm::BasicBlock* NewBlock(const std::string& name,
                              llvm::Function* = nullptr);
