@@ -1535,7 +1535,6 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber(llvm::BasicBlock* gc_required,
   llvm::Value* address = FieldOperand(result, HeapObject::kMapOffset);
   llvm::Value* casted_address = __ CreatePointerCast(address,
                                                      Types::ptr_tagged);
-  InsertDebugTrap();
   __ CreateStore(root, casted_address);
   return __ CreatePtrToInt(casted_address, Types::i64);
 }
@@ -3287,9 +3286,28 @@ void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
 void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
   llvm::Value* value = LoadFieldOperand(Use(instr->value()),
                                         HeapObject::kMapOffset);
-  
   if (instr->is_interval_check()) {
-    UNIMPLEMENTED();
+    InstanceType first;
+    InstanceType last;
+    instr->GetCheckInterval(&first, &last);
+    
+    llvm::Value* instance = LoadFieldOperand(value, Map::kInstanceTypeOffset);
+    llvm::Value* imm_first = __ getInt64(static_cast<int>(first));
+
+    // If there is only one type in the interval check for equality.
+    if (first == last) {
+      llvm::Value* cmp = __ CreateICmpNE(instance, imm_first);
+      DeoptimizeIf(cmp);
+    } else {
+      llvm::Value* cmp = __ CreateICmpULT(instance, imm_first);
+      DeoptimizeIf(cmp);
+      // Omit check for the last type.
+      if (last != LAST_TYPE) {
+        llvm::Value* imm_last = __ getInt64(static_cast<int>(last));
+        llvm::Value* cmp = __ CreateICmpUGT(instance, imm_last);
+        DeoptimizeIf(cmp);
+      }
+    }
   } else {
     uint8_t mask;
     uint8_t tag;
