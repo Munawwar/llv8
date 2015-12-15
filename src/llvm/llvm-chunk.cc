@@ -1363,12 +1363,181 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber() {
   // fast inline allocation should be used
   // (otherwise runtime stub call should be performed).
 
-  CHECK(!FLAG_inline_new);
+  //CHECK(!FLAG_inline_new);
 
   // return an i8*
   llvm::Value* allocated = CallRuntimeViaId(Runtime::kAllocateHeapNumber);
   // RecordSafepointWithRegisters...
   return allocated;
+}
+
+bool LLVMChunkBuilder::IsValid(llvm::Value* value){
+  return value == nullptr ? false : true;
+}
+
+void LLVMChunkBuilder::UpdateAllocationTopHelper(llvm::Value* result_end,
+                                                 llvm::Value* screatch,
+                                                 AllocationFlags flags) {
+  if (emit_debug_code()) {
+    UNIMPLEMENTED();
+  }
+
+  ExternalReference allocation_top =
+      AllocationUtils::GetAllocationTopReference(isolate(), flags);
+  // Update new top.
+  if (IsValid(screatch)){
+    // Scratch already contains address of allocation top.
+    UNIMPLEMENTED();
+  } else {
+    //Store(allocation_top, result_end);
+    //TODO: root_array_available_ changed in JSEntryStub::Generate
+    bool root_array_available_ = true;
+    if (root_array_available_ && !isolate()->serializer_enabled()) {
+      int64_t delta = RootRegisterDelta(allocation_top);
+      int64_t limit = 0x80000000;
+      bool check_limit = (-limit<=delta) && (delta<=limit);
+      if (delta != -1 && check_limit) {
+        Address root_array_start_address =
+                ExternalReference::roots_array_start(isolate()).address();
+        auto int64_address =
+             __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
+        int32_t offset = static_cast<int32_t>(delta);
+        auto store_address = ConstructAddress(int64_address, offset);
+        auto casted_load_address = __ CreateBitCast(store_address,
+                                                    Types::ptr_i64);
+        __ CreateStore(result_end, casted_load_address);
+        return;
+      }
+    }
+    UNIMPLEMENTED();
+  }
+}
+
+llvm::Value* LLVMChunkBuilder::LoadAllocationTopHelper(llvm::Value* screatch,
+                                                       AllocationFlags flags) {
+  ExternalReference allocation_top =
+      AllocationUtils::GetAllocationTopReference(isolate(), flags);
+
+  // Just return if allocation top is already known.
+  if ((flags & RESULT_CONTAINS_TOP) != 0) {
+    UNIMPLEMENTED();
+  }
+
+  // Move address of new object to result. Use scratch register if available,
+  // and keep address in scratch until call to UpdateAllocationTopHelper.
+  if (IsValid(screatch)){
+    UNIMPLEMENTED();
+    return nullptr;
+  } else {
+    //TODO: root_array_available_ changed in JSEntryStub::Generate
+    bool root_array_available_ = true;
+    if (root_array_available_ && !isolate()->serializer_enabled()) {
+      int64_t delta = RootRegisterDelta(allocation_top);
+      int64_t limit = 0x80000000;
+      bool check_limit = (-limit<=delta) && (delta<=limit);
+      if (delta != -1 && check_limit) {
+        Address root_array_start_address =
+                ExternalReference::roots_array_start(isolate()).address();
+        auto int64_address =
+             __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
+        int32_t offset = static_cast<int32_t>(delta);
+        auto load_address = ConstructAddress(int64_address, offset);
+        auto casted_load_address = __ CreateBitCast(load_address,
+                                                    Types::ptr_i64);
+        return __ CreateLoad(casted_load_address);
+      }
+    }
+    // Safe code.
+    //UNIMPLEMENTED();
+    return nullptr;
+  }
+}
+
+llvm::Value* LLVMChunkBuilder::Allocate(int object_size,
+                                        llvm::Value* result_end,
+                                        llvm::Value* screatch,
+                                        llvm::BasicBlock* gc_required,
+                                        AllocationFlags flags) {
+  DCHECK((flags & (RESULT_CONTAINS_TOP | SIZE_IN_WORDS)) == 0);
+  DCHECK(object_size <= Page::kMaxRegularHeapObjectSize);
+  llvm::Value* result = nullptr;
+  if (!FLAG_inline_new) {
+    if (emit_debug_code()) {
+      result = __ getInt64(0x7091);
+      UNIMPLEMENTED();
+      // Trash the registers to simulate an allocation failure.
+    }
+    UNIMPLEMENTED();
+  }
+
+  // Load address of new object into result.
+  result = LoadAllocationTopHelper(screatch, flags);
+
+  if ((flags & DOUBLE_ALIGNMENT) != 0) {
+    UNIMPLEMENTED();
+  }
+
+  // Calculate new top and bail out if new space is exhausted.
+  ExternalReference allocation_limit =
+      AllocationUtils::GetAllocationLimitReference(isolate(), flags);
+
+  llvm::Value* top = result;
+  llvm::Value* inc_top = __ CreateAdd(top, __ getInt64(object_size));
+  llvm::Value* carry_check = __ CreateICmpSGE(inc_top, __ getInt64(0x100000000));
+  llvm::BasicBlock* not_carry = NewBlock("Allocate add is correct");
+  __ CreateCondBr(carry_check, gc_required, not_carry);
+
+  __ SetInsertPoint(not_carry);
+  llvm::Value* limit_operand = ExternalOperand(allocation_limit);
+  llvm::BasicBlock* limit_is_valid = NewBlock("Allocate limit is valid");
+  llvm::Value* cmp_limit = __ CreateICmpSGT(inc_top, limit_operand);
+  __ CreateCondBr(cmp_limit, gc_required, limit_is_valid);
+
+  __ SetInsertPoint(limit_is_valid);
+  // Update allocation top.
+  UpdateAllocationTopHelper(top, screatch, flags);
+  bool tag_result = (flags & TAG_OBJECT) != 0;
+/*
+  if (IsValid(result_end)){
+    if (tag_result) {
+      return __ CreateSub( ,__ getInt64(object_size - kHeapObjectTag));
+    } else {
+      return __ CreateSub( ,__ getInt64(object_size));
+   }
+  } else if (tag_result) {
+    // Tag the result if requested.
+    DCHECK(kHeapObjectTag == 1);
+    //TODO: size of inc
+    return  __ CreateAdd(result, __ getInt64(8));
+  }
+*/
+
+  if (tag_result) {
+    // Tag the result if requested.
+    DCHECK(kHeapObjectTag == 1);
+    //TODO: size of inc
+    return  __ CreateAdd(result, __ getInt64(8));
+  }
+  return result;
+}
+
+llvm::Value* LLVMChunkBuilder::AllocateHeapNumber(llvm::BasicBlock* gc_required,
+                                                  MutableMode mode){
+  llvm::Value* no_reg = nullptr;
+  llvm::Value* scratch = nullptr;
+  llvm::Value* result = Allocate(HeapNumber::kSize, scratch, no_reg,
+                                 gc_required, TAG_OBJECT);
+  Heap::RootListIndex map_index = mode == MUTABLE
+      ? Heap::kMutableHeapNumberMapRootIndex
+      : Heap::kHeapNumberMapRootIndex;
+  // Set the map.
+  llvm::Value* root = LoadRoot(map_index);
+  llvm::Value* address = FieldOperand(result, HeapObject::kMapOffset);
+  llvm::Value* casted_address = __ CreatePointerCast(address,
+                                                     Types::ptr_tagged);
+  InsertDebugTrap();
+  __ CreateStore(root, casted_address);
+  return __ CreatePtrToInt(casted_address, Types::i64);
 }
 
 void LLVMChunkBuilder::DirtyHack(int arg_count) {
@@ -2731,20 +2900,36 @@ void LLVMChunkBuilder::DoCapturedObject(HCapturedObject* instr) {
 
 void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   // TODO(llvm): this case in Crankshaft utilizes deferred calling.
-
+  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::BasicBlock* deferred = NewBlock("ChangeDoubleToTagged deferred");
+  llvm::BasicBlock* deferred_exit = NewBlock("ChangeDoubleToTagged"
+                                             " deferred exit");
+  llvm::Value* new_heap_number = nullptr;
   DCHECK(Use(val)->getType()->isDoubleTy());
-  if (FLAG_inline_new) UNIMPLEMENTED();
+  int count = 1;
+  if (FLAG_inline_new) {//UNIMPLEMENTED();
+    new_heap_number = AllocateHeapNumber(deferred);
+    __ CreateBr(deferred_exit);
+    count = 2;
+  } else {
+    __ CreateBr(deferred);
+  }
+  __ SetInsertPoint(deferred);
+    llvm::Value* deferred_heap_number = AllocateHeapNumber(); // i8*
+  __ CreateBr(deferred_exit);
 
-  llvm::Value* new_heap_number = AllocateHeapNumber(); // i8*
-  auto store_address = FieldOperand(new_heap_number, HeapNumber::kValueOffset);
-  llvm::Value* casted_adderss = __ CreateBitCast(store_address,
-                                                 Types::ptr_tagged);
+  __ SetInsertPoint(deferred_exit);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, count);
+  if(FLAG_inline_new)
+     phi->addIncoming(new_heap_number, insert);
+  phi->addIncoming(deferred_heap_number, deferred);
+  llvm::Value* store_address = FieldOperand(phi, HeapNumber::kValueOffset);
+  llvm::Value* casted_address = __ CreateBitCast(store_address, Types::ptr_tagged);
   llvm::Value* casted_val = __ CreateBitCast(Use(val), Types::tagged);
   // [(i8*)new_heap_number + offset] = val;
-  __ CreateStore(casted_val, casted_adderss);
+  __ CreateStore(casted_val, casted_address);
 
-  auto new_heap_number_casted = __ CreatePtrToInt(new_heap_number,
-                                                  Types::tagged);
+  auto new_heap_number_casted = __ CreatePtrToInt(phi, Types::tagged);
   instr->set_llvm_value(new_heap_number_casted); // no offset
 
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
@@ -4704,8 +4889,7 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
-  int32_t divisor_val = (HConstant::cast(
-                                          instr->right()))->Integer32Value();
+  int32_t divisor_val = (HConstant::cast(instr->right()))->Integer32Value();
   if (divisor_val == 0) {
     UNIMPLEMENTED();
   }
@@ -4714,6 +4898,21 @@ void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
   auto result = __ CreateSRem(left, right);
   if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
      UNIMPLEMENTED();
+     llvm::Value* mul = __ CreateMul(result, right);
+     llvm::Value* sub = __ CreateSub(left, mul);
+     llvm::BasicBlock* remainder_not_zero = NewBlock("DoModByConstI"
+                                                      " remainder_not_zero");
+     llvm::BasicBlock* remainder_zero = NewBlock("DoModByConstI"
+                                                  " remainder_zero");
+     llvm::Value* zero = __ getInt32(0);
+     llvm::Value* cmp = __ CreateICmpEQ(sub, zero);
+     __ CreateCondBr(cmp, remainder_zero, remainder_not_zero);
+
+     __ SetInsertPoint(remainder_zero);
+     llvm::Value* cmp_divident = __ CreateICmpSLT(left, zero);
+     DeoptimizeIf(cmp_divident);
+
+     __ SetInsertPoint(remainder_not_zero);
   }
   instr->set_llvm_value(result);
 
