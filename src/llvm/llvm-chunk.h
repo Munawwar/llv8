@@ -51,6 +51,10 @@ class IntHelper : public AllStatic {
 // ZoneObject is probably a better approach than the fancy
 // C++11 smart pointers which I have been using all over the place.
 // So TODO(llvm): more zone objects!
+struct DeoptIdMap {
+        int32_t patchpoint_id;
+        int bailout_id;
+};
 class LLVMRelocationData : public ZoneObject {
  public:
   union ExtendedInfo {
@@ -83,6 +87,8 @@ class LLVMRelocationData : public ZoneObject {
   int32_t GetNextRelocPathcpointId();
   int32_t GetNextRelocNopPathcpointId();
   int32_t GetNextDeoptRelocPathcpointId();
+  int GetBailoutId(int32_t patchpoint_id);
+  void SetBailoutId(int32_t patchpoint_id, int bailout_id);
   bool IsPatchpointIdDeopt(int32_t patchpoint_id);
   bool IsPatchpointIdSafepoint(int32_t patchpoint_id);
   bool IsPatchpointIdReloc(int32_t patchpoint_id);
@@ -100,7 +106,7 @@ class LLVMRelocationData : public ZoneObject {
   // Patchpoint ids belong to one of the following:
   GrowableBitVector is_reloc_;
   GrowableBitVector is_reloc_with_nop_;
-  GrowableBitVector is_deopt_;
+  ZoneList<DeoptIdMap> is_deopt_;
   GrowableBitVector is_safepoint_;
   bool is_transferred_;
   Zone* zone_;

@@ -483,12 +483,18 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
   code->set_stack_slots(stacksize_size / kStackSlotSize - kPhonySpillCount);
 
   std::vector<uint32_t> sorted_ids;
+  int max_deopt = 0;
   for (auto i = 0; i < stackmaps.records.size(); i++) {
     auto id = stackmaps.records[i].patchpointID;
-    if (reloc_data_->IsPatchpointIdDeopt(id)) sorted_ids.push_back(id);
+    if (reloc_data_->IsPatchpointIdDeopt(id)) {
+      sorted_ids.push_back(id);
+      int bailout_id = reloc_data_->GetBailoutId(id);
+      if (bailout_id > max_deopt) max_deopt = bailout_id;
+    }
   }
+  CHECK(max_deopt >= 0);
   std::sort(sorted_ids.begin(), sorted_ids.end());
-  auto true_deopt_count = sorted_ids.size();
+  size_t true_deopt_count = max_deopt + 1;
   Handle<DeoptimizationInputData> data =
       DeoptimizationInputData::New(isolate(),
                                    IntHelper::AsInt(true_deopt_count), TENURED);
@@ -503,6 +509,7 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
 
     auto stackmap_id = sorted_ids[deopt_entry_number];
     CHECK(reloc_data_->IsPatchpointIdDeopt(stackmap_id));
+    int bailout_id = reloc_data_->GetBailoutId(stackmap_id);
 
     auto env = deopt_data_->GetEnvironmentByPatchpointId(stackmap_id);
 
@@ -512,12 +519,12 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
     int translation_index = WriteTranslationFor(env, stackmaps);
     // pc offset can be obtained from the stackmap TODO(llvm):
     // but we do not support lazy deopt yet (and for eager it should be -1)
-    env->Register(deopt_entry_number, translation_index, -1);
+    env->Register(bailout_id, translation_index, -1);
 
-    data->SetAstId(deopt_entry_number, env->ast_id());
-    data->SetTranslationIndex(deopt_entry_number,
+    data->SetAstId(bailout_id, env->ast_id());
+    data->SetTranslationIndex(bailout_id,
                               Smi::FromInt(translation_index));
-    data->SetArgumentsStackHeight(deopt_entry_number,
+    data->SetArgumentsStackHeight(bailout_id,
                                   Smi::FromInt(env->arguments_stack_height()));
     data->SetPc(deopt_entry_number, Smi::FromInt(-1));
   }
@@ -672,7 +679,8 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
 
 int32_t LLVMRelocationData::GetNextDeoptPathcpointId() {
   int32_t next_id = ++last_patchpoint_id_;
-  is_deopt_.Add(next_id, zone_);
+  DeoptIdMap map {next_id, -1};
+  is_deopt_.Add(map, zone_);
   return next_id;
 }
 
@@ -689,19 +697,47 @@ int32_t LLVMRelocationData::GetNextRelocPathcpointId() {
 }
 
 int32_t LLVMRelocationData::GetNextRelocNopPathcpointId() {
-int32_t next_id = GetNextRelocPathcpointId();
+  int32_t next_id = GetNextRelocPathcpointId();
   is_reloc_with_nop_.Add(next_id, zone_);
   return next_id;
 }
 
 int32_t LLVMRelocationData::GetNextDeoptRelocPathcpointId() {
   auto next_id = GetNextRelocPathcpointId();
-  is_deopt_.Add(next_id, zone_);
+  DeoptIdMap map {next_id, -1};
+  is_deopt_.Add(map, zone_);
   return next_id;
 }
 
+void LLVMRelocationData::SetBailoutId(int32_t patchpoint_id, int bailout_id) {
+  CHECK(IsPatchpointIdDeopt(patchpoint_id));
+  for (int i = 0; i < is_deopt_.length(); ++i) {
+     if (is_deopt_[i].patchpoint_id == patchpoint_id) {
+       is_deopt_[i].bailout_id = bailout_id;
+       return;
+     }
+  }
+  UNREACHABLE();
+}
+
+int LLVMRelocationData::GetBailoutId(int32_t patchpoint_id) {
+  CHECK(IsPatchpointIdDeopt(patchpoint_id));
+  for (int i = 0; i < is_deopt_.length(); ++i) {
+     if (is_deopt_[i].patchpoint_id == patchpoint_id) {
+       CHECK(is_deopt_[i].bailout_id != -1);
+       return is_deopt_[i].bailout_id;
+     }
+  }
+  UNREACHABLE();
+  return -1;
+}
+
 bool LLVMRelocationData::IsPatchpointIdDeopt(int32_t patchpoint_id) {
-  return is_deopt_.Contains(patchpoint_id);
+  for (int i = 0; i < is_deopt_.length(); ++i) {
+     if (is_deopt_[i].patchpoint_id == patchpoint_id)
+       return true;
+  }
+  return false;
 }
 
 bool LLVMRelocationData::IsPatchpointIdSafepoint(int32_t patchpoint_id) {
@@ -1567,6 +1603,8 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
   LLVMEnvironment* environment = AssignEnvironment();
   auto patchpoint_id = reloc_data_->GetNextDeoptRelocPathcpointId();
   deopt_data_->Add(environment, patchpoint_id);
+  int bailout_id = deopt_data_->DeoptCount() - 1;
+  reloc_data_->SetBailoutId(patchpoint_id, bailout_id);
 
   if (!next_block) next_block = NewBlock("BlockCont");
   llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
@@ -1594,7 +1632,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
     AllowHandleAllocation allow;
     // TODO(llvm): what if we use patchpoint_id here?
     entry = Deoptimizer::GetDeoptimizationEntry(isolate(),
-        deopt_data_->DeoptCount() - 1, bailout_type);
+        bailout_id, bailout_type);
   }
   if (entry == NULL) {
     Abort(kBailoutWasNotPrepared);
