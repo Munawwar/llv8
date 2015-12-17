@@ -1066,50 +1066,23 @@ llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
   auto calling_conv = llvm::CallingConv::C; // We don't really care.
   auto empty = std::vector<llvm::Value*>();
   bool record_safepoint = false;
-  bool returns = false;
-  return CallVal(target_adderss, calling_conv, empty, record_safepoint,
-                 returns);
-}
-
-// TODO(llvm): [refactor]: return type should be parameterized!
-// (We already have CallAddress for tagged, void, float64 return types.)
-llvm::Value* LLVMChunkBuilder::CallAddressForMathPow(Address target,
-                                           llvm::CallingConv::ID calling_conv,
-                                           std::vector<llvm::Value*>& params) {
-  llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
-  bool is_var_arg = false;
-
-  auto return_type = Types::float64;
-  std::vector<llvm::Type*> param_types;
-  param_types.push_back(params[0]->getType());
-  param_types.push_back(params[1]->getType());
-  llvm::FunctionType* function_type = llvm::FunctionType::get(
-      return_type, param_types, is_var_arg);
-  llvm::PointerType* ptr_to_function = function_type->getPointerTo();
-
-  llvm::Value* casted = __ CreateIntToPtr(target_adderss, ptr_to_function);
-  // FIXME(llvm): refactor using CallVal()
-  llvm::CallInst* call_inst = __ CreateCall(casted, params);
-  call_inst->setCallingConv(calling_conv);
-
-  return call_inst;
+  return CallVal(target_adderss, calling_conv, empty, __ getVoidTy(),
+                 record_safepoint);
 }
 
 llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
                                        llvm::CallingConv::ID calling_conv,
                                        std::vector<llvm::Value*>& params,
-                                       bool record_safepoint,
-                                       bool expect_return) {
+                                       llvm::Type* return_type,
+                                       bool record_safepoint) {
   bool is_var_arg = false;
 
-  llvm::Type* return_type = nullptr;
-  if (expect_return)
-    return_type = Types::tagged;
-  else
+  if (!return_type)
     return_type = __ getVoidTy();
 
-  auto param_type = Types::tagged;
-  std::vector<llvm::Type*> param_types(params.size(), param_type);
+  std::vector<llvm::Type*> param_types;
+  for (auto param : params)
+    param_types.push_back(param->getType());
   llvm::FunctionType* function_type = llvm::FunctionType::get(
       return_type, param_types, is_var_arg);
   llvm::PointerType* ptr_to_function = function_type->getPointerTo();
@@ -1166,10 +1139,9 @@ llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
 llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
                                            llvm::CallingConv::ID calling_conv,
                                            std::vector<llvm::Value*>& params,
-                                           llvm::Value* val_addr) {
-  if (!val_addr)
-    val_addr = __ getInt64(reinterpret_cast<uint64_t>(target));
-  return CallVal(val_addr, calling_conv, params);
+                                           llvm::Type* return_type) {
+  auto val_addr = __ getInt64(reinterpret_cast<uint64_t>(target));
+  return CallVal(val_addr, calling_conv, params, return_type);
 }
 
 llvm::Value* LLVMChunkBuilder::CallRuntimeViaId(Runtime::FunctionId id) {
@@ -2672,7 +2644,7 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 
   bool record_safepoint = true;
   auto call = CallVal(target_entry, llvm::CallingConv::X86_64_V8_E, args,
-                      record_safepoint);
+                      Types::tagged, record_safepoint);
   instr->set_llvm_value(call);
 }
 
@@ -3777,7 +3749,8 @@ llvm::Value* LLVMChunkBuilder::CallCFunction(ExternalReference function,
     UNIMPLEMENTED();
   }
   llvm::Value* obj = LoadAddress(function);
-  llvm::Value* call = CallVal(obj, llvm::CallingConv::X86_64_V8_S3, params);
+  llvm::Value* call = CallVal(obj, llvm::CallingConv::X86_64_V8_S3,
+                              params, Types::tagged);
   DCHECK(base::OS::ActivationFrameAlignment() != 0);
   DCHECK(num_arguments >= 0);
   int argument_slots_on_stack = ArgumentStackSlotsForCFunctionCall(num_arguments);
@@ -4214,7 +4187,7 @@ void LLVMChunkBuilder::DoInvokeFunction(HInvokeFunction* instr) {
         pending_pushed_args_.Clear();
         // callingConv 
         llvm::Value* call = CallVal(LoadFieldOperand(Use(instr->function()), JSFunction::kCodeEntryOffset),
-                                    llvm::CallingConv::X86_64_V8_S4, params);
+                                    llvm::CallingConv::X86_64_V8_S4, params, Types::tagged);
         llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
         instr->set_llvm_value(return_val);
       }
@@ -5190,9 +5163,9 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
     std::vector<llvm::Value*> params;
     for (int i = 0; i < instr->OperandCount(); i++)
       params.push_back(Use(instr->OperandAt(i))); 
-    llvm::Value* call = CallAddressForMathPow(code->instruction_start(),
-                                              llvm::CallingConv::X86_64_V8_S2,
-                                              params);
+    llvm::Value* call = CallAddress(code->entry(),
+                                    llvm::CallingConv::X86_64_V8_S2,
+                                    params, Types::float64);
     instr->set_llvm_value(call);
   } else {
     //UNIMPLEMENTED();
@@ -5207,8 +5180,9 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
     std::vector<llvm::Value*> params;
     for (int i = 0; i < instr->OperandCount(); i++)
       params.push_back(Use(instr->OperandAt(i)));
-    llvm::Value* call = CallAddressForMathPow(code->instruction_start(),
-                                    llvm::CallingConv::X86_64_V8_S2, params);
+    llvm::Value* call = CallAddress(code->entry(),
+                                    llvm::CallingConv::X86_64_V8_S2,
+                                    params, Types::float64);
     instr->set_llvm_value(call);
   }
 }
