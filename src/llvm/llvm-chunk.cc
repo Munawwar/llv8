@@ -769,6 +769,15 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   attr_set = attr_set.addAttribute(llvm_context,
                                    llvm::AttributeSet::FunctionIndex,
                                    "no-frame-pointer-elim", "true");
+  // Emit jumptables to .text instead of .rodata so relocation is easy.
+  attr_set = attr_set.addAttribute(llvm_context,
+                                   llvm::AttributeSet::FunctionIndex,
+                                   "put-jumptable-in-fn-section", "true");
+  // Same for constant pools.
+  attr_set = attr_set.addAttribute(llvm_context,
+                                   llvm::AttributeSet::FunctionIndex,
+                                   "put-constantpool-in-fn-section", "true");
+
   function_->setAttributes(attr_set);
   function_->setGC(kGcStrategyName);
   function_->setCallingConv(llvm::CallingConv::X86_64_V8);
@@ -2579,6 +2588,7 @@ llvm::CallingConv::ID LLVMChunkBuilder::GetCallingConv(CallInterfaceDescriptor d
 void LLVMChunkBuilder::DoCallWithDescriptor(HCallWithDescriptor* instr) {
   CallInterfaceDescriptor descriptor = instr->descriptor();
   llvm::CallingConv::ID conv = GetCallingConv(descriptor);
+  // FIXME(llvm): not very good because CallingConv::ID is unsigned.
   if (conv == -1) UNIMPLEMENTED();
 
   //TODO: Do wee need this check here?

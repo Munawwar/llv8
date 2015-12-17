@@ -7,6 +7,7 @@
 
 #if DEBUG
 #define LLV8_HAD_DEBUG
+#undef DEBUG
 #endif
 
 // FIXME(llvm): remove unneeded headers
@@ -24,6 +25,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
+#include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/CodeGen/LinkAllCodegenComponents.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -50,6 +52,7 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CodeGen.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
 

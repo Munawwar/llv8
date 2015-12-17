@@ -131,13 +131,21 @@ class LLVMGranularity final {
 
   void AddModule(std::unique_ptr<llvm::Module> module) {
     if (!engine_) {
+      std::vector<std::string> machine_attributes;
+      SetMachineAttributes(machine_attributes);
+
       std::unique_ptr<MCJITMemoryManager> manager =
           MCJITMemoryManager::Create();
       memory_manager_ref_ = manager.get(); // non-owning!
+
       llvm::ExecutionEngine* raw = llvm::EngineBuilder(std::move(module))
         .setMCJITMemoryManager(std::move(manager))
         .setErrorStr(&err_str_)
         .setEngineKind(llvm::EngineKind::JIT)
+        .setMAttrs(machine_attributes)
+        .setMCPU("x86-64")
+        .setRelocationModel(llvm::Reloc::PIC_) // position independent code
+        .setCodeModel(llvm::CodeModel::Small) // TODO(llvm): Honestly, IDK.
         .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
         .create();
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
@@ -264,6 +272,17 @@ class LLVMGranularity final {
 
   std::string GenerateName() {
     return std::to_string(count_++);
+  }
+
+  void SetMachineAttributes(std::vector<std::string>& machine_attributes) {
+    // TODO(llvm): add desired machine attributes. See llc -mattr=help
+    // FIXME(llvm): for each attribute see, if the corresponding cpu
+    // feature is supported.
+    for (auto attr : {
+      "sse","sse2","sse4.1","sse4.2",
+      "sse4a", "ssse3", "aes", "avx", "avx2" }) {
+      machine_attributes.push_back(attr);
+    }
   }
 
   DISALLOW_COPY_AND_ASSIGN(LLVMGranularity);

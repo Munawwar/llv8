@@ -90,6 +90,10 @@ byte* MCJITMemoryManager::allocateDataSection(uintptr_t size,
   allocated_data_.Add(buffer);
   if (section_name.equals(".llvm_stackmaps"))
     stackmaps_.Add(buffer);
+#ifdef DEBUG
+  std::cerr << reinterpret_cast<void*>(buffer) << std::endl;
+#endif
+
   return buffer;
 }
 

@@ -1143,7 +1143,11 @@
           ['OS=="linux" and disable_glibcxx_debug==0', {
             # Enable libstdc++ debugging facilities to help catch problems
             # early, see http://crbug.com/65151 .
-            'defines': ['_GLIBCXX_DEBUG=1',],
+            # TODO(llvm): we shouldn't mix different _GLIBCXX_DEBUG values
+            # for compiling v8 and llvm. Otherwise we'll exeperience crashes
+            # due to different field offsets of the same field.
+            # So just disabling for now. It should be conditional though.
+            #defines': ['_GLIBCXX_DEBUG=1',],
           }],
           ['OS=="aix"', {
             'ldflags': [ '-Wl,-bbigtoc' ],
