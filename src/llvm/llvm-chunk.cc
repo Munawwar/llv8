@@ -6518,7 +6518,74 @@ void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {
 }
 
 void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* receiver = Use(instr->receiver());
+  llvm::Value* function = Use(instr->function());
+  llvm::BasicBlock* insert_block = __ GetInsertBlock();
+  llvm::BasicBlock* global_object = NewBlock("DoWrapReceiver Global object");
+  llvm::BasicBlock* not_global_object = NewBlock("DoWrapReceiver "
+                                                 "Not global object");
+  llvm::BasicBlock* not_equal = NewBlock("DoWrapReceiver not_equal");
+  llvm::BasicBlock* receiver_ok = NewBlock("DoWrapReceiver Receiver ok block");
+  llvm::BasicBlock* dist = NewBlock("DoWrapReceiver Distance");
+  llvm::BasicBlock* receiver_fail = NewBlock("DoWrapReceiver Receiver"
+                                             " fail block");
+
+  if (!instr->known_function()){
+    llvm::Value* op = LoadFieldOperand(function,
+                                       JSFunction::kSharedFunctionInfoOffset);
+    llvm::Value* bit_with_byte =
+                 __ getInt64(1 << SharedFunctionInfo::kStrictModeBitWithinByte);
+    llvm::Value* byte_offset = LoadFieldOperand(op,
+                                 SharedFunctionInfo::kStrictModeByteOffset);
+    llvm::Value* cmp = __ CreateICmpNE(byte_offset, bit_with_byte);
+    __ CreateCondBr(cmp, receiver_ok, receiver_fail);
+    __ SetInsertPoint(receiver_fail);
+    llvm::Value* native_byte_offset = LoadFieldOperand(op,
+                                 SharedFunctionInfo::kNativeByteOffset);
+    llvm::Value* native_bit_with_byte =
+                 __ getInt64(1 << SharedFunctionInfo::kNativeBitWithinByte);
+    llvm::Value* compare = __ CreateICmpNE(native_byte_offset, native_bit_with_byte);
+    __ CreateCondBr(compare, receiver_ok, dist);
+  }
+  __ SetInsertPoint(dist);
+
+  // Normal function. Replace undefined or null with global receiver.
+  llvm::Value* compare_root = CompareRoot(receiver, Heap::kNullValueRootIndex);
+  __ CreateCondBr(compare_root, global_object, not_global_object);
+  __ SetInsertPoint(not_global_object);
+  llvm::Value* comp_root = CompareRoot(receiver, Heap::kUndefinedValueRootIndex);
+  __ CreateCondBr(comp_root, global_object, not_equal);
+
+  // The receiver should be a JS object
+  __ SetInsertPoint(not_equal);
+  llvm::Value* is_smi = SmiCheck(receiver);
+  DeoptimizeIf(is_smi);
+  llvm::Value* compare_obj = CmpObjectType(receiver, FIRST_SPEC_OBJECT_TYPE, llvm::CmpInst::ICMP_ULT);
+  DeoptimizeIf(compare_obj);
+  __ CreateBr(receiver_ok);
+  __ SetInsertPoint(global_object);
+  llvm::Value* glob_receiver = LoadFieldOperand(function, JSFunction::kContextOffset);
+  glob_receiver = LoadFieldOperand(glob_receiver, Context::SlotOffset(Context::GLOBAL_OBJECT_INDEX));
+  glob_receiver = LoadFieldOperand(glob_receiver, GlobalObject::kGlobalProxyOffset);
+  __ CreateBr(receiver_ok);
+  __ SetInsertPoint(receiver_ok);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  //phi->addIncoming(receiver, receiver_failed);
+  phi->addIncoming(glob_receiver, global_object);
+  //phi->addIncoming(receiver, not_equal);
+  phi->addIncoming(receiver, insert_block);
+  //UNIMPLEMENTED();
+  instr->set_llvm_value(phi);
+}
+
+
+llvm::Value* LLVMChunkBuilder::CmpObjectType(llvm::Value* heap_object,
+                                             InstanceType type,
+                                             llvm::CmpInst::Predicate predicate) {
+  llvm::Value* operand = LoadFieldOperand(heap_object, HeapObject::kMapOffset);
+  llvm::Value* map = LoadFieldOperand(operand, Map::kInstanceTypeOffset);
+  llvm::Value* imm = __ getInt64(static_cast<int>(type));
+  return __ CreateICmp(predicate, map, imm);
 }
 
 void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(

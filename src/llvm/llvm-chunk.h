@@ -718,6 +718,9 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   llvm::Value* LoadRoot(Heap::RootListIndex index);
   llvm::Value* CompareRoot(llvm::Value* val, Heap::RootListIndex index,
                            llvm::CmpInst::Predicate = llvm::CmpInst::ICMP_EQ);
+  llvm::Value* CmpObjectType(llvm::Value* heap_object,
+                             InstanceType type,
+                             llvm::CmpInst::Predicate = llvm::CmpInst::ICMP_EQ);
   llvm::Value* RecordRelocInfo(uint64_t intptr_value, RelocInfo::Mode rmode);
   void RecordWriteForMap(llvm::Value* object, llvm::Value* map);
   void RecordWriteField(llvm::Value* object, llvm::Value* key_reg,
