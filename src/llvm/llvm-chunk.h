@@ -145,7 +145,11 @@ class LLVMGranularity final {
         .setMAttrs(machine_attributes)
         .setMCPU("x86-64")
         .setRelocationModel(llvm::Reloc::PIC_) // position independent code
-        .setCodeModel(llvm::CodeModel::Small) // TODO(llvm): Honestly, IDK.
+        // A good read on code models can be found here:
+        // eli.thegreenplace.net/2012/01/03/understanding-the-x64-code-models
+        // We use a modified Large code model, which uses rip-relative
+        // addressing for jump tables.
+        .setCodeModel(llvm::CodeModel::Large)
         .setOptLevel(llvm::CodeGenOpt::Aggressive) // backend opt level
         .create();
       engine_ = std::unique_ptr<llvm::ExecutionEngine>(raw);
