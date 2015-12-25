@@ -82,6 +82,8 @@ class LLVMRelocationData : public ZoneObject {
     return reloc_map_;
   }
 
+  int32_t GetNextUnaccountedPatchpointId();
+  // TODO(llvm): all of these methods have the same typo.
   int32_t GetNextDeoptPathcpointId();
   int32_t GetNextSafepointPathcpointId();
   int32_t GetNextRelocPathcpointId();
@@ -537,10 +539,12 @@ class LLVMChunk final : public LowChunk {
   static const int kStackSlotSize = kPointerSize;
   static const int kPhonySpillCount = 3; // rbp, rsi, rdi
 
+  static int SpilledCount(const StackMaps& stackmaps);
+
   std::vector<RelocInfo> SetUpRelativeCalls(Address start);
   StackMaps GetStackMaps();
   void SetUpDeoptimizationData(Handle<Code> code, StackMaps& stackmaps);
-  void SetUpSafepointTables(Handle<Code> code, StackMaps& stackmaps);
+  void EmitSafepointTable(Assembler* code_desc, StackMaps& stackmaps);
   Vector<byte> GetFullRelocationInfo(CodeDesc& code_desc);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env, const StackMaps& stackmaps);
@@ -592,7 +596,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
         osr_preserved_values_(4, info->zone()),
         emit_debug_code_(FLAG_debug_code),
         volatile_zero_address_(nullptr),
-        pointers_() {
+        pointers_(),
+        number_of_pointers_(-1) {
     reloc_data_ = new(zone()) LLVMRelocationData(zone());
   }
   ~LLVMChunkBuilder() {}
@@ -608,6 +613,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   // Hydrogen does not impose such a constraint.
   // For that reason our phis are not LLVM-compliant right after phi resolution.
   LLVMChunkBuilder& NormalizePhis();
+  LLVMChunkBuilder& GiveNamesToPointerValues();
   LLVMChunkBuilder& PlaceStatePoints();
   LLVMChunkBuilder& RewriteStatePoints();
   LLVMChunkBuilder& Optimize(); // invoke llvm transformation passes for the function
@@ -629,6 +635,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
 #undef DECLARE_DO
   static const uintptr_t kExtFillingValue = 0xabcdbeef;
   static const char* kGcStrategyName;
+  static const std::string kPointersPrefix;
 
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
@@ -782,6 +789,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   int ArgumentStackSlotsForCFunctionCall(int num_arguments);
   llvm::Value* CallCFunction(ExternalReference function, std::vector<llvm::Value*>, int num_arguments);
   llvm::Value* LoadAddress(ExternalReference);
+  void DumpPointerValues();
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;
@@ -803,6 +811,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   // TODO(llvm): choose more appropriate data structure (maybe in the zone).
   // Or even some fancy lambda to pass to createAppendLivePointersToSafepoints.
   std::set<llvm::Value*> pointers_;
+  int number_of_pointers_;
   enum ScaleFactor {
     times_1 = 0,
     times_2 = 1,

@@ -38,6 +38,7 @@
 #include "llvm/IR/Statepoint.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler.h"
