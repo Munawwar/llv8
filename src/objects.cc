@@ -43,7 +43,7 @@
 #include "src/string-search.h"
 #include "src/string-stream.h"
 #include "src/utils.h"
-
+#include <string>
 #ifdef ENABLE_DISASSEMBLER
 #include "src/disasm.h"
 #include "src/disassembler.h"
@@ -11000,6 +11000,9 @@ void JSFunction::PrintName(FILE* out) {
 bool JSFunction::PassesFilter(const char* raw_filter) {
   if (*raw_filter == '*') return true;
   String* name = shared()->DebugName();
+  base::SmartArrayPointer<char> name_p = name->ToCString();
+  std::string name_c {name_p.get()};
+  std::string filter_c {raw_filter};
   Vector<const char> filter = CStrVector(raw_filter);
   if (filter.length() == 0) return name->length() == 0;
   if (filter[0] == '-') {
@@ -11022,6 +11025,8 @@ bool JSFunction::PassesFilter(const char* raw_filter) {
       name->IsUtf8EqualTo(filter.SubVector(0, filter.length() - 1), true)) {
     return true;
   }
+  std::size_t found = filter_c.find(name_c);
+  if (found != std::string::npos) return true;
   return false;
 }
 
