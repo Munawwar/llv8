@@ -439,7 +439,7 @@ std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
         result.push_back(reloc_info);
         Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
         pc_offset = pc_offset+4;
-        *pc_offset++ = 0x90; //nop
+        *pc_offset++ = Assembler::kNopByte;
       }
       else {
         // TODO(llvm): it's always CODE_TARGET for now.
@@ -2893,8 +2893,7 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
   for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
   pending_pushed_args_.Clear();
-  llvm::Value* call = CallCode(code,
-                                  llvm::CallingConv::X86_64_V8_S3, params);
+  llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S3, params);
   llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
   instr->set_llvm_value(return_val);
 }
@@ -2944,7 +2943,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
         params.push_back(pending_pushed_args_[i]);
       pending_pushed_args_.Clear();
       llvm::Value* call = CallCode(code,
-                                    llvm::CallingConv::X86_64_V8_S3, params);
+                                   llvm::CallingConv::X86_64_V8_S3, params);
       result_packed_elem = __ CreatePtrToInt(call, Types::i64);
       done =  NewBlock("CALL NEW ARRAY END");
       __ CreateBr(done);
@@ -2972,8 +2971,7 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    llvm::Value* call = CallCode(code,
-                                    llvm::CallingConv::X86_64_V8_S3, params);
+    llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S3, params);
     llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
     __ CreateBr(done);
     __ SetInsertPoint(done);
