@@ -518,6 +518,11 @@ void LLVMChunk::EmitSafepointTable(Assembler* assembler,
         Register reg = location.dwarf_reg.reg().IntReg();
         if (!reg.is(rbp)) UNIMPLEMENTED();
         auto index = FpRelativeOffsetToIndex(location.offset);
+        // Safepoint table indices are 0-based from the beginning of the spill
+        // slot area, adjust appropriately.
+        index -= kPhonySpillCount;
+        // Reverse the sequence. (why?)
+        index = SpilledCount(stackmaps) - 1 - index;
         DCHECK(location.size == kPointerSize);
         safepoint.DefinePointerSlot(index, zone());
       } else if (location.kind == StackMaps::Location::kIndirect) {
