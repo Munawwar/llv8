@@ -66,6 +66,12 @@ class HBasicBlock final : public ZoneObject {
   void RecordDeletedPhi(int merge_index) {
     deleted_phis_.Add(merge_index, zone());
   }
+  const ZoneList<HValue*>* defined_consts() const {
+    return &defined_consts_;
+  }
+  void RecordConst(HValue* constant) {
+    defined_consts_.Add(constant, zone());;
+  }
   HBasicBlock* dominator() const { return dominator_; }
   llvm::BasicBlock* llvm_start_basic_block() const {
     return llvm_start_basic_block_;
@@ -226,6 +232,7 @@ class HBasicBlock final : public ZoneObject {
   int first_instruction_index_;
   int last_instruction_index_;
   ZoneList<int> deleted_phis_;
+  ZoneList<HValue*> defined_consts_;
   HBasicBlock* parent_loop_header_;
   // For blocks marked as inline return target: the block with HEnterInlined.
   HBasicBlock* inlined_entry_block_;

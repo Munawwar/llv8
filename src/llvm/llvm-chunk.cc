@@ -966,7 +966,8 @@ void LLVMChunkBuilder::VisitInstruction(HInstruction* current) {
   current_instruction_ = old_current;
 }
 
-llvm::Value* LLVMChunkBuilder::CreateConstant(HConstant* instr) {
+llvm::Value* LLVMChunkBuilder::CreateConstant(HConstant* instr,
+                                              HBasicBlock* block) {
   Representation r = instr->representation();
   if (r.IsSmi()) {
     // TODO(llvm): use/write a function for that
@@ -987,7 +988,27 @@ llvm::Value* LLVMChunkBuilder::CreateConstant(HConstant* instr) {
     AllowHandleAllocation allow_handle_allocation;
     AllowHeapAllocation allow_heap_allocation;
     Handle<Object> object = instr->handle(isolate());
-    return MoveHeapObject(object);
+    auto current_block = __ GetInsertBlock();
+    if (block) {
+      // if constant is alredy defined in block, return that const
+      for (int i = 0; i < block->defined_consts()->length(); ++i) {
+         HValue* constant = block->defined_consts()->at(i);
+         if (constant->id() == instr->id()) {
+           DCHECK(constant->llvm_value());
+           return constant->llvm_value();
+         }
+      }
+      // Record constant in the current block
+      block->RecordConst(instr);
+      auto const_block = block->llvm_start_basic_block();
+      // Define objects constant in the "first llvm_block"
+      // to avoid domination problem
+      __ SetInsertPoint(const_block);
+    }
+    auto result = MoveHeapObject(object);
+    instr->set_llvm_value(result);
+    __ SetInsertPoint(current_block);
+    return result;
   } else {
     UNREACHABLE();
     llvm::Value* fictive_value = nullptr;
@@ -1313,7 +1334,7 @@ llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
       llvm::Value* value = Move(new_cell, RelocInfo::CELL);
       llvm::BasicBlock* current_block = __ GetInsertBlock();
       auto last_instr = current_block-> getTerminator();
-      // if block has terminator we must insert before instruction it
+      // if block has terminator we must insert before it
       if (!last_instr) {
         llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
         return  __ CreateLoad(ptr);
@@ -1918,7 +1939,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
 }
 
 LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
-    HEnvironment* hydrogen_env, int* argument_index_accumulator,
+    HEnvironment* hydrogen_env, int* argument_index_accumulator, 
     ZoneList<HValue*>* objects_to_materialize) {
   if (hydrogen_env == NULL) return NULL;
 
@@ -1962,7 +1983,7 @@ LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
     } else {
       if (value->IsConstant()) {
         HConstant* instr = HConstant::cast(value);
-        op = CreateConstant(instr);
+        op = CreateConstant(instr, current_block_);
       } else {
         op = Use(value);
       }
@@ -2163,7 +2184,7 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
 }
 
 void LLVMChunkBuilder::DoConstant(HConstant* instr) {
-  llvm::Value* const_value = CreateConstant(instr);
+  llvm::Value* const_value = CreateConstant(instr, current_block_);
   instr->set_llvm_value(const_value);
 }
 

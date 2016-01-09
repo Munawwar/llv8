@@ -82,6 +82,7 @@ HBasicBlock::HBasicBlock(HGraph* graph)
       first_instruction_index_(-1),
       last_instruction_index_(-1),
       deleted_phis_(4, graph->zone()),
+      defined_consts_(4,  graph->zone()),
       parent_loop_header_(NULL),
       inlined_entry_block_(NULL),
       llvm_start_basic_block_(nullptr),
