@@ -718,7 +718,6 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                                  llvm::Value* screatch,
                                  AllocationFlags flags);
   bool IsValid(llvm::Value* value);
-  void DirtyHack(int arg_count);
   llvm::CallingConv::ID GetCallingConv(CallInterfaceDescriptor descriptor);
   llvm::Value* CallRuntime(const Runtime::Function*);
   llvm::Value* CallRuntimeViaId(Runtime::FunctionId id);
