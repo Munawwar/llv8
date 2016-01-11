@@ -4372,7 +4372,37 @@ void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
-  UNIMPLEMENTED();
+  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::Value* function = Use(instr->function());
+  llvm::BasicBlock* equal = NewBlock("LoadFunctionPrototype Equal");
+  llvm::BasicBlock* done = NewBlock("LoadFunctionPrototype Done");
+
+  // Get the prototype or initial map from the function.
+  llvm::Value* load_func = LoadFieldOperand(function,
+                           JSFunction::kPrototypeOrInitialMapOffset);
+
+  // Check that the function has a prototype or an initial map.
+  llvm::Value* cmp_root = CompareRoot(load_func, Heap::kTheHoleValueRootIndex);
+  DeoptimizeIf(cmp_root);
+
+  // If the function does not have an initial map, we're done.
+  llvm::Value* result = LoadFieldOperand(load_func, HeapObject::kMapOffset);
+  llvm::Value* map = LoadFieldOperand(result, Map::kInstanceTypeOffset);
+  llvm::Value* map_type = __ getInt64(static_cast<int>(MAP_TYPE));
+  llvm::Value* cmp_type = __ CreateICmpNE(map, map_type);
+  __ CreateCondBr(cmp_type, done, equal);
+
+  __ SetInsertPoint(equal);
+  // Get the prototype from the initial map.
+  llvm::Value* get_prototype = LoadFieldOperand(load_func,
+                                               Map::kPrototypeOffset);
+
+  __ CreateBr(done);
+  __ SetInsertPoint(done);
+  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  phi->addIncoming(load_func, insert);
+  phi->addIncoming(get_prototype, equal);
+  instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
