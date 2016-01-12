@@ -704,20 +704,12 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   // Allocate a heap number in new space with undefined value. Returns
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment
-  llvm::Value* AllocateHeapNumber();
-  llvm::Value* AllocateHeapNumber(llvm::BasicBlock* gc_required,
-                                  MutableMode mode = IMMUTABLE);
-  llvm::Value* Allocate(int object_size,
-                        llvm::Value* result_end,
-                        llvm::Value* screatch,
-                        llvm::BasicBlock* gc_required,
-                        AllocationFlags flags);
-  llvm::Value* LoadAllocationTopHelper(llvm::Value* screatch,
-                                       AllocationFlags flags);
-  void UpdateAllocationTopHelper(llvm::Value* result_end,
-                                 llvm::Value* screatch,
-                                 AllocationFlags flags);
-  bool IsValid(llvm::Value* value);
+  llvm::Value* AllocateHeapNumberSlow();
+  llvm::Value* AllocateHeapNumber(MutableMode mode = IMMUTABLE);
+  llvm::Value* Allocate(int object_size, AllocationFlags flags);
+  llvm::Value* LoadAllocationTopHelper(AllocationFlags flags);
+  void UpdateAllocationTopHelper(llvm::Value* result_end, AllocationFlags flags);
+  void DirtyHack(int arg_count);
   llvm::CallingConv::ID GetCallingConv(CallInterfaceDescriptor descriptor);
   llvm::Value* CallRuntime(const Runtime::Function*);
   llvm::Value* CallRuntimeViaId(Runtime::FunctionId id);
