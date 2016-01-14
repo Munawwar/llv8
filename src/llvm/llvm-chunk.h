@@ -86,8 +86,8 @@ class LLVMRelocationData : public ZoneObject {
   // TODO(llvm): all of these methods have the same typo.
   int32_t GetNextDeoptPathcpointId();
   int32_t GetNextSafepointPathcpointId();
-  int32_t GetNextRelocPathcpointId();
-  int32_t GetNextRelocNopPathcpointId();
+  int32_t GetNextRelocPathcpointId(bool is_safepoint = false);
+  int32_t GetNextRelocNopPathcpointId(bool is_safepoint = false);
   int32_t GetNextDeoptRelocPathcpointId();
   int GetBailoutId(int32_t patchpoint_id);
   void SetBailoutId(int32_t patchpoint_id, int bailout_id);
@@ -105,7 +105,7 @@ class LLVMRelocationData : public ZoneObject {
   RelocMap reloc_map_;
   int32_t last_patchpoint_id_;
   // FIXME(llvm): not totally sure those belong here:
-  // Patchpoint ids belong to one of the following:
+  // Patchpoint ids belong to one (or more) of the following:
   GrowableBitVector is_reloc_;
   GrowableBitVector is_reloc_with_nop_;
   ZoneList<DeoptIdMap> is_deopt_;
@@ -254,6 +254,7 @@ class LLVMGranularity final {
     }
   }
 
+  int CallInstructionSizeAt(Address pc);
   std::vector<RelocInfo> Patch(Address, Address, LLVMRelocationData::RelocMap&);
 
   static const char* x64_target_triple;
@@ -541,11 +542,16 @@ class LLVMChunk final : public LowChunk {
 
   static int SpilledCount(const StackMaps& stackmaps);
 
-  std::vector<RelocInfo> SetUpRelativeCalls(Address start);
+  std::vector<RelocInfo> SetUpRelativeCalls(Address start,
+                                            const StackMaps& stackmaps);
   StackMaps GetStackMaps();
   void SetUpDeoptimizationData(Handle<Code> code, StackMaps& stackmaps);
-  void EmitSafepointTable(Assembler* code_desc, StackMaps& stackmaps);
-  Vector<byte> GetFullRelocationInfo(CodeDesc& code_desc);
+  void EmitSafepointTable(Assembler* code_desc,
+                          StackMaps& stackmaps,
+                          Address instruction_start);
+  Vector<byte> GetFullRelocationInfo(
+      CodeDesc& code_desc,
+      const std::vector<RelocInfo>& reloc_data_from_patchpoints);
   // Returns translation index of the newly generated translation
   int WriteTranslationFor(LLVMEnvironment* env, const StackMaps& stackmaps);
   void WriteTranslation(LLVMEnvironment* environment,
@@ -771,6 +777,11 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                                  std::vector<llvm::Value*>& function_args,
                                  std::vector<llvm::Value*>& live_values,
                                  int covering_nop_size = kMaxCallSequenceLen);
+  llvm::Value* CallStatePoint(int32_t stackmap_id,
+                              llvm::Value* target_function,
+                              llvm::CallingConv::ID calling_conv,
+                              std::vector<llvm::Value*>& function_args,
+                              int covering_nop_size);
   void DoMathAbs(HUnaryMathOperation* instr);
   void DoIntegerMathAbs(HUnaryMathOperation* instr);
   void DoSmiMathAbs(HUnaryMathOperation* instr);
