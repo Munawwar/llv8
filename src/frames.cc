@@ -358,8 +358,6 @@ Code* StackFrame::GetSafepointData(Isolate* isolate,
                                    unsigned* stack_slots) {
   InnerPointerToCodeCache::InnerPointerToCodeCacheEntry* entry =
       isolate->inner_pointer_to_code_cache()->GetCacheEntry(inner_pointer);
-  if (entry->code->is_llvmed())
-     return entry->code;
   if (!entry->safepoint_entry.is_valid()) {
     entry->safepoint_entry = entry->code->GetSafepointEntry(inner_pointer);
     DCHECK(entry->safepoint_entry.is_valid());
@@ -643,8 +641,6 @@ void StandardFrame::IterateCompiledFrame(ObjectVisitor* v) const {
   SafepointEntry safepoint_entry;
   Code* code = StackFrame::GetSafepointData(
       isolate(), pc(), &safepoint_entry, &stack_slots);
-  if (code->is_llvmed())
-     return;
   unsigned slot_space = stack_slots * kPointerSize;
 
   // Visit the outgoing parameters.

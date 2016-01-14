@@ -11633,13 +11633,25 @@ void Code::Relocate(intptr_t delta) {
   Assembler::FlushICache(GetIsolate(), instruction_start(), instruction_size());
 }
 
-
-void Code::CopyFrom(const CodeDesc& desc, const Vector<byte>* reloc_data) {
+// TODO(llvm): refactor out the common part and get rid of default parameters.
+void Code::CopyFrom(const CodeDesc& desc,
+                    const CodeDesc* safepoint_table_desc,
+                    const Vector<byte>* reloc_data,
+                    int nop_size) {
   DCHECK(Marking::Color(this) == Marking::WHITE_OBJECT);
 
   // copy code
   CopyBytes(instruction_start(), desc.buffer,
             static_cast<size_t>(desc.instr_size));
+
+  if (safepoint_table_desc) {
+    // nopes
+//    NOPES!
+    // copy safepoint table
+    CopyBytes(instruction_start() + desc.instr_size + nop_size,
+              safepoint_table_desc->buffer,
+              static_cast<size_t>(safepoint_table_desc->instr_size));
+  }
 
   // copy reloc info
   if (!reloc_data) {

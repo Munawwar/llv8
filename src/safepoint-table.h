@@ -195,6 +195,12 @@ class SafepointTableBuilder BASE_EMBEDDED {
                             int arguments,
                             Safepoint::DeoptMode mode);
 
+  // Define a new safepoint for the given pc.
+  Safepoint DefineSafepoint(unsigned pc,
+                            Safepoint::Kind kind,
+                            int arguments,
+                            Safepoint::DeoptMode mode);
+
   // Record deoptimization index for lazy deoptimization for the last
   // outstanding safepoints.
   void RecordLazyDeoptimizationIndex(int index);
@@ -204,7 +210,7 @@ class SafepointTableBuilder BASE_EMBEDDED {
 
   // Emit the safepoint table after the body. The number of bits per
   // entry must be enough to hold all the pointer indexes.
-  void Emit(Assembler* assembler, int bits_per_entry);
+  void Emit(Assembler* assembler, int bits_per_entry, bool for_llvmed = false);
 
 
  private:

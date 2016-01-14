@@ -35,7 +35,7 @@ bool SafepointEntry::HasRegisterAt(int reg_index) const {
 
 
 SafepointTable::SafepointTable(Code* code) {
-  DCHECK(code->is_crankshafted());
+  DCHECK(code->is_crankshafted() || code->is_llvmed());
   code_ = code;
   Address header = code->instruction_start() + code->safepoint_table_offset();
   length_ = Memory::uint32_at(header + kLengthOffset);
@@ -100,13 +100,13 @@ void Safepoint::DefinePointerRegister(Register reg, Zone* zone) {
 
 
 Safepoint SafepointTableBuilder::DefineSafepoint(
-    Assembler* assembler,
+    unsigned pc,
     Safepoint::Kind kind,
     int arguments,
     Safepoint::DeoptMode deopt_mode) {
   DCHECK(arguments >= 0);
   DeoptimizationInfo info;
-  info.pc = assembler->pc_offset();
+  info.pc = pc;
   info.arguments = arguments;
   info.has_doubles = (kind & Safepoint::kWithDoubles);
   deoptimization_info_.Add(info, zone_);
@@ -123,6 +123,15 @@ Safepoint SafepointTableBuilder::DefineSafepoint(
 }
 
 
+Safepoint SafepointTableBuilder::DefineSafepoint(
+    Assembler* assembler,
+    Safepoint::Kind kind,
+    int arguments,
+    Safepoint::DeoptMode deopt_mode) {
+  return DefineSafepoint(assembler->pc_offset(), kind, arguments, deopt_mode);
+}
+
+
 void SafepointTableBuilder::RecordLazyDeoptimizationIndex(int index) {
   while (last_lazy_safepoint_ < deopt_index_list_.length()) {
     deopt_index_list_[last_lazy_safepoint_++] = index;
@@ -135,10 +144,14 @@ unsigned SafepointTableBuilder::GetCodeOffset() const {
 }
 
 
-void SafepointTableBuilder::Emit(Assembler* assembler, int bits_per_entry) {
-  // Make sure the safepoint table is properly aligned. Pad with nops.
-  assembler->Align(kIntSize);
-  assembler->RecordComment(";;; Safepoint table.");
+void SafepointTableBuilder::Emit(Assembler* assembler,
+                                 int bits_per_entry,
+                                 bool for_llvmed) {
+  if (!for_llvmed) {
+    // Make sure the safepoint table is properly aligned. Pad with nops.
+    assembler->Align(kIntSize);
+    assembler->RecordComment(";;; Safepoint table.");
+  }
   offset_ = assembler->pc_offset();
 
   // Take the register bits into account.

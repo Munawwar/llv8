@@ -5059,7 +5059,10 @@ class Code: public HeapObject {
   void Relocate(intptr_t delta);
 
   // Migrate code described by desc.
-  void CopyFrom(const CodeDesc& desc, const Vector<byte>* reloc_data = nullptr);
+  void CopyFrom(const CodeDesc& desc,
+                const CodeDesc* safepoint_table_desc = nullptr,
+                const Vector<byte>* reloc_data = nullptr,
+                int nop_size = 0);
 
   // Returns the object size for a given body (used for allocation).
   static int SizeFor(int body_size) {

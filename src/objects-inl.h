@@ -5205,7 +5205,7 @@ unsigned Code::safepoint_table_offset() {
 
 void Code::set_safepoint_table_offset(unsigned offset) {
   CHECK(offset <= (1 << kSafepointTableOffsetBitCount));
-  DCHECK(is_crankshafted());
+  DCHECK(is_crankshafted() || is_llvmed());
   DCHECK(IsAligned(offset, static_cast<unsigned>(kIntSize)));
   int previous = READ_UINT32_FIELD(this, kKindSpecificFlags2Offset);
   int updated = SafepointTableOffsetField::update(previous, offset);

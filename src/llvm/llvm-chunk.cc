@@ -2,10 +2,13 @@
 // found in the LICENSE file.
 
 #include <cstdio>
+#include <iomanip>
+
 #include "src/code-factory.h"
 #include "src/disassembler.h"
 #include "src/hydrogen-osr.h"
 #include "src/ic/ic.h"
+#include "src/safepoint-table.h"
 #include "llvm-chunk.h"
 #include "pass-normalize-phis.h"
 #include <llvm/IR/InlineAsm.h>
@@ -18,6 +21,7 @@ namespace internal {
 
 auto LLVMGranularity::x64_target_triple = "x86_64-unknown-linux-gnu";
 const char* LLVMChunkBuilder::kGcStrategyName = "v8-gc";
+const std::string LLVMChunkBuilder::kPointersPrefix = "pointer_";
 llvm::Type* Types::i8 = nullptr;
 llvm::Type* Types::i32 = nullptr;
 llvm::Type* Types::i64 = nullptr;
@@ -33,6 +37,29 @@ llvm::Type* Types::tagged = nullptr;
 llvm::PointerType* Types::ptr_tagged = nullptr;
 
 LLVMChunk::~LLVMChunk() {}
+
+static void DumpSafepoints(Code* code) {
+  SafepointTable table(code);
+  std::cerr << "Safepoints (size = " << table.size() << ")\n";
+  for (unsigned i = 0; i < table.length(); i++) {
+    unsigned pc_offset = table.GetPcOffset(i);
+    std::cerr << static_cast<const void*>(code->instruction_start() + pc_offset) << "  ";
+    std::cerr << std::setw(4) << pc_offset << "  ";
+    table.PrintEntry(i, std::cerr);
+    std::cerr << " (sp -> fp)  ";
+    SafepointEntry entry = table.GetEntry(i);
+    if (entry.deoptimization_index() != Safepoint::kNoDeoptimizationIndex) {
+      std::cerr << std::setw(6) << entry.deoptimization_index();
+    } else {
+      std::cerr << "<none>";
+    }
+    if (entry.argument_count() > 0) {
+      std::cerr << " argc: " << entry.argument_count();
+    }
+    std::cerr << "\n";
+  }
+  std::cerr << "\n";
+}
 
 Handle<Code> LLVMChunk::Codegen() {
   uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
@@ -57,6 +84,7 @@ Handle<Code> LLVMChunk::Codegen() {
   CodeDesc& code_desc =
       LLVMGranularity::getInstance().memory_manager_ref()->LastAllocatedCode();
 
+  // This is of course totally untrue.
   code_desc.origin = &masm_;
 
 #ifdef DEBUG
@@ -64,19 +92,35 @@ Handle<Code> LLVMChunk::Codegen() {
       code_desc.buffer, code_desc.buffer + code_desc.instr_size);
 #endif
 
-  Vector<byte> reloc_bytevector = GetFullRelocationInfo(code_desc);
+  StackMaps stackmaps = GetStackMaps();
+
+  // It is important that this call goes before EmitSafepointTable()
+  // because it patches nop sequences to calls (and EmitSafepointTable
+  // looks for calls in the instruction stream to determine their sizes).
+  std::vector<RelocInfo> reloc_info_from_patchpoints =
+      SetUpRelativeCalls(buf, stackmaps);
+
+  // This assembler owns it's buffer (it contains our SafepointTable).
+  // FIXME(llvm): assembler shouldn't care for kGap for our case...
+  auto initial_buffer_size = Max(code_desc.buffer_size / 6, 32);
+  Assembler assembler(isolate, nullptr, initial_buffer_size);
+  EmitSafepointTable(&assembler, stackmaps, buf);
+  CodeDesc safepoint_table_desc;
+  assembler.GetCode(&safepoint_table_desc);
+
+  Vector<byte> reloc_bytevector = GetFullRelocationInfo(
+      code_desc, reloc_info_from_patchpoints);
 
   // Allocate and install the code.
   if (info()->IsStub()) UNIMPLEMENTED(); // Probably different flags for stubs.
   Code::Flags flags = Code::ComputeFlags(info()->output_code_kind());
-  Handle<Code> code = isolate->factory()->NewLLVMCode(code_desc,
-      &reloc_bytevector, flags);
+  Handle<Code> code = isolate->factory()->NewLLVMCode(
+      code_desc, safepoint_table_desc, &reloc_bytevector, flags);
   isolate->counters()->total_compiled_code_size()->Increment(
       code->instruction_size());
 
-  StackMaps stackmaps = GetStackMaps();
   SetUpDeoptimizationData(code, stackmaps);
-  SetUpSafepointTables(code, stackmaps);
+
   // TODO(llvm): it is not thread-safe. It's not anything-safe.
   // We assume a new function gets attention after the previous one
   // has been fully processed by llv8.
@@ -96,9 +140,12 @@ Handle<Code> LLVMChunk::Codegen() {
     it.rinfo()->Print(isolate, std::cerr);
   }
   std::cerr << "\n";
+
+  DumpSafepoints(*code);
 #endif
   return code;
 }
+
 
 void LLVMChunk::WriteTranslation(LLVMEnvironment* environment,
                                  Translation* translation,
@@ -366,19 +413,10 @@ int32_t LLVMDeoptData::GetPatchpointIdByEnvironment(LLVMEnvironment* env) {
 }
 
 
-std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(Address start) {
+std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(
+    Address start,
+    const StackMaps& stackmaps) {
   std::vector<RelocInfo> result;
-  // --------------------------------------------------------------
-  // TODO(llvm): it's a duplication (see SetUpDeoptimizationData).
-  // Move stackmap parse to, say, Codegen().
-  List<byte*>& stackmap_list =
-      LLVMGranularity::getInstance().memory_manager_ref()->stackmaps();
-  if (stackmap_list.length() == 0) return result;
-  DCHECK(stackmap_list.length() == 1);
-  StackMaps stackmaps;
-  DataView view(stackmap_list[0]);
-  stackmaps.parse(&view);
-  // --------------------------------------------------------------
 
   for (auto i = 0; i < stackmaps.records.size(); i++) {
     auto record = stackmaps.records[i];
@@ -446,15 +484,72 @@ StackMaps LLVMChunk::GetStackMaps() {
   return stackmaps;
 }
 
-void LLVMChunk::SetUpSafepointTables(Handle<Code> code, StackMaps& stackmaps) {
+void LLVMChunk::EmitSafepointTable(Assembler* assembler,
+                                   StackMaps& stackmaps,
+                                   Address instruction_start) {
+  SafepointTableBuilder safepoints_builder(zone());
 
+  // TODO(llvm): safepoints should probably be sorted by position in the code (!)
+  // As of today, the search @ SafepointTable::FindEntry is linear though.
+
+  int safepoint_arguments = 0;
+  // TODO(llvm): There's also kWithRegisters. And with doubles...
+  Safepoint::Kind kind = Safepoint::kSimple;
+  Safepoint::DeoptMode deopt_mode = Safepoint::kLazyDeopt;
+
+  for (auto stackmap_record : stackmaps.records) {
+    auto patchpoint_id = stackmap_record.patchpointID;
+    if (!reloc_data_->IsPatchpointIdSafepoint(patchpoint_id)) continue;
+
+    unsigned pc_offset = stackmap_record.instructionOffset;
+    int call_instr_size = LLVMGranularity::getInstance().CallInstructionSizeAt(
+        instruction_start + pc_offset);
+    DCHECK_GT(call_instr_size, 0);
+    pc_offset += call_instr_size;
+    Safepoint safepoint = safepoints_builder.DefineSafepoint(
+        pc_offset, kind, safepoint_arguments, deopt_mode);
+
+    // First three locations are constants describing the calling convention,
+    // flags passed to the statepoint intrinsic and the number of following
+    // deopt Locations.
+    CHECK(stackmap_record.locations.size() >= 3);
+
+    for (auto i = 3; i < stackmap_record.locations.size(); i++) {
+      auto location = stackmap_record.locations[i];
+      // FIXME(llvm): LLVM bug (should be Indirect). See discussion here:
+      // http://lists.llvm.org/pipermail/llvm-dev/2015-November/092394.html
+      if (location.kind == StackMaps::Location::kDirect) {
+        Register reg = location.dwarf_reg.reg().IntReg();
+        if (!reg.is(rbp)) UNIMPLEMENTED();
+        auto index = FpRelativeOffsetToIndex(location.offset);
+        // Safepoint table indices are 0-based from the beginning of the spill
+        // slot area, adjust appropriately.
+        index -= kPhonySpillCount;
+        // Reverse the sequence.
+        index = SpilledCount(stackmaps) - 1 - index;
+        DCHECK(location.size == kPointerSize);
+        safepoint.DefinePointerSlot(index, zone());
+      } else if (location.kind == StackMaps::Location::kIndirect) {
+        UNIMPLEMENTED();
+      } else if (location.kind == StackMaps::Location::kConstantIndex) {
+        // FIXME(llvm): why do we have these kinds of locations?
+      } else {
+        UNIMPLEMENTED();
+      }
+    }
+  }
+
+  bool llvmed = true;
+  safepoints_builder.Emit(assembler, SpilledCount(stackmaps), llvmed);
 }
 
-Vector<byte> LLVMChunk::GetFullRelocationInfo(CodeDesc& code_desc) {
+Vector<byte> LLVMChunk::GetFullRelocationInfo(
+    CodeDesc& code_desc,
+    const std::vector<RelocInfo>& reloc_data_from_patchpoints) {
   // Relocation info comes from 2 sources:
   // 1) reloc info already present in reloc_data_;
   // 2) patchpoints (CODE_TARGET reloc info has to be extracted from them).
-  std::vector<RelocInfo> reloc_data_2 = SetUpRelativeCalls(code_desc.buffer);
+  const std::vector<RelocInfo>& reloc_data_2 = reloc_data_from_patchpoints;
   std::vector<RelocInfo> reloc_data_1 = LLVMGranularity::getInstance().Patch(
       code_desc.buffer, code_desc.buffer + code_desc.instr_size,
       reloc_data_->reloc_map());
@@ -475,12 +570,17 @@ Vector<byte> LLVMChunk::GetFullRelocationInfo(CodeDesc& code_desc) {
   return reloc_bytevector;
 }
 
+int LLVMChunk::SpilledCount(const StackMaps& stackmaps) {
+  // One function at a time. And each function must have a stackmap.
+  CHECK(stackmaps.stack_sizes.size() == 1);
+  int stack_size = IntHelper::AsInt(stackmaps.stack_sizes[0].size);
+  DCHECK(stack_size / kStackSlotSize - kPhonySpillCount >= 0);
+  return stack_size / kStackSlotSize - kPhonySpillCount;
+}
+
 void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
                                         StackMaps& stackmaps) {
-  if (stackmaps.stack_sizes.size() < 1) return;
-  int stacksize_size = IntHelper::AsInt(stackmaps.stack_sizes[0].size);
-  DCHECK(stacksize_size / kStackSlotSize - kPhonySpillCount >= 0);
-  code->set_stack_slots(stacksize_size / kStackSlotSize - kPhonySpillCount);
+  code->set_stack_slots(SpilledCount(stackmaps));
 
   std::vector<uint32_t> sorted_ids;
   int max_deopt = 0;
@@ -566,6 +666,50 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
   data->SetOsrPcOffset(Smi::FromInt(6));
 
   code->set_deoptimization_data(*data);
+}
+
+// TODO(llvm): refactor. DRY + move disass features to a separate file.
+// Also, we shall not need an instance of LLVMGranularity for such things.
+// Returns size of the instruction starting at pc or -1 if an error occurs.
+int LLVMGranularity::CallInstructionSizeAt(Address pc) {
+  auto triple = x64_target_triple;
+  std::string err;
+  const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple,
+                                                                  err);
+  DCHECK(target);
+  std::unique_ptr<llvm::MCRegisterInfo> mri(target->createMCRegInfo(triple));
+  DCHECK(mri);
+  std::unique_ptr<llvm::MCAsmInfo> mai(target->createMCAsmInfo(*mri, triple));
+  DCHECK(mai);
+  std::unique_ptr<llvm::MCInstrInfo> mii(target->createMCInstrInfo());
+  DCHECK(mii);
+  std::string feature_str;
+  const llvm::StringRef cpu = "";
+  std::unique_ptr<llvm::MCSubtargetInfo> sti(
+      target->createMCSubtargetInfo(triple, cpu, feature_str));
+  DCHECK(sti);
+  llvm::MCContext mc_context(mai.get(), mri.get(), nullptr);
+  std::unique_ptr<llvm::MCDisassembler> disasm(
+      target->createMCDisassembler(*sti, mc_context));
+  DCHECK(disasm);
+
+  llvm::MCInst inst;
+  uint64_t size;
+  auto max_instruction_lenght = 15; // True for x64.
+
+  llvm::MCDisassembler::DecodeStatus s = disasm->getInstruction(
+      inst /* out */, size /* out */,
+      llvm::ArrayRef<uint8_t>(pc, pc + max_instruction_lenght),
+      0, llvm::nulls(), llvm::nulls());
+
+  std::unique_ptr<const llvm::MCInstrAnalysis> mia(
+      target->createMCInstrAnalysis(mii.get()));
+  DCHECK(mia);
+
+  if (s == llvm::MCDisassembler::Success && mia->isCall(inst))
+    return IntHelper::AsInt(size);
+  else
+    return -1;
 }
 
 std::vector<RelocInfo> LLVMGranularity::Patch(
@@ -669,12 +813,17 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   LLVMChunk* chunk = builder
       .Build()
       .NormalizePhis()
+      .GiveNamesToPointerValues()
       .PlaceStatePoints()
       .RewriteStatePoints()
-      .Optimize()
+//      .Optimize()
       .Create();
   if (chunk == NULL) return NULL;
   return chunk;
+}
+
+int32_t LLVMRelocationData::GetNextUnaccountedPatchpointId() {
+  return ++last_patchpoint_id_;
 }
 
 int32_t LLVMRelocationData::GetNextDeoptPathcpointId() {
@@ -690,14 +839,16 @@ int32_t LLVMRelocationData::GetNextSafepointPathcpointId() {
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextRelocPathcpointId() {
+int32_t LLVMRelocationData::GetNextRelocPathcpointId(bool is_safepoint) {
   int32_t next_id = ++last_patchpoint_id_;
   is_reloc_.Add(next_id, zone_);
+  if (is_safepoint)
+    is_safepoint_.Add(next_id, zone_);
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextRelocNopPathcpointId() {
-  int32_t next_id = GetNextRelocPathcpointId();
+int32_t LLVMRelocationData::GetNextRelocNopPathcpointId(bool is_safepoint) {
+  int32_t next_id = GetNextRelocPathcpointId(is_safepoint);
   is_reloc_with_nop_.Add(next_id, zone_);
   return next_id;
 }
@@ -784,7 +935,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   //  }
   //}
 
-  // TODO(llvm): decide whether do have llvm insert safepoint polls.
+  // TODO(llvm): decide whether to have llvm insert safepoint polls.
   //  CreateSafepointPollFunction();
 
   // First param is context (v8, js context) which goes to rsi,
@@ -973,6 +1124,7 @@ llvm::Value* LLVMChunkBuilder::CreateConstant(HConstant* instr,
     // TODO(llvm): use/write a function for that
     // FIXME(llvm): this block was not tested
     int64_t int32_value = instr->Integer32Value();
+    // FIXME(llvm): getInt64 takes uint64_t! And we want to pass signed int64.
     return __ getInt64(int32_value << (kSmiShift));
   } else if (r.IsInteger32()) {
     return __ getInt32(instr->Integer32Value());
@@ -1163,25 +1315,31 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
 llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
                                         llvm::CallingConv::ID calling_conv,
                                         std::vector<llvm::Value*>& params) {
+  bool record_safepoint = true;
   auto index = chunk()->masm().GetCodeTargetIndex(code);
   int nop_size;
   int32_t pp_id;
   if (code->kind() == Code::BINARY_OP_IC ||
       code->kind() == Code::COMPARE_IC) {
-    pp_id = reloc_data_->GetNextRelocNopPathcpointId();
+    pp_id = reloc_data_->GetNextRelocNopPathcpointId(record_safepoint);
     nop_size = 6; // call relative i32 takes 5 bytes: `e8` + i32 + nop
   } else {
+    pp_id = reloc_data_->GetNextRelocPathcpointId(record_safepoint);
     nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
-    pp_id = reloc_data_->GetNextRelocPathcpointId();
   }
 
+  // If we didn't have to also have a safe point at the call site,
+  // simple call to the patchpoint intrinsic would suffice. However
+  // LLVM does not support statepoints upon patchpoints (or any other intrinsics
+  // for that matter). Luckily, patchpoint's functionality is a subset of that
+  // of the statepoint intrinsic.
   auto llvm_null = llvm::ConstantPointerNull::get(Types::ptr_i8);
-  std::vector<llvm::Value*> empty_live_values;
-  auto call_inst = CallPatchPoint(pp_id, llvm_null, params, empty_live_values,
-                                  nop_size);
-  call_inst->setCallingConv(calling_conv);
+  auto result = CallStatePoint(pp_id, llvm_null, calling_conv, params, nop_size);
+
   // Map pp_id -> index in code_targets_.
   chunk()->target_index_for_ppid()[pp_id] = index;
+
+
   if (code->kind() == Code::BINARY_OP_IC ||
       code->kind() == Code::COMPARE_IC) {
     // This will be optimized out anyway
@@ -1190,7 +1348,7 @@ llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
     __ CreateCall(intrinsic);
   }
 
-  return call_inst;
+  return result;
 }
 
 llvm::Value* LLVMChunkBuilder::CallAddress(Address target,
@@ -1702,9 +1860,41 @@ class PassInfoPrinter {
 const char* PassInfoPrinter::filler = "====================";
 bool PassInfoPrinter::only_after = false;
 
+// PlaceStatePoints and RewriteStatePoints may move things around a bit
+// (by deleting and adding instructions) so we can't refer to anything
+// by llvm::Value*.
+// This function gives names (which are preserved) to the values we want
+// to track.
+// Warning: same method may not work for all transformation passes,
+// because names might not be preserved.
+LLVMChunkBuilder& LLVMChunkBuilder::GiveNamesToPointerValues() {
+  PassInfoPrinter printer("GiveNamesToPointerValues", module_.get());
+  DCHECK_EQ(number_of_pointers_, -1);
+  number_of_pointers_ = 0;
+  for (auto value : pointers_) {
+      value->setName(kPointersPrefix + std::to_string(number_of_pointers_++));
+  }
+  // Now we have names. llvm::Value*s will soon become invalid.
+  pointers_.clear();
+  return *this;
+}
+
+void LLVMChunkBuilder::DumpPointerValues() {
+  DCHECK_GE(number_of_pointers_, 0);
+#ifdef DEBUG
+  std::cerr << "< POINTERS:" << "\n";
+  for (auto i = 0 ; i < number_of_pointers_; i++) {
+    std::string name = kPointersPrefix + std::to_string(i);
+    auto value = function_->getValueSymbolTable().lookup(name);
+    if (value)
+      llvm::errs() << value->getName() << " | " << *value << "\n";
+  }
+  std::cerr << "POINTERS >" << "\n";
+#endif
+}
+
 LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
   PassInfoPrinter printer("normalization", module_.get());
-
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   if (FLAG_phi_normalize) pass_manager.add(createNormalizePhisPass());
   pass_manager.doInitialization();
@@ -1714,7 +1904,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::NormalizePhis() {
 
 LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
   PassInfoPrinter printer("PlaceStatePoints", module_.get());
-
+  DumpPointerValues();
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
   pass_manager.add(llvm::createPlaceSafepointsPass());
   pass_manager.doInitialization();
@@ -1725,9 +1915,18 @@ LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
 
 LLVMChunkBuilder& LLVMChunkBuilder::RewriteStatePoints() {
   PassInfoPrinter printer("AppendLivePointersToSafepoints", module_.get());
+  DumpPointerValues();
+
+  std::set<llvm::Value*> pointer_values;
+  for (auto i = 0 ; i < number_of_pointers_; i++) {
+    std::string name = kPointersPrefix + std::to_string(i);
+    auto value = function_->getValueSymbolTable().lookup(name);
+    if (value)
+      pointer_values.insert(value);
+  }
 
   llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  pass_manager.add(createAppendLivePointersToSafepointsPass(pointers_));
+  pass_manager.add(createAppendLivePointersToSafepointsPass(pointer_values));
   pass_manager.doInitialization();
   pass_manager.run(*function_);
   pass_manager.doFinalization();
@@ -1774,6 +1973,12 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
+    // Ensure every function has an associated Stack Map section.
+    // Note: LLVM lang ref says
+    // "allocating zero bytes is legal, but the result is undefined".
+    auto phony_alloca = __ CreateAlloca(__ getInt64Ty(), 0, "phony_alloca");
+    CallStackMap(reloc_data_->GetNextUnaccountedPatchpointId(), phony_alloca);
+
     //If function contains OSR entry, it's first instruction must be osr_branch
     if (graph_->has_osr()) { 
       osr_preserved_values_.Clear();
@@ -2013,11 +2218,6 @@ void LLVMChunkBuilder::DoStackCheck(HStackCheck* instr) {
 //  Assert(above_equal);
 }
 
-// TODO(llvm): this version of stackmap call is most often
-// used only for program counter (pc) and should be replaced in the
-// future by less optimization-constraining intrinsic
-// (which should be added to LLVM).
-// UPD: totally unused
 void LLVMChunkBuilder::CallStackMap(int stackmap_id, llvm::Value* value) {
   auto vector = std::vector<llvm::Value*>(1, value);
   CallStackMap(stackmap_id, vector);
@@ -2058,13 +2258,60 @@ llvm::CallInst* LLVMChunkBuilder::CallPatchPoint(
   patchpoint_args.insert(patchpoint_args.end(),
                          live_values.begin(), live_values.end());
 
-  auto call = __ CreateCall(patchpoint, patchpoint_args);
+  return __ CreateCall(patchpoint, patchpoint_args);
+}
 
-  // FIXME(llvm): [safepoints] temp. We need a safepoint there.
-  // (Maybe not always).
-  call->addAttribute(llvm::AttributeSet::FunctionIndex,
-                     "no-statepoint-please", "true");
-  return call;
+
+// Returns the value of gc.result (call instruction would be irrelevant).
+llvm::Value* LLVMChunkBuilder::CallStatePoint(
+    int32_t stackmap_id,
+    llvm::Value* target_function,
+    llvm::CallingConv::ID calling_conv,
+    std::vector<llvm::Value*>& function_args,
+    int covering_nop_size) {
+
+  auto return_type = Types::tagged;
+
+  // The statepoint intrinsic is overloaded by the function pointer type.
+  std::vector<llvm::Type*> params;
+  for (int i = 0; i < function_args.size(); i++)
+    params.push_back(function_args[i]->getType());
+  llvm::FunctionType* function_type = llvm::FunctionType::get(
+      return_type, params, false);
+  auto function_type_ptr = function_type->getPointerTo();
+  llvm::Type* statepoint_arg_types[] =
+    { llvm::cast<llvm::PointerType>(function_type_ptr) };
+
+  auto casted_target = __ CreateBitOrPointerCast(target_function,
+                                                 function_type_ptr);
+
+  llvm::Function* statepoint = llvm::Intrinsic::getDeclaration(
+      module_.get(), llvm::Intrinsic::experimental_gc_statepoint,
+      statepoint_arg_types);
+
+  auto llvm_patchpoint_id = __ getInt64(stackmap_id);
+  auto nop_size = __ getInt32(covering_nop_size);
+  auto num_args = __ getInt32(IntHelper::AsUInt32(function_args.size()));
+  auto flags = __ getInt32(0);
+  auto num_transition_args = __ getInt32(0);
+  auto num_deopt_args = __ getInt32(0);
+
+  std::vector<llvm::Value*>  statepoint_args =
+    { llvm_patchpoint_id, nop_size, casted_target, num_args, flags };
+
+  statepoint_args.insert(statepoint_args.end(),
+                         function_args.begin(), function_args.end());
+
+  statepoint_args.insert(statepoint_args.end(),
+                         { num_transition_args, num_deopt_args });
+
+  auto token = __ CreateCall(statepoint, statepoint_args);
+  token->setCallingConv(calling_conv);
+
+  llvm::Function* gc_result = llvm::Intrinsic::getDeclaration(
+      module_.get(), llvm::Intrinsic::experimental_gc_result, { return_type });
+
+  return __ CreateCall(gc_result, { token });
 }
 
 llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,

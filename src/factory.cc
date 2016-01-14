@@ -1380,6 +1380,7 @@ Handle<Code> Factory::NewCodeRaw(int object_size, bool immovable) {
 }
 
 Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
+                                  const CodeDesc& safepoint_table_desc,
                                   const Vector<byte>* reloc_data,
                                   Code::Flags flags,
                                   bool immovable,
@@ -1387,11 +1388,13 @@ Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
                                   bool is_debug) {
   DCHECK(desc.reloc_size == 0);
   Handle<ByteArray> reloc_info = NewByteArray(reloc_data->length(), TENURED);
-//  Handle<ConstantPoolArray> constant_pool =
-//      desc.origin->NewConstantPool(isolate());
 
+  auto align = kIntSize;
+  int delta = (align - (desc.instr_size  & (align - 1))) & (align - 1);
+  auto total_instruction_size = desc.instr_size +
+      safepoint_table_desc.instr_size + delta;
   // Compute size.
-  int body_size = RoundUp(desc.instr_size, kObjectAlignment);
+  int body_size = RoundUp(total_instruction_size, kObjectAlignment);
   int obj_size = Code::SizeFor(body_size);
 
   Handle<Code> code = NewCodeRaw(obj_size, immovable);
@@ -1404,7 +1407,7 @@ Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
   DisallowHeapAllocation no_gc;
   code->set_gc_metadata(Smi::FromInt(0));
   code->set_ic_age(isolate()->heap()->global_ic_age());
-  code->set_instruction_size(desc.instr_size);
+  code->set_instruction_size(total_instruction_size);
   code->set_relocation_info(*reloc_info);
   code->set_flags(flags);
   code->set_raw_kind_specific_flags1(0);
@@ -1418,6 +1421,7 @@ Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
   // FIXME(llvm): bad bad not good
   code->set_is_crankshafted(false);
   code->set_is_crankshafted(true);
+  code->set_safepoint_table_offset(desc.instr_size + delta);
   if (code->kind() == Code::OPTIMIZED_FUNCTION) {
     code->set_marked_for_deoptimization(false);
   }
@@ -1439,7 +1443,8 @@ Handle<Code> Factory::NewLLVMCode(const CodeDesc& desc,
   // that are dereferenced during the copy to point directly to the actual heap
   // objects. These pointers can include references to the code object itself,
   // through the self_reference parameter.
-  code->CopyFrom(desc, reloc_data); // FIXME(llvm): it dereferences desc.origin
+  // FIXME(llvm): it dereferences desc.origin
+  code->CopyFrom(desc, &safepoint_table_desc, reloc_data, delta);
 
 #ifdef VERIFY_HEAP
   if (FLAG_verify_heap) code->ObjectVerify();
