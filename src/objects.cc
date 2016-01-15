@@ -11645,8 +11645,10 @@ void Code::CopyFrom(const CodeDesc& desc,
             static_cast<size_t>(desc.instr_size));
 
   if (safepoint_table_desc) {
-    // nopes
-//    NOPES!
+#ifdef DEBUG
+    // Ensure control doesn't reach this memory (it is here only for alignment).
+    memset(instruction_start() + desc.instr_size, 0xCC, nop_size);  // int3
+#endif
     // copy safepoint table
     CopyBytes(instruction_start() + desc.instr_size + nop_size,
               safepoint_table_desc->buffer,
