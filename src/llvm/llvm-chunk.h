@@ -84,11 +84,11 @@ class LLVMRelocationData : public ZoneObject {
 
   int32_t GetNextUnaccountedPatchpointId();
   // TODO(llvm): all of these methods have the same typo.
-  int32_t GetNextDeoptPathcpointId();
-  int32_t GetNextSafepointPathcpointId();
-  int32_t GetNextRelocPathcpointId(bool is_safepoint = false);
-  int32_t GetNextRelocNopPathcpointId(bool is_safepoint = false);
-  int32_t GetNextDeoptRelocPathcpointId();
+  int32_t GetNextDeoptPatchpointId();
+  int32_t GetNextSafepointPatchpointId();
+  int32_t GetNextRelocPatchpointId(bool is_safepoint = false);
+  int32_t GetNextRelocNopPatchpointId(bool is_safepoint = false);
+  int32_t GetNextDeoptRelocPatchpointId();
   int GetBailoutId(int32_t patchpoint_id);
   void SetBailoutId(int32_t patchpoint_id, int bailout_id);
   bool IsPatchpointIdDeopt(int32_t patchpoint_id);

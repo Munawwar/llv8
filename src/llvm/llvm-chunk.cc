@@ -826,20 +826,20 @@ int32_t LLVMRelocationData::GetNextUnaccountedPatchpointId() {
   return ++last_patchpoint_id_;
 }
 
-int32_t LLVMRelocationData::GetNextDeoptPathcpointId() {
+int32_t LLVMRelocationData::GetNextDeoptPatchpointId() {
   int32_t next_id = ++last_patchpoint_id_;
   DeoptIdMap map {next_id, -1};
   is_deopt_.Add(map, zone_);
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextSafepointPathcpointId() {
+int32_t LLVMRelocationData::GetNextSafepointPatchpointId() {
   int32_t next_id = ++last_patchpoint_id_;
   is_safepoint_.Add(next_id, zone_);
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextRelocPathcpointId(bool is_safepoint) {
+int32_t LLVMRelocationData::GetNextRelocPatchpointId(bool is_safepoint) {
   int32_t next_id = ++last_patchpoint_id_;
   is_reloc_.Add(next_id, zone_);
   if (is_safepoint)
@@ -847,14 +847,14 @@ int32_t LLVMRelocationData::GetNextRelocPathcpointId(bool is_safepoint) {
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextRelocNopPathcpointId(bool is_safepoint) {
-  int32_t next_id = GetNextRelocPathcpointId(is_safepoint);
+int32_t LLVMRelocationData::GetNextRelocNopPatchpointId(bool is_safepoint) {
+  int32_t next_id = GetNextRelocPatchpointId(is_safepoint);
   is_reloc_with_nop_.Add(next_id, zone_);
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextDeoptRelocPathcpointId() {
-  auto next_id = GetNextRelocPathcpointId();
+int32_t LLVMRelocationData::GetNextDeoptRelocPatchpointId() {
+  auto next_id = GetNextRelocPatchpointId();
   DeoptIdMap map {next_id, -1};
   is_deopt_.Add(map, zone_);
   return next_id;
@@ -1301,7 +1301,7 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
   call_inst->setCallingConv(calling_conv);
 
   if (record_safepoint) {
-    int32_t stackmap_id = reloc_data_->GetNextSafepointPathcpointId();
+    int32_t stackmap_id = reloc_data_->GetNextSafepointPatchpointId();
     call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
                             "statepoint-id", std::to_string(stackmap_id));
   } else {
@@ -1321,10 +1321,10 @@ llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
   int32_t pp_id;
   if (code->kind() == Code::BINARY_OP_IC ||
       code->kind() == Code::COMPARE_IC) {
-    pp_id = reloc_data_->GetNextRelocNopPathcpointId(record_safepoint);
+    pp_id = reloc_data_->GetNextRelocNopPatchpointId(record_safepoint);
     nop_size = 6; // call relative i32 takes 5 bytes: `e8` + i32 + nop
   } else {
-    pp_id = reloc_data_->GetNextRelocPathcpointId(record_safepoint);
+    pp_id = reloc_data_->GetNextRelocPatchpointId(record_safepoint);
     nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
   }
 
@@ -1702,7 +1702,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
                                     bool negate,
                                     llvm::BasicBlock* next_block) {
   LLVMEnvironment* environment = AssignEnvironment();
-  auto patchpoint_id = reloc_data_->GetNextDeoptRelocPathcpointId();
+  auto patchpoint_id = reloc_data_->GetNextDeoptRelocPatchpointId();
   deopt_data_->Add(environment, patchpoint_id);
   int bailout_id = deopt_data_->DeoptCount() - 1;
   reloc_data_->SetBailoutId(patchpoint_id, bailout_id);
