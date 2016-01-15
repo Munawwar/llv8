@@ -5392,7 +5392,33 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
   if (exponent_type.IsSmi()) {
     UNIMPLEMENTED();
   } else if (exponent_type.IsTagged()) {
-    UNIMPLEMENTED();
+    llvm::Value* tagged_exponent = Use(instr->right());
+    llvm::Value* is_smi = SmiCheck(tagged_exponent, false);
+    llvm::BasicBlock* deopt = NewBlock("DoPower CheckObjType");
+    llvm::BasicBlock* no_deopt = NewBlock("DoPower No Deoptimize");
+    __ CreateCondBr(is_smi, no_deopt, deopt);
+    __ SetInsertPoint(deopt);
+    llvm::Value* cmp = CmpObjectType(tagged_exponent,
+                                     HEAP_NUMBER_TYPE, llvm::CmpInst::ICMP_NE);
+    DeoptimizeIf(cmp, false, no_deopt);
+
+    __ SetInsertPoint(no_deopt);
+    MathPowStub stub(isolate(), MathPowStub::TAGGED);
+    Handle<Code> code = Handle<Code>::null();
+    {
+      AllowHandleAllocation allow_handles;
+      AllowHeapAllocation allow_heap;
+      code = stub.GetCode();
+      // FIXME(llvm,gc): respect reloc info mode...
+    }
+    std::vector<llvm::Value*> params;
+    for (int i = 0; i < instr->OperandCount(); i++)
+      params.push_back(Use(instr->OperandAt(i)));
+    llvm::Value* call = CallAddress(code->entry(),
+                                    llvm::CallingConv::X86_64_V8_S2,
+                                    params, Types::float64);
+    instr->set_llvm_value(call);
+  
   } else if (exponent_type.IsInteger32()) {
     MathPowStub stub(isolate(), MathPowStub::INTEGER);
     Handle<Code> code = Handle<Code>::null();
