@@ -1973,11 +1973,6 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
-    // Ensure every function has an associated Stack Map section.
-    // Note: LLVM lang ref says
-    // "allocating zero bytes is legal, but the result is undefined".
-    auto phony_alloca = __ CreateAlloca(__ getInt64Ty(), 0, "phony_alloca");
-    CallStackMap(reloc_data_->GetNextUnaccountedPatchpointId(), phony_alloca);
 
     //If function contains OSR entry, it's first instruction must be osr_branch
     if (graph_->has_osr()) { 
@@ -1988,6 +1983,12 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
          auto alloc = __ CreateAlloca(Types::i64);
          osr_preserved_values_.Add(alloc, info()->zone());
       }
+      // Ensure every function has an associated Stack Map section.
+      // Note: LLVM lang ref says
+      // "allocating zero bytes is legal, but the result is undefined".
+      auto phony_alloca = __ CreateAlloca(__ getInt64Ty(), 0, "phony_alloca");
+      CallStackMap(reloc_data_->GetNextUnaccountedPatchpointId(), phony_alloca);
+
       HBasicBlock* osr_block = graph_->osr()->osr_entry();
       llvm::BasicBlock* not_osr_target = NewBlock("NO_OSR_CONTINUE");
       llvm::BasicBlock* osr_target = Use(osr_block);
@@ -6775,7 +6776,14 @@ void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
       llvm::Value* result = __ CreateLoad(osr_preserved_values_[spill_index], is_volatile);
       instr->set_llvm_value(result);
     } else {
-      //TODO: Handle this case  
+      //TODO: Check this case
+      DCHECK(spill_index == -1);
+      spill_index = 1;
+      llvm::Function::arg_iterator it = function_->arg_begin();
+      int i = 0;
+      while (++i < 3 + spill_index) ++it;
+      llvm::Value* result = it;
+      instr->set_llvm_value(result);
     }
     
   }
