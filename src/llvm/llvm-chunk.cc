@@ -4462,7 +4462,7 @@ void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
 void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
   llvm::Value* context = Use(instr->value());
   llvm::BasicBlock* insert = __ GetInsertBlock(); 
-  auto offset = instr->slot_index();
+  auto offset = Context::SlotOffset(instr->slot_index());
   llvm::Value* result_addr = ConstructAddress(context, offset);
   llvm::Value* result_casted = __ CreateBitCast(result_addr, Types::ptr_i64);
   llvm::Value* result = __ CreateLoad(result_casted);
@@ -5578,7 +5578,7 @@ void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
   //TODO: not tested
   llvm::Value* context = Use(instr->context());
   llvm::Value* value = Use(instr->value());
-  int offset = instr->slot_index(); 
+  int offset = Context::SlotOffset(instr->slot_index()); 
 
   if (instr->RequiresHoleCheck()) {
     UNIMPLEMENTED();
