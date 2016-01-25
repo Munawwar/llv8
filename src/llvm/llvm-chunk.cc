@@ -940,8 +940,8 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
 
   // First param is context (v8, js context) which goes to rsi,
   // second param is the callee's JSFunction object (rdi),
-  // third param is Parameter 0 which is `this`, 
-  // forth parame is rbx for detecting osr entry
+  // third param is rbx for detecting osr entry,
+  // fourth param is Parameter 0 which is `this`.
   int num_parameters = info()->num_parameters() + 4;
 
   std::vector<llvm::Type*> params(num_parameters, Types::tagged);
@@ -1973,22 +1973,19 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
+    // Ensure every function has an associated Stack Map section.
+    std::vector<llvm::Value*> empty;
+    CallStackMap(reloc_data_->GetNextUnaccountedPatchpointId(), empty);
 
     //If function contains OSR entry, it's first instruction must be osr_branch
     if (graph_->has_osr()) { 
       osr_preserved_values_.Clear();
       // We need to move llvm spill index by UnoptimizedFrameSlots count
       // in order to preserve Full-Codegen local values
-      for (int i = 0; i < graph_->osr()->UnoptimizedFrameSlots(); ++i) { 
+      for (int i = 0; i < graph_->osr()->UnoptimizedFrameSlots(); ++i) {
          auto alloc = __ CreateAlloca(Types::i64);
          osr_preserved_values_.Add(alloc, info()->zone());
       }
-      // Ensure every function has an associated Stack Map section.
-      // Note: LLVM lang ref says
-      // "allocating zero bytes is legal, but the result is undefined".
-      auto phony_alloca = __ CreateAlloca(__ getInt64Ty(), 0, "phony_alloca");
-      CallStackMap(reloc_data_->GetNextUnaccountedPatchpointId(), phony_alloca);
-
       HBasicBlock* osr_block = graph_->osr()->osr_entry();
       llvm::BasicBlock* not_osr_target = NewBlock("NO_OSR_CONTINUE");
       llvm::BasicBlock* osr_target = Use(osr_block);
