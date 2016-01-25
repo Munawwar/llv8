@@ -302,6 +302,8 @@ class LLVMGranularity final {
 };
 
 struct Types final : public AllStatic {
+   static llvm::Type* smi;
+   static llvm::Type* ptr_smi;
    static llvm::Type* tagged;
    static llvm::PointerType* ptr_tagged;
 
@@ -333,9 +335,10 @@ struct Types final : public AllStatic {
     ptr_float32 = llvm::PointerType::get(ir_builder->getFloatTy(), address_space);
     ptr_float64 = llvm::PointerType::get(ir_builder->getDoubleTy(),
                                          address_space);
-    // TODO(llvm): we should probably switch to i8*
-    tagged = i64;
-    ptr_tagged = ptr_i64;
+    tagged = ptr_i8;
+    ptr_tagged = ptr_i8->getPointerTo();
+    smi = i64;
+    ptr_smi = smi->getPointerTo();
   }
 };
 

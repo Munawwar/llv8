@@ -35,6 +35,8 @@ llvm::PointerType* Types::ptr_float32 = nullptr;
 llvm::PointerType* Types::ptr_float64 = nullptr;
 llvm::Type* Types::tagged = nullptr;
 llvm::PointerType* Types::ptr_tagged = nullptr;
+llvm::Type* Types::smi = nullptr;
+llvm::Type* Types::ptr_smi = nullptr;
 
 LLVMChunk::~LLVMChunk() {}
 
@@ -1031,7 +1033,7 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
     case Representation::Kind::kExternal: // For now.
       return Types::tagged;
     case Representation::Kind::kSmi:
-      return Types::i64;
+      return Types::smi;
     case Representation::Kind::kDouble:
       return Types::float64;
     default:
@@ -1040,6 +1042,7 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
   }
 }
 
+// FIXME(llvm): unused (remove).
 std::vector<llvm::Value*> LLVMChunkBuilder::GetSafepointValues(
     HInstruction* call_instr) {
   // TODO(llvm): Refactor out the AssingPointerMap() part.
@@ -1135,13 +1138,15 @@ llvm::Value* LLVMChunkBuilder::CreateConstant(HConstant* instr,
     // TODO(llvm): tagged type
     // TODO(llvm): RelocInfo::EXTERNAL_REFERENCE
     Address external_address = instr->ExternalReferenceValue().address();
-    return __ getInt64(reinterpret_cast<uint64_t>(external_address));
+    auto as_i64 = __ getInt64(reinterpret_cast<uint64_t>(external_address));
+    return __ CreateBitOrPointerCast(as_i64, Types::tagged);
   } else if (r.IsTagged()) {
     AllowHandleAllocation allow_handle_allocation;
     AllowHeapAllocation allow_heap_allocation;
     Handle<Object> object = instr->handle(isolate());
     auto current_block = __ GetInsertBlock();
     if (block) {
+      // TODO(llvm): use binary search or a search tree.
       // if constant is alredy defined in block, return that const
       for (int i = 0; i < block->defined_consts()->length(); ++i) {
          HValue* constant = block->defined_consts()->at(i);
@@ -1191,8 +1196,8 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
     VisitInstruction(instr);
   }
   DCHECK(value->llvm_value());
-  //DCHECK_EQ(value->llvm_value()->getType(),
-    //        GetLLVMType(value->representation()));
+  DCHECK_EQ(value->llvm_value()->getType(),
+            GetLLVMType(value->representation()));
   if (HasTaggedValue(value))
     pointers_.insert(value->llvm_value());
   return value->llvm_value();
@@ -1201,7 +1206,9 @@ llvm::Value* LLVMChunkBuilder::Use(HValue* value) {
 llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
   llvm::Value* res = nullptr;
   if (SmiValuesAre32Bits()) {
-    res = __ CreateLShr(Use(value), kSmiShift);
+    // The smi can have tagged representation.
+    auto as_smi = __ CreateBitOrPointerCast(Use(value), Types::smi);
+    res = __ CreateLShr(as_smi, kSmiShift);
     res = __ CreateTrunc(res, Types::i32);
   } else {
     DCHECK(SmiValuesAre31Bits());
@@ -1212,7 +1219,8 @@ llvm::Value* LLVMChunkBuilder::SmiToInteger32(HValue* value) {
 }
 
 llvm::Value* LLVMChunkBuilder::SmiCheck(llvm::Value* value, bool negate) {
-  llvm::Value* res = __ CreateAnd(value, __ getInt64(1));
+  llvm::Value* value_as_smi = __ CreateBitOrPointerCast(value, Types::smi);
+  llvm::Value* res = __ CreateAnd(value_as_smi, __ getInt64(1));
   return __ CreateICmp(negate ? llvm::CmpInst::ICMP_NE : llvm::CmpInst::ICMP_EQ,
       res, __ getInt64(0));
 }
@@ -1479,7 +1487,7 @@ llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
     // TODO(llvm): use/write a function for that
     Smi* smi = Smi::cast(*object);
     llvm::Value* value = ValueFromSmi(smi);
-    return value;
+    return __ CreateBitOrPointerCast(value, Types::tagged);
   } else { // Heap object
     // MacroAssembler::MoveHeapObject
     AllowHeapAllocation allow_allocation;
@@ -1492,11 +1500,11 @@ llvm::Value* LLVMChunkBuilder::MoveHeapObject(Handle<Object> object) {
       auto last_instr = current_block-> getTerminator();
       // if block has terminator we must insert before it
       if (!last_instr) {
-        llvm::Value* ptr = __ CreateIntToPtr(value, Types::ptr_i64);
+        llvm::Value* ptr = __ CreateBitOrPointerCast(value, Types::ptr_tagged);
         return  __ CreateLoad(ptr);
       }
-      llvm::Value* ptr = new llvm::IntToPtrInst(value, Types::ptr_i64, "", last_instr);
-      return  new llvm::LoadInst(ptr, "", last_instr);
+      llvm::Value* ptr = new llvm::BitCastInst(value, Types::ptr_tagged, "", last_instr);
+      return new llvm::LoadInst(ptr, "", last_instr);
     } else {
       return Move(object, RelocInfo::EMBEDDED_OBJECT);
     }
@@ -1542,7 +1550,9 @@ llvm::Value* LLVMChunkBuilder::CompareMap(llvm::Value* object,
 llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
   auto page_align_mask = __ getInt64(~Page::kPageAlignmentMask);
   // TODO(llvm): do the types match?
-  auto masked_object = __ CreateAnd(object, page_align_mask, "CheckPageFlag1");
+  auto object_as_i64 = __ CreateBitOrPointerCast(object, Types::i64);
+  auto masked_object = __ CreateAnd(object_as_i64, page_align_mask,
+                                    "CheckPageFlag1");
   auto flags_address = ConstructAddress(masked_object,
                                         MemoryChunk::kFlagsOffset);
   auto i32_ptr_flags_address = __ CreateBitCast(flags_address, Types::ptr_i32);
@@ -1983,19 +1993,21 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
       // We need to move llvm spill index by UnoptimizedFrameSlots count
       // in order to preserve Full-Codegen local values
       for (int i = 0; i < graph_->osr()->UnoptimizedFrameSlots(); ++i) {
-         auto alloc = __ CreateAlloca(Types::i64);
+         auto alloc = __ CreateAlloca(Types::tagged);
          osr_preserved_values_.Add(alloc, info()->zone());
       }
       HBasicBlock* osr_block = graph_->osr()->osr_entry();
       llvm::BasicBlock* not_osr_target = NewBlock("NO_OSR_CONTINUE");
       llvm::BasicBlock* osr_target = Use(osr_block);
       llvm::Value* zero = __ getInt64(0);
+      llvm::Value* zero_as_tagged = __ CreateBitOrPointerCast(zero,
+                                                              Types::tagged);
       llvm::Function::arg_iterator it = function_->arg_begin();
       int i = 0;
       while (++i < 3) ++it;
       llvm::Value* osr_value  = it;
       // Branch to OSR block
-      llvm::Value* compare = __ CreateICmpEQ(osr_value, zero);
+      llvm::Value* compare = __ CreateICmpEQ(osr_value, zero_as_tagged);
       __ CreateCondBr(compare, not_osr_target, osr_target);
       __ SetInsertPoint(not_osr_target);
     }
@@ -2327,7 +2339,7 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
   reloc_data_->Add(rinfo, meta_info);
 
   bool is_var_arg = false;
-  auto return_type = Types::i64;
+  auto return_type = Types::tagged;
   auto param_types = { Types::i64 };
   auto func_type = llvm::FunctionType::get(return_type, param_types,
                                            is_var_arg);
@@ -2417,26 +2429,16 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
   } else if (instr->representation().IsExternal()) {
     //TODO: not tested string-validate-input.js in doTest
     DCHECK(instr->IsConsistentExternalRepresentation());
-    CHECK(!instr->CheckFlag(HValue::kCanOverflow));
-    bool can_overflow = instr->CheckFlag(HValue::kCanOverflow);
+    DCHECK(!instr->CheckFlag(HValue::kCanOverflow));
     //FIXME: possibly wrong
-    llvm::Value* llvm_left = __ CreateZExt(Use(instr->left()), Types::i64);
-    llvm::Value* llvm_right = __ CreateZExt(Use(instr->right()), Types::i64);
-    if (!can_overflow) {
-      llvm::Value* Add = __ CreateAdd(llvm_left, llvm_right, "");
-      instr->set_llvm_value(Add);
-    } else {
-      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::sadd_with_overflow, Types::i64);
-
-      llvm::Value* params[] = { llvm_left, llvm_right };
-      llvm::Value* call = __ CreateCall(intrinsic, params);
-
-      llvm::Value* sum = __ CreateExtractValue(call, 0);
-      llvm::Value* overflow = __ CreateExtractValue(call, 1);
-      instr->set_llvm_value(sum);
-      DeoptimizeIf(overflow);
-    }
+    llvm::Value* left_as_i64 = __ CreateBitOrPointerCast(Use(instr->left()),
+                                                         Types::i64);
+    llvm::Value* right_as_i64 = __ CreateBitOrPointerCast(Use(instr->right()),
+                                                          Types::i64);
+    llvm::Value* sum = __ CreateAdd(left_as_i64, right_as_i64);
+    llvm::Value* sum_as_external = __ CreateBitOrPointerCast(
+        sum, GetLLVMType(Representation::External()));
+    instr->set_llvm_value(sum_as_external);
   } else {
     UNIMPLEMENTED();
   }
@@ -2463,11 +2465,10 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   args.push_back(arg2);
   args.push_back(arg1);
   llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
-  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
 //  if (instr->MustPrefillWithFiller()) {
 //    UNIMPLEMENTED();
 //  }
-  instr->set_llvm_value(alloc_casted);
+  instr->set_llvm_value(alloc);
 }
 
 void LLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
@@ -2561,6 +2562,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
                                     llvm::BasicBlock* true_target,
                                     llvm::BasicBlock* false_target) {
   llvm::Value* value = Use(instr->value());
+  llvm::Value* value_as_i64 = __ CreateBitOrPointerCast(value, Types::i64);
 
   if (expected.IsEmpty()) expected = ToBooleanStub::Types::Generic();
 
@@ -2612,7 +2614,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ SetInsertPoint(next);
     // Smis: 0 -> false, all other -> true.
     llvm::BasicBlock* not_zero = NewBlock("BranchTagged Smi Non Zero");
-    auto cmp_zero = __ CreateICmpEQ(value, __ getInt64(0));
+    auto cmp_zero = __ CreateICmpEQ(value_as_i64, __ getInt64(0));
     __ CreateCondBr(cmp_zero, false_target, not_zero);
     __ SetInsertPoint(not_zero);
     llvm::Value* smi_cond = SmiCheck(value, false);
@@ -2623,7 +2625,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // If we need a map later and have a Smi -> deopt.
     //TODO: Not tested, string-fasta fastaRandom
     __ SetInsertPoint(next);
-    auto smi_and = __ CreateAnd(value, __ getInt64(kSmiTagMask));
+    auto smi_and = __ CreateAnd(value_as_i64, __ getInt64(kSmiTagMask));
     auto is_smi = __ CreateICmpEQ(smi_and, __ getInt64(0));
     next = NewBlock("BranchTagged NeedsMapCont");
     DeoptimizeIf(is_smi, false, next);
@@ -2746,9 +2748,7 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
       llvm::BranchInst* branch = __ CreateCondBr(compare, true_target,
                                                  false_target);
       instr->set_llvm_value(branch);
-    }
-      else if (type.IsSmi() || type.IsJSArray()
-              || type.IsHeapNumber()) {
+    } else if (type.IsSmi() || type.IsJSArray() || type.IsHeapNumber()) {
       UNIMPLEMENTED();
     } else {
       ToBooleanStub::Types expected = instr->expected_input_types();
@@ -2949,7 +2949,7 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
 
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
   //TODO: Respect RelocInfo
-  int arity = instr->argument_count()-1;
+  int arity = instr->argument_count() - 1;
   llvm::Value* arity_val = __ getInt64(arity);
   llvm::Value* result_packed_elem = nullptr;
   llvm::BasicBlock* packed_continue = nullptr;
@@ -2967,7 +2967,9 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     load_root = MoveHeapObject(instr->site());
     if (IsFastPackedElementsKind(kind)) {
       packed_continue = NewBlock("CALL NEW ARRAY PACKED CASE CONTINUE");
+      DCHECK_GE(pending_pushed_args_.length(), 1);
       llvm::Value* first_arg = pending_pushed_args_[0];
+      first_arg = __ CreateBitOrPointerCast(first_arg, Types::i64);
       llvm::Value* cmp_eq = __ CreateICmpEQ(first_arg, __ getInt64(0));
       __ CreateCondBr(cmp_eq, packed_case, packed_continue);
       __ SetInsertPoint(packed_continue);
@@ -2988,12 +2990,11 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
         params.push_back(Use(instr->OperandAt(i)));
       params.push_back(arity_val);
       params.push_back(load_root);
-      for (int i = pending_pushed_args_.length()-1; i >=0; --i)
+      for (int i = pending_pushed_args_.length() - 1; i >=0; --i)
         params.push_back(pending_pushed_args_[i]);
       pending_pushed_args_.Clear();
-      llvm::Value* call = CallCode(code,
-                                   llvm::CallingConv::X86_64_V8_S3, params);
-      result_packed_elem = __ CreatePtrToInt(call, Types::i64);
+      result_packed_elem = CallCode(code, llvm::CallingConv::X86_64_V8_S3,
+                                    params);
       done =  NewBlock("CALL NEW ARRAY END");
       __ CreateBr(done);
     }
@@ -3020,11 +3021,11 @@ void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
     for (int i = pending_pushed_args_.length()-1; i >=0; --i)
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
-    llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S3, params);
-    llvm::Value* return_val = __ CreatePtrToInt(call, Types::i64);
+    llvm::Value* return_val = CallCode(code, llvm::CallingConv::X86_64_V8_S3,
+                                       params);
     __ CreateBr(done);
     __ SetInsertPoint(done);
-    llvm::PHINode* phi = __ CreatePHI(Types::i64, result_packed_elem ? 2 : 1);
+    llvm::PHINode* phi = __ CreatePHI(Types::tagged, result_packed_elem ? 2 : 1);
     phi->addIncoming(return_val, packed_case);
     if (result_packed_elem) {
       DCHECK(packed_continue);
@@ -3115,7 +3116,9 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
                                             HeapNumber::kValueOffset);
   llvm::Value* casted_address = __ CreateBitCast(store_address,
                                                  Types::ptr_tagged);
-  llvm::Value* casted_val = __ CreateBitCast(Use(val), Types::tagged);
+  llvm::Value* casted_intermediate = __ CreateBitCast(Use(val), Types::i64);
+  llvm::Value* casted_val = __ CreateBitOrPointerCast(casted_intermediate,
+                                                      Types::tagged);
   // [(i8*)new_heap_number + offset] = val;
   __ CreateStore(casted_val, casted_address);
 
@@ -3134,7 +3137,7 @@ llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
       __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
   int offset = index << kPointerSizeLog2;
   auto load_address = ConstructAddress(int64_address, offset);
-  auto casted_load_address = __ CreateBitCast(load_address, Types::ptr_i64);
+  auto casted_load_address = __ CreateBitCast(load_address, Types::ptr_tagged);
   return __ CreateLoad(casted_load_address);
 }
 
@@ -3347,7 +3350,8 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
   HValue* val = instr->value();
   if (from.IsSmi()) {
     if (to.IsTagged()) {
-      instr->set_llvm_value(Use(val));
+      auto as_tagged = __ CreateBitOrPointerCast(Use(val), Types::tagged);
+      instr->set_llvm_value(as_tagged);
       return;
     }
     from = Representation::Tagged();
@@ -3361,7 +3365,8 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         llvm::Value* cond = SmiCheck(Use(val), not_smi);
         DeoptimizeIf(cond); // Deoptimizer::kNotASmi
       }
-      instr->set_llvm_value(Use(val));
+      auto val_as_smi = __ CreateBitOrPointerCast(Use(val), Types::smi);
+      instr->set_llvm_value(val_as_smi);
     } else {
       DCHECK(to.IsInteger32());
       if (val->type().IsSmi() || val->representation().IsSmi()) {
@@ -3370,7 +3375,6 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
         instr->set_llvm_value(SmiToInteger32(val));
       } else {
         ChangeTaggedToISlow(val, instr);
-
       }
     }
   } else if (from.IsDouble()) {
@@ -3384,7 +3388,9 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
   } else if (from.IsInteger32()) {
     if (to.IsTagged()) {
       if (!instr->CheckFlag(HValue::kCanOverflow)) {
-        instr->set_llvm_value(Integer32ToSmi(val));
+        auto smi_as_tagged = __ CreateBitOrPointerCast(Integer32ToSmi(val),
+                                                       Types::tagged);
+        instr->set_llvm_value(smi_as_tagged);
       } else if (instr->value()->CheckFlag(HInstruction::kUint32)) {
         UIntToTag(instr);
       } else {
@@ -3779,8 +3785,7 @@ void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   {
      AllowHandleAllocation allow_handles;
      AllowHeapAllocation allow_heap;
-     ic = CodeFactory::CompareIC(isolate(), op,
-                                           instr->strength()).code();
+     ic = CodeFactory::CompareIC(isolate(), op, instr->strength()).code();
   }
   llvm::CmpInst::Predicate pred = TokenToPredicate(op, false, false);
   auto context = Use(instr->context());
@@ -3788,6 +3793,7 @@ void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   auto right = Use(instr->right());
   std::vector<llvm::Value*> params = { context, left, right };
   auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S10, params);
+  result = __ CreateBitOrPointerCast(result, Types::i64);
   // Lithium comparison is a little strange, I think mine is all right.
   auto compare_result = __ CreateICmp(pred, result, __ getInt64(0));
   auto compare_true = NewBlock("generic comparison true");
@@ -3842,11 +3848,7 @@ void LLVMChunkBuilder::DoCompareObjectEqAndBranch(HCompareObjectEqAndBranch* ins
   } else {
     cmp = __ CreateICmpEQ(Use(instr->left()), Use(instr->right()));
   }
-  llvm::BranchInst* branch = __ CreateCondBr(cmp,
-         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
-  instr->set_llvm_value(branch);
-
-  // UNIMPLEMENTED();
+  __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
 }
 
 void LLVMChunkBuilder::DoCompareMap(HCompareMap* instr) {
@@ -4313,8 +4315,7 @@ void LLVMChunkBuilder::DoInnerAllocatedObject(HInnerAllocatedObject* instr) {
   if(instr->offset()->IsConstant()) {
     uint32_t offset = (HConstant::cast(instr->offset()))->Integer32Value();
     llvm::Value* gep = ConstructAddress(Use(instr->base_object()), offset);
-    auto result = __ CreatePtrToInt(gep, Types::i64);
-    instr->set_llvm_value(result);
+    instr->set_llvm_value(gep);
     //UNIMPLEMENTED();
   } else {
     UNIMPLEMENTED();
@@ -4461,7 +4462,7 @@ void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
   llvm::BasicBlock* insert = __ GetInsertBlock(); 
   auto offset = Context::SlotOffset(instr->slot_index());
   llvm::Value* result_addr = ConstructAddress(context, offset);
-  llvm::Value* result_casted = __ CreateBitCast(result_addr, Types::ptr_i64);
+  llvm::Value* result_casted = __ CreateBitCast(result_addr, Types::ptr_tagged);
   llvm::Value* result = __ CreateLoad(result_casted);
   llvm::Value* root = nullptr;
   llvm::BasicBlock* load_root = nullptr;
@@ -4488,7 +4489,7 @@ void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
   if (count == 1) {
     instr->set_llvm_value(result);
   } else {
-    llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+    llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
     phi->addIncoming(result, insert);
     phi->addIncoming(root, load_root);
     instr->set_llvm_value(phi);
@@ -4718,7 +4719,9 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
 }
 
 llvm::Value* LLVMChunkBuilder::BuildFastArrayOperand(HValue* key, 
-      llvm::Value* elements, ElementsKind elements_kind, uint32_t inst_offset) {
+                                                     llvm::Value* elements,
+                                                     ElementsKind elements_kind,
+                                                     uint32_t inst_offset) {
   llvm::Value* address = nullptr;
   int shift_size = ElementsKindToShiftSize(elements_kind);
   if (key->IsConstant()) {
@@ -4740,9 +4743,10 @@ llvm::Value* LLVMChunkBuilder::BuildFastArrayOperand(HValue* key,
         scale_factor = 4;
         break;
       case 3:
-         scale_factor = 8;
-         break;
-      default : UNIMPLEMENTED();
+        scale_factor = 8;
+        break;
+      default:
+        UNIMPLEMENTED();
     }
     if (key->representation().IsInteger32()) {
        scale = __ getInt32(scale_factor);
@@ -4753,8 +4757,7 @@ llvm::Value* LLVMChunkBuilder::BuildFastArrayOperand(HValue* key,
      }
      llvm::Value* mul = __ CreateMul(lkey, scale);
      llvm::Value* add = __ CreateAdd(mul, offset);
-     llvm::Value* int_ptr = __ CreateIntToPtr(elements,
-                                              Types::ptr_i8);
+     llvm::Value* int_ptr = __ CreateIntToPtr(elements, Types::ptr_i8);
      address = __ CreateGEP(int_ptr, add);
   }
   return address;
@@ -4798,12 +4801,10 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
   llvm::Value* address = BuildFastArrayOperand(key, Use(instr->elements()),
                                        FAST_DOUBLE_ELEMENTS, inst_offset);
   llvm::Value* casted_address = nullptr;
-  if (instr->representation().IsInteger32()) {
-    casted_address = __ CreateBitCast(address, Types::ptr_i32);
-  } else {
-    casted_address = __ CreateBitCast(address, Types::ptr_i64);
-  }
+  auto pointer_type = GetLLVMType(instr->representation())->getPointerTo();
+  casted_address = __ CreateBitCast(address, pointer_type);
   llvm::Value* load = __ CreateLoad(casted_address);
+
   if (requires_hole_check) {
     if (IsFastSmiElementsKind(instr->elements_kind())) {
       llvm::Value* cmp = SmiCheck(load, false);
@@ -4849,8 +4850,7 @@ void LLVMChunkBuilder::DoLoadKeyedGeneric(HLoadKeyedGeneric* instr) {
   } else {
     result = CallCode(ic, llvm::CallingConv::X86_64_V8_S5, params);
   }
-  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
-  instr->set_llvm_value(return_val);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
@@ -4893,7 +4893,8 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     llvm::Value* res = __ CreateLoad(casted_address);
     instr->set_llvm_value(res);
   } else {
-    llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_i64);
+    DCHECK_EQ(GetLLVMType(instr->representation()), Types::tagged);
+    llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_tagged);
     llvm::Value* res = __ CreateLoad(casted_address);
     instr->set_llvm_value(res);
 
@@ -5721,31 +5722,27 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
                                                elements_kind, inst_offset); 
   HValue* hValue = instr->value();
   llvm::Value* store = nullptr;
-  if (hValue->representation().IsInteger32()) {
-    llvm::Value* casted_adderss = __ CreateBitCast(address,
-                                                   Types::ptr_i32);
-    store = __ CreateStore(Use(hValue), casted_adderss);
-  } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
-    llvm::Value* casted_adderss = __ CreateBitCast(address,
-                                                   Types::ptr_i64);
+
+  if (!hValue->IsConstant() || hValue->representation().IsSmi() ||
+      hValue->representation().IsInteger32()) {
+    auto pointer_type = GetLLVMType(hValue->representation())->getPointerTo();
+    llvm::Value* casted_adderss = __ CreateBitCast(address, pointer_type);
     store = __ CreateStore(Use(hValue), casted_adderss);
   } else {
     DCHECK(hValue->IsConstant());
     HConstant* constant = HConstant::cast(instr->value());
     Handle<Object> handle_value = constant->handle(isolate());
-    llvm::Value* casted_adderss = __ CreateBitCast(address,
-                                                  Types::ptr_i64);
+    llvm::Value* casted_adderss = __ CreateBitCast(address, Types::ptr_tagged);
     auto llvm_val = MoveHeapObject(handle_value);
     store = __ CreateStore(llvm_val, casted_adderss);
   } 
   instr->set_llvm_value(store);
   if (instr->NeedsWriteBarrier()) {
-    //Must be FIXED !!!
+    //Must be FIXED !!! // FIXME(llvm): look into this (WTF, man...)
     llvm::Value* elem = Use(instr->elements());
     llvm::Value* value = Use(instr->value());
     llvm::Value* key_l = Use(instr->key());
-    llvm::Value* casted_adderss = __ CreateBitCast(address,
-                                                   Types::ptr_i64);
+    llvm::Value* casted_adderss = __ CreateBitCast(address, Types::ptr_i64);
     key_l = __ CreateLoad(casted_adderss);
     RecordWrite(elem, key_l, value, instr->PointersToHereCheckForValue(), OMIT_REMEMBERED_SET);
     //UNIMPLEMENTED();
@@ -5919,10 +5916,10 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
       __ CreateStore(casted_value, casted_adderss);
     } else if (hValue->representation().IsSmi() || !hValue->IsConstant()){
       llvm::Value* store_address = ConstructAddress(obj_arg, offset);
+      auto pointer_type = GetLLVMType(hValue->representation())->getPointerTo();
       llvm::Value* casted_adderss = __ CreateBitCast(store_address,
-                                                     Types::ptr_i64);
-      llvm::Value* casted_value = __ CreateBitCast(Use(hValue), Types::i64);
-      __ CreateStore(casted_value, casted_adderss);
+                                                     pointer_type);
+      __ CreateStore(Use(hValue), casted_adderss);
     } else {
       DCHECK(hValue->IsConstant());
       {
@@ -5932,7 +5929,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
         llvm::Value* store_address = ConstructAddress(obj_arg,
                                                       offset);
         llvm::Value* casted_adderss = __ CreateBitCast(store_address,
-                                                       Types::ptr_i64);
+                                                       Types::ptr_tagged);
         auto llvm_val = MoveHeapObject(handle_value);
         __ CreateStore(llvm_val, casted_adderss);
       }
@@ -5987,8 +5984,7 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
   for (int i = 1; i < instr->OperandCount() ; ++i)
     params.push_back(Use(instr->OperandAt(i)));
   llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S10, params);
-  llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
-  instr->set_llvm_value(return_val); 
+  instr->set_llvm_value(call);
 }
 
 void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
@@ -6264,11 +6260,10 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
     if (!instr->CheckFlag(HValue::kCanOverflow)) {
       llvm::Value* sub = __ CreateSub(Use(left), Use(right), "");
       instr->set_llvm_value(sub);
-    }
-    else {
+    } else {
       auto type = instr->representation().IsSmi() ? Types::i64 : Types::i32;
-      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-      llvm::Intrinsic::ssub_with_overflow, type);
+      llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(
+          module_.get(), llvm::Intrinsic::ssub_with_overflow, type);
       llvm::Value* params[] = { Use(left), Use(right) };
       llvm::Value* call = __ CreateCall(intrinsic, params);
       llvm::Value* sub = __ CreateExtractValue(call, 0);
@@ -6329,10 +6324,10 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
   __ SetInsertPoint(cont);
 
   if (IsSimpleMapChangeTransition(from_kind, to_kind)) {
-    // map is an i64.
+    // map is a tagged value.
     auto new_map = Move(to_map, RelocInfo::EMBEDDED_OBJECT);
     auto store_addr = FieldOperand(object, HeapObject::kMapOffset);
-    auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_i64);
+    auto casted_store_addr = __ CreateBitCast(store_addr, Types::ptr_tagged);
     __ CreateStore(new_map, casted_store_addr);
     // Write barrier. TODO(llvm): give llvm.gcwrite and company a thought.
     RecordWriteForMap(object, new_map);
@@ -6771,6 +6766,7 @@ void LLVMChunkBuilder::DoUnknownOSRValue(HUnknownOSRValue* instr) {
     if (spill_index >=0) {
       bool is_volatile = true;
       llvm::Value* result = __ CreateLoad(osr_preserved_values_[spill_index], is_volatile);
+      result = __ CreateBitOrPointerCast(result, GetLLVMType(instr->representation()));
       instr->set_llvm_value(result);
     } else {
       //TODO: Check this case
@@ -6878,6 +6874,7 @@ void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(
                                                JSArrayBufferView::kBufferOffset);
   llvm::Value* bit_field_offset = LoadFieldOperand(array_offset,
                                                    JSArrayBuffer::kBitFieldOffset);
+  bit_field_offset = __ CreateBitOrPointerCast(bit_field_offset, Types::i64);
   llvm::Value* shift = __ getInt64(1 << JSArrayBuffer::WasNeutered::kShift);
   llvm::Value* test = __ CreateAnd(bit_field_offset, shift);
   llvm::Value* cmp = __ CreateICmpNE(test, __ getInt64(0));
@@ -6956,7 +6953,8 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  DCHECK(result->getType() == result_from_deferred->getType());
+  llvm::PHINode* phi = __ CreatePHI(result->getType(), 2);
   phi->addIncoming(result, insert);
   phi->addIncoming(result_from_deferred, deferred);
   instr->set_llvm_value(phi);
