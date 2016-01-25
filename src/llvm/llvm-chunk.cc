@@ -1654,12 +1654,14 @@ llvm::Value* LLVMChunkBuilder::Allocate(int object_size,
 
   __ SetInsertPoint(gc_required);
   llvm::Value* deferred_result = AllocateHeapNumberSlow();
+  auto casted_deferred = __ CreateBitOrPointerCast(deferred_result,
+                                                    Types::i64);
   __ CreateBr(merge);
 
   __ SetInsertPoint(merge);
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(final_result, limit_is_valid);
-  phi->addIncoming(deferred_result, gc_required);
+  phi->addIncoming(casted_deferred, gc_required);
   return phi;
 }
 
@@ -1674,7 +1676,8 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber(MutableMode mode){
   llvm::Value* casted_address = __ CreatePointerCast(address,
                                                      Types::ptr_tagged);
   __ CreateStore(root, casted_address);
-  return __ CreatePtrToInt(casted_address, Types::i64);
+  __ CreatePtrToInt(casted_address, Types::i64);
+  return result;
 }
 
 llvm::Value* LLVMChunkBuilder::GetContext() {
@@ -3104,22 +3107,21 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   if (FLAG_inline_new) {
     new_heap_number = AllocateHeapNumber();
   } else {
-    new_heap_number = AllocateHeapNumberSlow();
+    auto slow_heap = AllocateHeapNumberSlow(); // i8*
+    new_heap_number = __ CreateBitOrPointerCast(slow_heap, Types::i64);
   }
 
   llvm::Value* store_address = FieldOperand(new_heap_number,
                                             HeapNumber::kValueOffset);
   llvm::Value* casted_address = __ CreateBitCast(store_address,
-                                                 Types::ptr_tagged);
+                                                 Types::ptr_i64);
   llvm::Value* casted_intermediate = __ CreateBitCast(Use(val), Types::i64);
   llvm::Value* casted_val = __ CreateBitOrPointerCast(casted_intermediate,
-                                                      Types::tagged);
+                                                      Types::i64);
   // [(i8*)new_heap_number + offset] = val;
   __ CreateStore(casted_val, casted_address);
-
-  auto new_heap_number_casted = __ CreatePtrToInt(new_heap_number,
-                                                  Types::tagged);
-  instr->set_llvm_value(new_heap_number_casted); // no offset
+  auto result = __ CreateIntToPtr(new_heap_number, Types::tagged);
+  instr->set_llvm_value(result); // no offset
 
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
