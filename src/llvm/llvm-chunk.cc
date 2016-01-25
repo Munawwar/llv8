@@ -1563,11 +1563,6 @@ llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
 }
 
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumberSlow() {
-  // FIXME(llvm): if FLAG_inline_new is set (which is the default)
-  // fast inline allocation should be used
-  // (otherwise runtime stub call should be performed).
-
-  CHECK(!FLAG_inline_new);
 
   // return an i8*
   llvm::Value* allocated = CallRuntimeViaId(Runtime::kAllocateHeapNumber);
