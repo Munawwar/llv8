@@ -2874,7 +2874,6 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
   CallFunctionFlags flags = instr->function_flags();
   llvm::Value* context = Use(instr->context());
   llvm::Value* function = Use(instr->function());
-  llvm::Value* return_val = nullptr;
   llvm::Value* result = nullptr;
 
   if (instr->HasVectorAndSlot()) {
@@ -2900,7 +2899,6 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
     pending_pushed_args_.Clear();
     result = CallCode(ic, llvm::CallingConv::X86_64_V8_S6,
                              params);
-    return_val = __ CreatePtrToInt(result, Types::i64);
   } else {
     CallFunctionStub stub(isolate(), arity, flags);
     AllowHandleAllocation allow_handles;
@@ -2912,9 +2910,8 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
       params.push_back(pending_pushed_args_[i]);
     pending_pushed_args_.Clear();
     result = CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_S13, params);
-    return_val = __ CreatePtrToInt(result, Types::i64);
   }
-  instr->set_llvm_value(return_val);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
@@ -2939,8 +2936,7 @@ void LLVMChunkBuilder::DoCallNew(HCallNew* instr) {
       params.push_back(pending_pushed_args_[i]);
   pending_pushed_args_.Clear();
   llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S3, params);
-  llvm::Value* return_val = __ CreatePtrToInt(call,Types::i64);
-  instr->set_llvm_value(return_val);
+  instr->set_llvm_value(call);
 }
 
 void LLVMChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
@@ -4343,7 +4339,7 @@ void LLVMChunkBuilder::DoHasInPrototypeChainAndBranch(
   llvm::Value* load_object_map;
   __ CreateBr(loop);
   __ SetInsertPoint(loop);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
   phi->addIncoming(object_map, insert);
   llvm::Value* object_prototype = LoadFieldOperand(phi,
                                                    Map::kPrototypeOffset);
@@ -5871,16 +5867,16 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     Handle<Map> transition = instr->transition_map();
     AddDeprecationDependency(transition);
     if (!instr->NeedsWriteBarrierForMap()) {
-      llvm::Value* heap_treansition = MoveHeapObject(transition);
+      llvm::Value* heap_transition = MoveHeapObject(transition);
       llvm::Value* ptr = __ CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
       llvm::Value* address =  __ CreateGEP(ptr, __ getInt32(HeapObject::kMapOffset));
       llvm::Value* casted_address = __ CreateBitCast(address, Types::ptr_tagged);
-      __ CreateStore(heap_treansition, casted_address);
+      __ CreateStore(heap_transition, casted_address);
     } else {
       llvm::Value* scratch = MoveHeapObject(transition);
       llvm::Value* obj_addr = FieldOperand(Use(instr->object()),
                                            HeapObject::kMapOffset);
-      auto casted_address = __ CreateBitCast(obj_addr, Types::ptr_i64);
+      auto casted_address = __ CreateBitCast(obj_addr, Types::ptr_tagged);
       __ CreateStore(scratch, casted_address);
       RecordWriteForMap(Use(instr->object()), scratch);
     }
