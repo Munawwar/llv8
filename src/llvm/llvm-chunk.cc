@@ -523,13 +523,12 @@ void LLVMChunk::EmitSafepointTable(Assembler* assembler,
       if (location.kind == StackMaps::Location::kDirect) {
         Register reg = location.dwarf_reg.reg().IntReg();
         if (!reg.is(rbp)) UNIMPLEMENTED();
-        auto index = FpRelativeOffsetToIndex(location.offset);
+        DCHECK_LT(location.offset, 0);
+        DCHECK_EQ(location.size, kPointerSize);
+        auto index = -location.offset / kPointerSize;
         // Safepoint table indices are 0-based from the beginning of the spill
         // slot area, adjust appropriately.
         index -= kPhonySpillCount;
-        // Reverse the sequence.
-        index = SpilledCount(stackmaps) - 1 - index;
-        DCHECK(location.size == kPointerSize);
         safepoint.DefinePointerSlot(index, zone());
       } else if (location.kind == StackMaps::Location::kIndirect) {
         UNIMPLEMENTED();
@@ -1922,7 +1921,7 @@ LLVMChunkBuilder& LLVMChunkBuilder::PlaceStatePoints() {
 }
 
 LLVMChunkBuilder& LLVMChunkBuilder::RewriteStatePoints() {
-  PassInfoPrinter printer("AppendLivePointersToSafepoints", module_.get());
+  PassInfoPrinter printer("RewriteStatepointsForGC", module_.get());
   DumpPointerValues();
 
   std::set<llvm::Value*> pointer_values;
@@ -1933,11 +1932,10 @@ LLVMChunkBuilder& LLVMChunkBuilder::RewriteStatePoints() {
       pointer_values.insert(value);
   }
 
-  llvm::legacy::FunctionPassManager pass_manager(module_.get());
-  pass_manager.add(createAppendLivePointersToSafepointsPass(pointer_values));
-  pass_manager.doInitialization();
-  pass_manager.run(*function_);
-  pass_manager.doFinalization();
+  llvm::legacy::PassManager pass_manager;
+  pass_manager.add(v8::internal::createRewriteStatepointsForGCPass(
+      pointer_values));
+  pass_manager.run(*module_.get());
   return *this;
 }
 
@@ -2180,7 +2178,7 @@ void LLVMChunkBuilder::DoParameter(HParameter* instr) {
   // First off, skip first 2 parameters: context (rsi)
   // and callee's JSFunction object (rdi).
   // Now, I couldn't find a way to tweak the calling convention through LLVM
-  // in a way that param/eters are passed left-to-right on the stack.
+  // in a way that parameters are passed left-to-right on the stack.
   // So for now they are passed right-to-left, as in cdecl.
   // And therefore we do the magic here.
   index = -index;
