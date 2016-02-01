@@ -2877,6 +2877,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
   llvm::Value* result = nullptr;
 
   if (instr->HasVectorAndSlot()) {
+    UNIMPLEMENTED();
     AllowDeferredHandleDereference vector_structure_check;
     AllowHandleAllocation allow_handles;
     Handle<TypeFeedbackVector> feedback_vector = instr->feedback_vector();
