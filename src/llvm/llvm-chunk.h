@@ -605,6 +605,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
         osr_preserved_values_(4, info->zone()),
         emit_debug_code_(FLAG_debug_code),
         volatile_zero_address_(nullptr),
+        global_receiver_(nullptr),
         pointers_(),
         number_of_pointers_(-1) {
     reloc_data_ = new(zone()) LLVMRelocationData(zone());
@@ -660,6 +661,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   void CreateSafepointPollFunction();
   void DoBasicBlock(HBasicBlock* block, HBasicBlock* next_block);
   void VisitInstruction(HInstruction* current);
+  void PatchReceiverToGlobalProxy();
+  llvm::Value* GetParameter(int index);
   void DoPhi(HPhi* phi);
   void ResolvePhis();
   void ResolvePhis(HBasicBlock* block);
@@ -813,6 +816,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   ZoneList<llvm::Value*> osr_preserved_values_;
   bool emit_debug_code_;
   llvm::Value* volatile_zero_address_;
+  llvm::Value* global_receiver_;
   // TODO(llvm): choose more appropriate data structure (maybe in the zone).
   // Or even some fancy lambda to pass to createAppendLivePointersToSafepoints.
   std::set<llvm::Value*> pointers_;

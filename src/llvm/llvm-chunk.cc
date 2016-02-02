@@ -1471,8 +1471,9 @@ llvm::Value* LLVMChunkBuilder::ConstructAddress(llvm::Value* base, int64_t offse
   // The problem is (volatile_0 + imm) + offset == volatile_0 + (imm + offset),
   // so...
   llvm::Value* offset_val = ConstFoldBarrier(__ getInt64(offset));
-  llvm::Value* base_casted = __ CreateIntToPtr(base, Types::ptr_i8);
-  return __ CreateGEP(base_casted, offset_val);
+  llvm::Value* base_casted = __ CreateBitOrPointerCast(base, Types::ptr_i8);
+  auto constructed_address = __ CreateGEP(base_casted, offset_val);
+  return __ CreateBitOrPointerCast(constructed_address, base->getType());
 }
 
 llvm::Value* LLVMChunkBuilder::ValueFromSmi(Smi* smi) {
@@ -1554,7 +1555,8 @@ llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
                                     "CheckPageFlag1");
   auto flags_address = ConstructAddress(masked_object,
                                         MemoryChunk::kFlagsOffset);
-  auto i32_ptr_flags_address = __ CreateBitCast(flags_address, Types::ptr_i32);
+  auto i32_ptr_flags_address = __ CreateBitOrPointerCast(flags_address,
+                                                         Types::ptr_i32);
   auto flags = __ CreateLoad(i32_ptr_flags_address);
   auto llvm_mask = __ getInt32(mask);
   auto and_result = __ CreateAnd(flags, llvm_mask);
@@ -1969,6 +1971,28 @@ llvm::Value* LLVMChunkBuilder::ConstFoldBarrier(llvm::Value* imm) {
   return imm;
 }
 
+void LLVMChunkBuilder::PatchReceiverToGlobalProxy() {
+  if (info()->MustReplaceUndefinedReceiverWithGlobalProxy()) {
+    auto receiver = GetParameter(0); // `this'
+    auto is_undefined = CompareRoot(receiver, Heap::kUndefinedValueRootIndex);
+    auto patch_receiver = NewBlock("Patch receiver");
+    auto receiver_ok = NewBlock("Receiver OK");
+    __ CreateCondBr(is_undefined, patch_receiver, receiver_ok);
+    __ SetInsertPoint(patch_receiver);
+    auto global_object_operand_address = ConstructAddress(
+        GetContext(), Context::SlotOffset(Context::GLOBAL_OBJECT_INDEX));
+    auto global_object_operand = __ CreateLoad(global_object_operand_address);
+    auto global_receiver = LoadFieldOperand(global_object_operand,
+                                            GlobalObject::kGlobalProxyOffset);
+    __ CreateBr(receiver_ok);
+    __ SetInsertPoint(receiver_ok);
+    auto phi = __ CreatePHI(Types::tagged, 2);
+    phi->addIncoming(receiver, receiver_ok);
+    phi->addIncoming(global_receiver, patch_receiver);
+    global_receiver_ = phi;
+  }
+}
+
 void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
                                     HBasicBlock* next_block) {
 #ifdef DEBUG
@@ -1979,6 +2003,7 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
   current_block_ = block;
   next_block_ = next_block;
   if (block->IsStartBlock()) {
+    PatchReceiverToGlobalProxy();
     // Ensure every function has an associated Stack Map section.
     std::vector<llvm::Value*> empty;
     CallStackMap(reloc_data_->GetNextUnaccountedPatchpointId(), empty);
@@ -2167,11 +2192,12 @@ void LLVMChunkBuilder::DoContext(HContext* instr) {
   instr->set_llvm_value(GetContext());
 }
 
-void LLVMChunkBuilder::DoParameter(HParameter* instr) {
-  int index = instr->index();
-#ifdef DEBUG
-  std::cerr << "Parameter #" << index << std::endl;
-#endif
+llvm::Value* LLVMChunkBuilder::GetParameter(int index) {
+  DCHECK_GE(index, 0);
+
+  // `this' might be patched.
+  if (index == 0 && global_receiver_)
+    return global_receiver_;
 
   int num_parameters = info()->num_parameters() + 4;
   llvm::Function::arg_iterator it = function_->arg_begin();
@@ -2183,7 +2209,12 @@ void LLVMChunkBuilder::DoParameter(HParameter* instr) {
   // And therefore we do the magic here.
   index = -index;
   while (--index + num_parameters > 0) ++it;
-  instr->set_llvm_value(it);
+
+  return it;
+}
+
+void LLVMChunkBuilder::DoParameter(HParameter* instr) {
+  instr->set_llvm_value(GetParameter(instr->index()));
 }
 
 void LLVMChunkBuilder::DoArgumentsObject(HArgumentsObject* instr) {
@@ -3127,10 +3158,10 @@ llvm::Value* LLVMChunkBuilder::LoadRoot(Heap::RootListIndex index) {
   // TODO(llvm): Move(RelocInfo::EXTERNAL_REFERENCE)
   auto int64_address =
       __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
+  auto address = __ CreateBitOrPointerCast(int64_address, Types::ptr_tagged);
   int offset = index << kPointerSizeLog2;
-  auto load_address = ConstructAddress(int64_address, offset);
-  auto casted_load_address = __ CreateBitCast(load_address, Types::ptr_tagged);
-  return __ CreateLoad(casted_load_address);
+  auto load_address = ConstructAddress(address, offset);
+  return __ CreateLoad(load_address);
 }
 
 llvm::Value* LLVMChunkBuilder::CompareRoot(llvm::Value* operand,
@@ -4927,10 +4958,8 @@ void LLVMChunkBuilder::DoLoadNamedGeneric(HLoadNamedGeneric* instr) {
   params.push_back(vector);
   params.push_back(slot);
 
-  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S9,
-                         params);
-  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
-  instr->set_llvm_value(return_val);
+  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S9, params);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoLoadRoot(HLoadRoot* instr) {
