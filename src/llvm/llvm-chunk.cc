@@ -1979,8 +1979,11 @@ void LLVMChunkBuilder::PatchReceiverToGlobalProxy() {
     auto receiver_ok = NewBlock("Receiver OK");
     __ CreateCondBr(is_undefined, patch_receiver, receiver_ok);
     __ SetInsertPoint(patch_receiver);
+    auto context_as_ptr_to_tagged = __ CreateBitOrPointerCast(GetContext(),
+                                                              Types::ptr_tagged);
     auto global_object_operand_address = ConstructAddress(
-        GetContext(), Context::SlotOffset(Context::GLOBAL_OBJECT_INDEX));
+        context_as_ptr_to_tagged,
+        Context::SlotOffset(Context::GLOBAL_OBJECT_INDEX));
     auto global_object_operand = __ CreateLoad(global_object_operand_address);
     auto global_receiver = LoadFieldOperand(global_object_operand,
                                             GlobalObject::kGlobalProxyOffset);
