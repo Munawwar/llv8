@@ -6011,6 +6011,9 @@ void LLVMChunkBuilder::DoStringAdd(HStringAdd* instr) {
   instr->set_llvm_value(call);
 }
 
+// TODO(llvm): this is a horrible function.
+// At least do something about this mess with types.
+// And test it thoroughly...
 void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   //Only one path is tested
   //IsSeqString->OneByte->Done.
@@ -6023,6 +6026,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   llvm::Value* map_offset = LoadFieldOperand(str, HeapObject::kMapOffset);
   llvm::Value* instance_type = LoadFieldOperand(map_offset,
                                                 Map::kInstanceTypeOffset);
+  instance_type = __ CreateBitOrPointerCast(instance_type, Types::i64);
   //movzxbl
   llvm::Value* result_type = __ CreateAnd(instance_type,
                                           __ getInt64(0x000000ff));
@@ -6076,7 +6080,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   __ CreateBr(indirect_string_loaded);
 
   __ SetInsertPoint(indirect_string_loaded);
-  llvm::PHINode* phi_string = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi_string = __ CreatePHI(Types::tagged, 2);
   phi_string->addIncoming(after_cmp_root_str, cmp_root_cont);
   phi_string->addIncoming(cons_string, cons_str_cont);
 
@@ -6088,6 +6092,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
                                                HeapObject::kMapOffset);
   llvm::Value* indirect_instance = LoadFieldOperand(indirect_map,
                                                     Map::kInstanceTypeOffset);
+  indirect_instance = __ CreateBitOrPointerCast(indirect_instance, Types::i64);
   llvm::Value* indirect_result_type = __ CreateAnd(indirect_instance,
                                                   __ getInt64(0x000000ff));
   __ CreateBr(check_sequental);
@@ -6104,7 +6109,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   phi_index->addIncoming(index_indirect, indirect_string_loaded);
   phi_index->addIncoming(index, insert);
 
-  llvm::PHINode* phi_str = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi_str = __ CreatePHI(Types::tagged, 2);
   phi_str->addIncoming(str, insert);
   phi_str->addIncoming(phi_string, indirect_string_loaded);
 
@@ -6145,13 +6150,14 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   __ SetInsertPoint(two_byte_external);
   llvm::BasicBlock* done = NewBlock("StringCharCodeAt Done");
   llvm::Value* two_byte_offset = __ CreateMul(phi_index, __ getInt32(2));
-  llvm::Value* base_casted_two_ext = __ CreateIntToPtr(external_string,
-                                                      Types::ptr_i8);
+  llvm::Value* base_casted_two_ext = __ CreateBitOrPointerCast(external_string,
+                                                               Types::ptr_i8);
   llvm::Value* two_byte_address = __ CreateGEP(base_casted_two_ext,
                                                two_byte_offset);
   llvm::Value* casted_addr_two_ext = __ CreatePointerCast(two_byte_address,
-                                                     Types::ptr_tagged);
+                                                          Types::ptr_tagged);
   llvm::Value* two_byte_ex_load = __ CreateLoad(casted_addr_two_ext);
+  two_byte_ex_load = __ CreateBitOrPointerCast(two_byte_ex_load, Types::i64);
   llvm::Value* two_byte_external_result = __ CreateAnd(two_byte_ex_load,
                                                       __ getInt64(0x0000ffff));
   __ CreateBr(done);
@@ -6166,6 +6172,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   llvm::Value* casted_addr_one_ext = __ CreatePointerCast(one_byte_addr_ext,
                                                   Types::ptr_tagged);
   llvm::Value* add_result_one =  __ CreateLoad(casted_addr_one_ext);
+  add_result_one = __ CreateBitOrPointerCast(add_result_one, Types::i64);
   llvm::Value* one_byte_external_result = __ CreateAnd(add_result_one,
                                                       __ getInt64(0x000000ff));
   __ CreateBr(done);
@@ -6191,6 +6198,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   llvm::Value* casted_adds_two = __ CreatePointerCast(address_two,
                                                      Types::ptr_tagged);
   llvm::Value* two_byte_load = __ CreateLoad(casted_adds_two);
+  two_byte_load = __ CreateBitOrPointerCast(two_byte_load, Types::i64);
   llvm::Value* two_byte_result = __ CreateAnd(two_byte_load,
                                              __ getInt64(0x0000ffff));
   __ CreateBr(done);
@@ -6202,6 +6210,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   llvm::Value* addr_one = __ CreateGEP(base_casted_one, one_byte_add_index);
   llvm::Value* casted_adds_one = __ CreatePointerCast(addr_one, Types::ptr_tagged);
   llvm::Value* one_byte_load = __ CreateLoad(casted_adds_one);
+  one_byte_load = __ CreateBitOrPointerCast(one_byte_load, Types::i64);
   llvm::Value* one_byte_result = __ CreateAnd(one_byte_load, __ getInt64(0x000000ff));
   __ CreateBr(done);
 
@@ -6214,7 +6223,7 @@ void LLVMChunkBuilder::DoStringCharCodeAt(HStringCharCodeAt* instr) {
   __ CreateBr(set_value);
 
   __ SetInsertPoint(deferred);
-  llvm::PHINode* str_phi_deferred = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* str_phi_deferred = __ CreatePHI(Types::tagged, 2);
   str_phi_deferred->addIncoming(str, insert);
   str_phi_deferred->addIncoming(phi_str, cont_inside_seq);
 
