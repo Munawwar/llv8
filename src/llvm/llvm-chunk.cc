@@ -2679,8 +2679,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // spec object -> true.
     DCHECK(map); //FIXME: map can be null here
     __ SetInsertPoint(next);
-    llvm::Value* cmp_instance = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset),
-                                            __ getInt64(static_cast<int8_t>(FIRST_SPEC_OBJECT_TYPE)));
+    llvm::Value* cmp_instance = CmpInstanceType(map, FIRST_SPEC_OBJECT_TYPE, llvm::CmpInst::ICMP_UGE);
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);    
   }
 
@@ -2689,8 +2688,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     DCHECK(map); //FIXME: map can be null here
     __ SetInsertPoint(check_blocks[cur_block]);
     llvm::BasicBlock* is_string_bb = NewBlock("BranchTagged ToBoolString IsString");
-    llvm::Value* cmp_instance = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset),
-                                            __ getInt64(static_cast<int8_t>(FIRST_NONSTRING_TYPE)));
+    llvm::Value* cmp_instance = CmpInstanceType(map, FIRST_NONSTRING_TYPE, llvm::CmpInst::ICMP_UGE);
      __ CreateCondBr(cmp_instance, check_blocks[++cur_block], is_string_bb);
      __ SetInsertPoint(is_string_bb);
      auto str_length = LoadFieldOperand(value, String::kLengthOffset);
@@ -2702,8 +2700,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // Symbol value -> true.
     __ SetInsertPoint(check_blocks[cur_block]);
     DCHECK(map); //FIXME: map can be null here
-    llvm::Value* cmp_instance = __ CreateICmpEQ(LoadFieldOperand(map, Map::kInstanceTypeOffset),
-                                            __ getInt64(static_cast<int8_t>(SYMBOL_TYPE)));
+    llvm::Value* cmp_instance = CmpInstanceType(map, SYMBOL_TYPE, llvm::CmpInst::ICMP_EQ);
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);
   }
 
@@ -2739,6 +2736,16 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
      // TODO(llvm): not sure
      __ CreateUnreachable();
   }
+}
+
+llvm::Value* LLVMChunkBuilder::CmpInstanceType(llvm::Value* map,
+                             InstanceType type,
+                             llvm::CmpInst::Predicate predicate) {
+   llvm::Value* field_operand = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+   llvm::Value* int_type = __ getInt64(static_cast<int>(type));
+   llvm::Value* cmp_result = __ CreateICmp(predicate, field_operand,
+                                           int_type, "CmpInstanceType");
+   return cmp_result;
 }
 
 void LLVMChunkBuilder::DoBranch(HBranch* instr) {
