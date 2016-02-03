@@ -263,6 +263,7 @@ struct BaseDefiningValueResult {
     // Check consistency between new and old means of checking whether a BDV is
     // a base.
     bool MustBeBase = isKnownBaseResult(BDV);
+    USE(MustBeBase);
     DCHECK(!MustBeBase || MustBeBase == IsKnownBase);
 #endif
   }
@@ -662,6 +663,7 @@ makeStatepointExplicitImpl(const CallSite &CS, /* to replace */
 // The GCResult is already inserted, we just need to find it
 #ifndef NDEBUG
   Instruction *toReplace = CS.getInstruction();
+  USE(toReplace);
   DCHECK((toReplace->hasNUses(0) || toReplace->hasNUses(1)) &&
          "only valid use before rewrite is gc.result");
   DCHECK(!toReplace->hasOneUse() ||
@@ -1160,6 +1162,7 @@ static bool insertParsePoints(Function &F, DominatorTree &DT, Pass *P,
 
   for (size_t i = 0; i < toUpdate.size(); i++) {
     CallSite &CS = toUpdate[i];
+    USE(CS);
     DCHECK(CS.getInstruction()->getParent()->getParent() == &F);
     DCHECK(isStatepoint(CS) && "expected to already be a deopt statepoint");
   }
@@ -1295,7 +1298,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT, Pass *P,
       if (!isa<Instruction>(V))
         // Non-instruction values trivial dominate all possible uses
         continue;
-      auto LiveInst = cast<Instruction>(V);
+      auto LiveInst = cast<Instruction>(V); 
+      USE(LiveInst);
       DCHECK(DT.isReachableFromEntry(LiveInst->getParent()) &&
              "unreachable values should never be live");
       DCHECK(DT.dominates(LiveInst, info.StatepointToken) &&
@@ -1600,6 +1604,7 @@ static void computeLiveInValues(DominatorTree &DT, Function &F,
 
 #ifndef NDEBUG
     for (Value *Kill : Data.KillSet[&BB])
+      USE(Kill);
       DCHECK(!Data.LiveSet[&BB].count(Kill) && "live set contains kill");
 #endif
 
