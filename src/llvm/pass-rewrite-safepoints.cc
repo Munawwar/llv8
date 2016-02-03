@@ -1603,9 +1603,10 @@ static void computeLiveInValues(DominatorTree &DT, Function &F,
                         gc_collected_pointers);
 
 #ifndef NDEBUG
-    for (Value *Kill : Data.KillSet[&BB])
+    for (Value *Kill : Data.KillSet[&BB]) {
       USE(Kill);
       DCHECK(!Data.LiveSet[&BB].count(Kill) && "live set contains kill");
+    }
 #endif
 
     Data.LiveOut[&BB] = DenseSet<Value *>();
