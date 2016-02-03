@@ -6982,7 +6982,7 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
 //  RecordSafepointWithLazyDeopt(instr, RECORD_SAFEPOINT_WITH_REGISTERS, 0);
   // __ StoreToSafepointRegisterSlot(result, result);
   llvm::Value* is_smi = SmiCheck(result_from_deferred, false);
-  DeoptimizeIf(is_smi, true);
+  DeoptimizeIf(is_smi);
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
