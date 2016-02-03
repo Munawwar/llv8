@@ -2911,7 +2911,6 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 }
 
 void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
-  //TODO: Not tested
   int arity = instr->argument_count() - 1;
   CallFunctionFlags flags = instr->function_flags();
   llvm::Value* context = Use(instr->context());
@@ -2919,7 +2918,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
   llvm::Value* result = nullptr;
 
   if (instr->HasVectorAndSlot()) {
-    UNIMPLEMENTED();
+    //UNIMPLEMENTED();
     AllowDeferredHandleDereference vector_structure_check;
     AllowHandleAllocation allow_handles;
     Handle<TypeFeedbackVector> feedback_vector = instr->feedback_vector();
