@@ -2742,8 +2742,9 @@ llvm::Value* LLVMChunkBuilder::CmpInstanceType(llvm::Value* map,
                              InstanceType type,
                              llvm::CmpInst::Predicate predicate) {
    llvm::Value* field_operand = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+   llvm::Value* int_field_operand = __ CreatePtrToInt(field_operand, Types::i64);
    llvm::Value* int_type = __ getInt64(static_cast<int>(type));
-   llvm::Value* cmp_result = __ CreateICmp(predicate, field_operand,
+   llvm::Value* cmp_result = __ CreateICmp(predicate, int_field_operand,
                                            int_type, "CmpInstanceType");
    return cmp_result;
 }
