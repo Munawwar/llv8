@@ -2667,8 +2667,9 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     map = LoadFieldOperand(value, HeapObject::kMapOffset);
     if (expected.CanBeUndetectable()) {
       auto map_bit_offset = LoadFieldOperand(map, Map::kBitFieldOffset);
+      auto casted_map_bit_offset = __ CreatePtrToInt(map_bit_offset, Types::i64);
       auto map_detach = __ getInt64(1 << Map::kIsUndetectable);
-      auto test = __ CreateAnd(map_bit_offset, map_detach);
+      auto test = __ CreateAnd(casted_map_bit_offset, map_detach);
       auto cmp_zero = __ CreateICmpEQ(test, __ getInt64(0));
       next = NewBlock("BracnhTagged NonUndetachable");
       __ CreateCondBr(cmp_zero, next, false_target);
@@ -2679,8 +2680,10 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // spec object -> true.
     DCHECK(map); //FIXME: map can be null here
     __ SetInsertPoint(next);
-    llvm::Value* cmp_instance = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset),
-                                            __ getInt64(static_cast<int8_t>(FIRST_SPEC_OBJECT_TYPE)));
+    llvm::Value* map_type = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+    llvm::Value* casted_map_type = __ CreatePtrToInt(map_type, Types::i64);
+    llvm::Value* obj_type = __ getInt64(static_cast<int8_t>(FIRST_SPEC_OBJECT_TYPE));
+    llvm::Value* cmp_instance = __ CreateICmpUGE(casted_map_type, obj_type);
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);    
   }
 
@@ -2689,12 +2692,15 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     DCHECK(map); //FIXME: map can be null here
     __ SetInsertPoint(check_blocks[cur_block]);
     llvm::BasicBlock* is_string_bb = NewBlock("BranchTagged ToBoolString IsString");
-    llvm::Value* cmp_instance = __ CreateICmpUGE(LoadFieldOperand(map, Map::kInstanceTypeOffset),
-                                            __ getInt64(static_cast<int8_t>(FIRST_NONSTRING_TYPE)));
+    llvm::Value* map_type = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+    llvm::Value* casted_map_type = __ CreatePtrToInt(map_type, Types::i64);
+    llvm::Value* type = __ getInt64(static_cast<int8_t>(FIRST_NONSTRING_TYPE));
+    llvm::Value* cmp_instance = __ CreateICmpUGE(casted_map_type, type);
      __ CreateCondBr(cmp_instance, check_blocks[++cur_block], is_string_bb);
      __ SetInsertPoint(is_string_bb);
      auto str_length = LoadFieldOperand(value, String::kLengthOffset);
-     auto cmp_length = __ CreateICmpEQ(str_length, __ getInt64(0));
+     auto casted_str_length = __ CreatePtrToInt(str_length, Types::i64);
+     auto cmp_length = __ CreateICmpEQ(casted_str_length, __ getInt64(0));
      __ CreateCondBr(cmp_length, false_target, true_target);
   }
 
@@ -2702,8 +2708,10 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // Symbol value -> true.
     __ SetInsertPoint(check_blocks[cur_block]);
     DCHECK(map); //FIXME: map can be null here
-    llvm::Value* cmp_instance = __ CreateICmpEQ(LoadFieldOperand(map, Map::kInstanceTypeOffset),
-                                            __ getInt64(static_cast<int8_t>(SYMBOL_TYPE)));
+    llvm::Value* map_type = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+    llvm::Value* casted_map_type = __ CreatePtrToInt(map_type, Types::i64);
+    llvm::Value* symbol_type = __ getInt64(static_cast<int8_t>(SYMBOL_TYPE));
+    llvm::Value* cmp_instance = __ CreateICmpEQ(casted_map_type, symbol_type);
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);
   }
 
@@ -2774,7 +2782,8 @@ void LLVMChunkBuilder::DoBranch(HBranch* instr) {
       DCHECK(!info()->IsStub());
       llvm::Value* zero = __ getInt64(0);
       llvm::Value* length = LoadFieldOperand(value, String::kLengthOffset);
-      llvm::Value* compare = __ CreateICmpNE(length, zero);
+      llvm::Value* casted_length = __ CreatePtrToInt(length, Types::i64);
+      llvm::Value* compare = __ CreateICmpNE(casted_length, zero);
       llvm::BranchInst* branch = __ CreateCondBr(compare, true_target,
                                                  false_target);
       instr->set_llvm_value(branch);
