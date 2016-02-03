@@ -2680,10 +2680,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // spec object -> true.
     DCHECK(map); //FIXME: map can be null here
     __ SetInsertPoint(next);
-    llvm::Value* map_type = LoadFieldOperand(map, Map::kInstanceTypeOffset);
-    llvm::Value* casted_map_type = __ CreatePtrToInt(map_type, Types::i64);
-    llvm::Value* obj_type = __ getInt64(static_cast<int8_t>(FIRST_SPEC_OBJECT_TYPE));
-    llvm::Value* cmp_instance = __ CreateICmpUGE(casted_map_type, obj_type);
+    llvm::Value* cmp_instance = CmpInstanceType(map, FIRST_SPEC_OBJECT_TYPE, llvm::CmpInst::ICMP_UGE);
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);    
   }
 
@@ -2692,10 +2689,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     DCHECK(map); //FIXME: map can be null here
     __ SetInsertPoint(check_blocks[cur_block]);
     llvm::BasicBlock* is_string_bb = NewBlock("BranchTagged ToBoolString IsString");
-    llvm::Value* map_type = LoadFieldOperand(map, Map::kInstanceTypeOffset);
-    llvm::Value* casted_map_type = __ CreatePtrToInt(map_type, Types::i64);
-    llvm::Value* type = __ getInt64(static_cast<int8_t>(FIRST_NONSTRING_TYPE));
-    llvm::Value* cmp_instance = __ CreateICmpUGE(casted_map_type, type);
+    llvm::Value* cmp_instance = CmpInstanceType(map, FIRST_NONSTRING_TYPE, llvm::CmpInst::ICMP_UGE);
      __ CreateCondBr(cmp_instance, check_blocks[++cur_block], is_string_bb);
      __ SetInsertPoint(is_string_bb);
      auto str_length = LoadFieldOperand(value, String::kLengthOffset);
@@ -2708,10 +2702,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // Symbol value -> true.
     __ SetInsertPoint(check_blocks[cur_block]);
     DCHECK(map); //FIXME: map can be null here
-    llvm::Value* map_type = LoadFieldOperand(map, Map::kInstanceTypeOffset);
-    llvm::Value* casted_map_type = __ CreatePtrToInt(map_type, Types::i64);
-    llvm::Value* symbol_type = __ getInt64(static_cast<int8_t>(SYMBOL_TYPE));
-    llvm::Value* cmp_instance = __ CreateICmpEQ(casted_map_type, symbol_type);
+    llvm::Value* cmp_instance = CmpInstanceType(map, SYMBOL_TYPE, llvm::CmpInst::ICMP_EQ);
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);
   }
 
@@ -2747,6 +2738,17 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
      // TODO(llvm): not sure
      __ CreateUnreachable();
   }
+}
+
+llvm::Value* LLVMChunkBuilder::CmpInstanceType(llvm::Value* map,
+                             InstanceType type,
+                             llvm::CmpInst::Predicate predicate) {
+   llvm::Value* field_operand = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+   llvm::Value* int_field_operand = __ CreatePtrToInt(field_operand, Types::i64);
+   llvm::Value* int_type = __ getInt64(static_cast<int>(type));
+   llvm::Value* cmp_result = __ CreateICmp(predicate, int_field_operand,
+                                           int_type, "CmpInstanceType");
+   return cmp_result;
 }
 
 void LLVMChunkBuilder::DoBranch(HBranch* instr) {
@@ -2912,7 +2914,6 @@ void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
 }
 
 void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
-  //TODO: Not tested
   int arity = instr->argument_count() - 1;
   CallFunctionFlags flags = instr->function_flags();
   llvm::Value* context = Use(instr->context());
@@ -2920,7 +2921,7 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
   llvm::Value* result = nullptr;
 
   if (instr->HasVectorAndSlot()) {
-    UNIMPLEMENTED();
+    //UNIMPLEMENTED();
     AllowDeferredHandleDereference vector_structure_check;
     AllowHandleAllocation allow_handles;
     Handle<TypeFeedbackVector> feedback_vector = instr->feedback_vector();
