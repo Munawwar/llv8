@@ -6826,7 +6826,6 @@ void LLVMChunkBuilder::DoUseConst(HUseConst* instr) {
 void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
   llvm::Value* receiver = Use(instr->receiver());
   llvm::Value* function = Use(instr->function());
-  llvm::Value* receiver_f = nullptr;
   llvm::BasicBlock* insert_block = __ GetInsertBlock();
   llvm::BasicBlock* global_object = NewBlock("DoWrapReceiver Global object");
   llvm::BasicBlock* not_global_object = NewBlock("DoWrapReceiver "
@@ -6844,15 +6843,17 @@ void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
                 __ getInt64(1 << SharedFunctionInfo::kStrictModeBitWithinByte);
     llvm::Value* byte_offset = LoadFieldOperand(op,
                                  SharedFunctionInfo::kStrictModeByteOffset);
-    llvm::Value* cmp = __ CreateICmpNE(byte_offset, bit_with_byte);
+    llvm::Value* casted_offset = __ CreatePtrToInt(byte_offset, Types::i64);
+    llvm::Value* cmp = __ CreateICmpNE(casted_offset, bit_with_byte);
     __ CreateCondBr(cmp, receiver_ok, receiver_fail);
     __ SetInsertPoint(receiver_fail);
-    receiver_f = receiver;
     llvm::Value* native_byte_offset = LoadFieldOperand(op,
                                  SharedFunctionInfo::kNativeByteOffset);
     llvm::Value* native_bit_with_byte =
                  __ getInt64(1 << SharedFunctionInfo::kNativeBitWithinByte);
-    llvm::Value* compare = __ CreateICmpNE(native_byte_offset,
+    llvm::Value* casted_native_offset = __ CreatePtrToInt(native_byte_offset,
+                                                          Types::i64);
+    llvm::Value* compare = __ CreateICmpNE(casted_native_offset,
                                           native_bit_with_byte);
     __ CreateCondBr(compare, receiver_ok, dist);
   } else
@@ -6869,27 +6870,26 @@ void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
 
   // The receiver should be a JS object
   __ SetInsertPoint(not_equal);
-  llvm::Value* receiver_not_equal = receiver;
-  llvm::Value* is_smi = SmiCheck(receiver_not_equal);
+  llvm::Value* is_smi = SmiCheck(receiver);
   DeoptimizeIf(is_smi);
-  llvm::Value* compare_obj = CmpObjectType(receiver_not_equal,
+  llvm::Value* compare_obj = CmpObjectType(receiver,
                                           FIRST_SPEC_OBJECT_TYPE,
                                           llvm::CmpInst::ICMP_ULT);
   DeoptimizeIf(compare_obj);
   __ CreateBr(receiver_ok);
+
   __ SetInsertPoint(global_object);
-  llvm::Value* glob_receiver = LoadFieldOperand(function,
-                                               JSFunction::kContextOffset);
-  glob_receiver = LoadFieldOperand(glob_receiver,
+  llvm::Value* global_receiver = LoadFieldOperand(function,
+                                                 JSFunction::kContextOffset);
+  global_receiver = LoadFieldOperand(global_receiver,
                              Context::SlotOffset(Context::GLOBAL_OBJECT_INDEX));
-  glob_receiver = LoadFieldOperand(glob_receiver,
-                                  GlobalObject::kGlobalProxyOffset);
+  global_receiver = LoadFieldOperand(global_receiver,
+                                    GlobalObject::kGlobalProxyOffset);
   __ CreateBr(receiver_ok);
+
   __ SetInsertPoint(receiver_ok);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 4);
-  phi->addIncoming(receiver_f, receiver_fail);
-  phi->addIncoming(glob_receiver, global_object);
-  phi->addIncoming(receiver_not_equal, not_equal);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
+  phi->addIncoming(global_receiver, global_object);
   phi->addIncoming(receiver, insert_block);
   instr->set_llvm_value(phi);
 }
@@ -6900,8 +6900,9 @@ llvm::Value* LLVMChunkBuilder::CmpObjectType(llvm::Value* heap_object,
                                              llvm::CmpInst::Predicate predicate) {
   llvm::Value* operand = LoadFieldOperand(heap_object, HeapObject::kMapOffset);
   llvm::Value* map = LoadFieldOperand(operand, Map::kInstanceTypeOffset);
+  llvm::Value* casted_map = __ CreatePtrToInt(map, Types::i64);
   llvm::Value* imm = __ getInt64(static_cast<int>(type));
-  return __ CreateICmp(predicate, map, imm);
+  return __ CreateICmp(predicate, casted_map, imm);
 }
 
 void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(
