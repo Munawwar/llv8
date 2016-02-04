@@ -1519,7 +1519,9 @@ llvm::Value* LLVMChunkBuilder::Move(Handle<Object> object,
   DCHECK(!isolate()->heap()->InNewSpace(*object));
 
   uint64_t intptr_value = reinterpret_cast<uint64_t>(object.location());
-  return RecordRelocInfo(intptr_value, rmode);
+  auto the_pointer = RecordRelocInfo(intptr_value, rmode);
+  pointers_.insert(the_pointer);
+  return the_pointer;
 }
 
 llvm::Value* LLVMChunkBuilder::Compare(llvm::Value* lhs, llvm::Value* rhs) {
@@ -4639,10 +4641,8 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
   params.push_back(name);
   params.push_back(vector);
   params.push_back(slot);
-  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S9,
-                            params);
-  llvm::Value* return_val = __ CreatePtrToInt(result, Types::i64);
-  instr->set_llvm_value(return_val);
+  auto result = CallCode(ic, llvm::CallingConv::X86_64_V8_S9, params);
+  instr->set_llvm_value(result);
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
@@ -5075,7 +5075,7 @@ void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
   //llvm::Value* casted_floor = __ CreateBitCast(floor, Types::i32); 
   llvm::Value* casted_int =  __ CreateFPToSI(floor, Types::i64);
      // FIXME: Figure out why we need this step. Fix for bitops-nsieve-bits
-     auto result = __ CreateTruncOrBitCast(casted_int, Types::i32);
+  auto result = __ CreateTruncOrBitCast(casted_int, Types::i32);
   instr->set_llvm_value(result);
 }
 
