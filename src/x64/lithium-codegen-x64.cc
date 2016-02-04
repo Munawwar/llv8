@@ -1052,7 +1052,7 @@ void LCodeGen::DoModByConstI(LModByConstI* instr) {
     DeoptimizeIf(no_condition, instr, Deoptimizer::kDivisionByZero);
     return;
   }
-
+  
   __ TruncatingDiv(dividend, Abs(divisor));
   __ imull(rdx, rdx, Immediate(Abs(divisor)));
   __ movl(rax, dividend);

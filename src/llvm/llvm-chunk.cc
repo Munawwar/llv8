@@ -5172,22 +5172,21 @@ void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
   auto left = Use(instr->left());
   auto right = __ getInt32(divisor_val);
   auto result = __ CreateSRem(left, right);
+
+  // Check for negative zero.
   if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-     UNIMPLEMENTED();
-     llvm::Value* mul = __ CreateMul(result, right);
-     llvm::Value* sub = __ CreateSub(left, mul);
      llvm::BasicBlock* remainder_not_zero = NewBlock("DoModByConstI"
                                                       " remainder_not_zero");
      llvm::BasicBlock* remainder_zero = NewBlock("DoModByConstI"
                                                   " remainder_zero");
      llvm::Value* zero = __ getInt32(0);
-     llvm::Value* cmp = __ CreateICmpEQ(sub, zero);
-     __ CreateCondBr(cmp, remainder_zero, remainder_not_zero);
+     llvm::Value* cmp = __ CreateICmpNE(result, zero);
+     __ CreateCondBr(cmp, remainder_not_zero, remainder_zero);
 
      __ SetInsertPoint(remainder_zero);
      llvm::Value* cmp_divident = __ CreateICmpSLT(left, zero);
-     DeoptimizeIf(cmp_divident);
-
+     DeoptimizeIf(cmp_divident, false, remainder_not_zero);
+        
      __ SetInsertPoint(remainder_not_zero);
   }
   instr->set_llvm_value(result);
@@ -5712,6 +5711,7 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
 
 void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
   HValue* key = instr->key();
+  llvm::Value* value = Use(instr->value());
   uint32_t inst_offset = instr->base_offset();
   ElementsKind elements_kind = instr->elements_kind();
   if (kPointerSize == kInt32Size && !key->IsConstant()
@@ -5720,17 +5720,11 @@ void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
   }
   if (instr->NeedsCanonicalization()) {
     UNIMPLEMENTED();
-    //FIXME: wrong
-    llvm::Value* val_ = __ getInt64(0);
-    // __ CreateXor(val_, val_);
-    llvm::Value* double_val_ = __ CreateSIToFP(val_, Types::float64);
-    llvm::Value* double_input_ = __ CreateSIToFP(Use(instr->value()), Types::float64);
-    __ CreateFSub(double_input_, double_val_);
   }
   llvm::Value* address = BuildFastArrayOperand(key, Use(instr->elements()),
                                                elements_kind, inst_offset);
   llvm::Value* casted_address = __ CreateBitCast(address, Types::ptr_float64);
-  llvm::Value* Store = __ CreateStore(Use(instr->value()), casted_address);
+  llvm::Value* Store = __ CreateStore(value, casted_address);
   instr->set_llvm_value(Store);
 }
 
