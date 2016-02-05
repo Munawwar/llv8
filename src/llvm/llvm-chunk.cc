@@ -6383,8 +6383,6 @@ void LLVMChunkBuilder::DoTransitionElementsKind(
    params.push_back(object);
    params.push_back(map);
    params.push_back(GetContext());
-   for (int i = 1; i < instr->OperandCount() ; ++i)
-    params.push_back(Use(instr->OperandAt(i)));
    pending_pushed_args_.Clear();
    AllowHandleAllocation allow_handles; 
    CallCode(stub.GetCode(), llvm::CallingConv::X86_64_V8_CES, params);
