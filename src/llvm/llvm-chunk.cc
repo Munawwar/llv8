@@ -3292,7 +3292,8 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
   bool truncating = instr->CanTruncateToInt32();
 
   llvm::Value* vals_map = LoadFieldOperand(Use(val), HeapObject::kMapOffset);
-  llvm::Value* cmp = CompareRoot(vals_map, Heap::kHeapNumberMapRootIndex);
+  llvm::Value* cmp = CompareRoot(vals_map, Heap::kHeapNumberMapRootIndex,
+                                 llvm::CmpInst::ICMP_NE);
 
   if (truncating) {
     llvm::BasicBlock* truncate_heap_number = NewBlock("TruncateHeapNumberToI");
