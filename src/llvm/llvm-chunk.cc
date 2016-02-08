@@ -2669,9 +2669,9 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     map = LoadFieldOperand(value, HeapObject::kMapOffset);
     if (expected.CanBeUndetectable()) {
       auto map_bit_offset = LoadFieldOperand(map, Map::kBitFieldOffset);
-      auto casted_map_bit_offset = __ CreatePtrToInt(map_bit_offset, Types::i64);
+      auto int_map_bit_offset = __ CreatePtrToInt(map_bit_offset, Types::i64);
       auto map_detach = __ getInt64(1 << Map::kIsUndetectable);
-      auto test = __ CreateAnd(casted_map_bit_offset, map_detach);
+      auto test = __ CreateAnd(int_map_bit_offset, map_detach);
       auto cmp_zero = __ CreateICmpEQ(test, __ getInt64(0));
       next = NewBlock("BracnhTagged NonUndetachable");
       __ CreateCondBr(cmp_zero, next, false_target);
@@ -5616,7 +5616,11 @@ void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
   }
 
   llvm::Value* target = ConstructAddress(context, offset);
-  llvm::Value* casted_address = __ CreateBitCast(target, Types::ptr_i64);
+  llvm::Value* casted_address = nullptr;
+  if (instr->value()->representation().IsTagged())
+    casted_address = __ CreateBitCast(target, Types::ptr_tagged);
+  else
+    casted_address = __ CreateBitCast(target, Types::ptr_i64);
   __ CreateStore(value, casted_address);
   if (instr->NeedsWriteBarrier()) {
     int slot_offset = Context::SlotOffset(instr->slot_index());
