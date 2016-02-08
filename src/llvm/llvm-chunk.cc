@@ -3567,8 +3567,9 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
       //                  fail form date-format-tofte.js in arrayExists)
       llvm::Value* instance_offset = LoadFieldOperand(value,
                                                       Map::kInstanceTypeOffset);
-      
-      llvm::Value* and_value = __ CreateAnd(instance_offset, __ getInt64(0x000000ff));
+
+      llvm::Value* casted_offset = __ CreatePtrToInt(instance_offset, Types::i64);
+      llvm::Value* and_value = __ CreateAnd(casted_offset, __ getInt64(0x000000ff));
       llvm::Value* and_mask = __ CreateAnd(and_value, __ getInt64(mask));
       llvm::Value* cmp = __ CreateICmpEQ(and_mask, __ getInt64(tag));
       DeoptimizeIf(cmp, true);
