@@ -5911,7 +5911,7 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
     if (!instr->NeedsWriteBarrierForMap()) {
       llvm::Value* heap_transition = MoveHeapObject(transition);
       llvm::Value* ptr = __ CreateIntToPtr(Use(instr->object()), Types::ptr_i8);
-      llvm::Value* address =  __ CreateGEP(ptr, __ getInt32(HeapObject::kMapOffset));
+      llvm::Value* address = FieldOperand(ptr, HeapObject::kMapOffset);
       llvm::Value* casted_address = __ CreateBitCast(address, Types::ptr_tagged);
       __ CreateStore(heap_transition, casted_address);
     } else {
