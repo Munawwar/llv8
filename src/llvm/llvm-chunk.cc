@@ -3300,7 +3300,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     llvm::BasicBlock* no_heap_number = NewBlock("Not a heap number");
     llvm::BasicBlock* merge_inner = NewBlock("inner merge");
 
-    __ CreateCondBr(cmp, truncate_heap_number, no_heap_number);
+    __ CreateCondBr(cmp, no_heap_number, truncate_heap_number);
 
     __ SetInsertPoint(truncate_heap_number);
     llvm::Value* value_addr = FieldOperand(Use(val), HeapNumber::kValueOffset);
@@ -3310,25 +3310,76 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     llvm::Value* truncate_heap_number_result = __ CreateFPToSI(double_val,
                                                                Types::i32);
 
-    // FIXME(llvm): add NaN check
-    // cmpq(result_reg, Immediate(1)); (MacroAssembler::TruncateHeapNumberToI)
-    // And implement the slow case call (SlowTruncateToI)
-    auto not_qnan = __ CreateFCmpORD(double_val, double_val);
-    Assert(not_qnan);
-    auto not_indef = __ CreateICmpNE(truncate_heap_number_result,
-                                     __ getInt32(0x80000000));
-    Assert(not_indef);
+    //TruncateHeapNumberToI
+    llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(
+          module_.get(), llvm::Intrinsic::ssub_with_overflow, Types::i32);
+    llvm::Value* params[] = { __ getInt32(1), truncate_heap_number_result };
+    llvm::Value* call = __ CreateCall(intrinsic, params);
+    llvm::Value* overflow = __ CreateExtractValue(call, 1);
+    llvm::BasicBlock* slow_case = NewBlock("ChangeTaggedToISlow slow case");
+    llvm::BasicBlock* done = NewBlock("ChangeTaggedToISlow done");
+    __ CreateCondBr(overflow, slow_case, done);
 
+    __ SetInsertPoint(slow_case);
+    Register input_reg = rbx;
+    Register result_reg = rax;
+    int offset = HeapNumber::kValueOffset - kHeapObjectTag;
+    DoubleToIStub stub(isolate(), input_reg, result_reg, offset, true);
+    Handle<Code> code = Handle<Code>::null();
+    {
+      AllowHandleAllocation allow_handles;
+      AllowHeapAllocation allow_heap_alloc;
+      code = stub.GetCode();
+    }
+    llvm::Value* fictive_val = __ getInt32(0); //fictive
+    std::vector<llvm::Value*> args = { fictive_val, truncate_heap_number_result };
+    auto result_intrisic = CallCode(code, llvm::CallingConv::X86_64_V8_S12, args);
+    auto casted_result_intrisic = __ CreatePtrToInt(result_intrisic, Types::i32);
+    Assert(__ getFalse()); // FIXME(llvm): Not tested this case
+    __ CreateBr(done);
+
+    __ SetInsertPoint(done);
+    llvm::PHINode* phi_done = __ CreatePHI(Types::i32, 2);
+    phi_done->addIncoming(casted_result_intrisic, slow_case);
+    phi_done->addIncoming(truncate_heap_number_result, truncate_heap_number);
     __ CreateBr(merge_inner);
 
     __ SetInsertPoint(no_heap_number);
-    Assert(__ getFalse()); // FIXME(llvm): deal with oddballs
+    // Check for Oddballs. Undefined/False is converted to zero and True to one
+    // for truncating conversions.
+    llvm::BasicBlock* check_bools = NewBlock("ChangeTaggedToISlow check_bools");
+    llvm::BasicBlock* no_check_bools = NewBlock("ChangeTaggedToISlow no_check_bools");
+    llvm::Value* cmp_undefined = CompareRoot(Use(val), Heap::kUndefinedValueRootIndex,
+                                        llvm::CmpInst::ICMP_NE);
+    __ CreateCondBr(cmp_undefined, check_bools, no_check_bools);
+    __ SetInsertPoint(no_check_bools);
+    llvm::Value* result_no_check_bools = __ getInt32(0);
+    __ CreateBr(merge_inner);
+
+    __ SetInsertPoint(check_bools);
+    llvm::BasicBlock* check_true = NewBlock("ChangeTaggedToISlow check_true");
+    llvm::BasicBlock* check_false = NewBlock("ChangeTaggedToISlow check_false");
+    llvm::Value* cmp_true = CompareRoot(Use(val), Heap::kTrueValueRootIndex,
+                                   llvm::CmpInst::ICMP_NE);
+    __ CreateCondBr(cmp_true, check_false, check_true);
+
+    __ SetInsertPoint(check_true);
+    llvm::Value* result_check_true = __ getInt32(1);
+    __ CreateBr(merge_inner);
+
+    __ SetInsertPoint(check_false);
+    llvm::Value* cmp_false = CompareRoot(Use(val), Heap::kFalseValueRootIndex,
+                                    llvm::CmpInst::ICMP_NE);
+    DeoptimizeIf(cmp_false);
+    llvm::Value* result_check_false = __ getInt32(0);
     __ CreateBr(merge_inner);
 
     __ SetInsertPoint(merge_inner);
-    llvm::PHINode* phi_inner = __ CreatePHI(Types::i32, 2);
-    phi_inner->addIncoming(__ getInt32(0x0badbeef), no_heap_number); // FIXME
-    phi_inner->addIncoming(truncate_heap_number_result, truncate_heap_number);
+    llvm::PHINode* phi_inner = __ CreatePHI(Types::i32, 4);
+    phi_inner->addIncoming(result_no_check_bools, no_check_bools);
+    phi_inner->addIncoming(result_check_true, check_true);
+    phi_inner->addIncoming(result_check_false, check_false);
+    phi_inner->addIncoming(phi_done, done);
     relult_for_not_smi = phi_inner;
     not_smi_merge = merge_inner;
   } else {
