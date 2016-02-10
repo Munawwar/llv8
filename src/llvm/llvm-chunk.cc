@@ -3332,9 +3332,12 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
       code = stub.GetCode();
     }
     llvm::Value* fictive_val = __ getInt32(0); //fictive
-    std::vector<llvm::Value*> args = { fictive_val, truncate_heap_number_result };
-    auto result_intrisic = CallCode(code, llvm::CallingConv::X86_64_V8_S12, args);
-    auto casted_result_intrisic = __ CreatePtrToInt(result_intrisic, Types::i32);
+    std::vector<llvm::Value*> args = {fictive_val, truncate_heap_number_result};
+    llvm::Value* result_intrisic = CallCode(code,
+                                            llvm::CallingConv::X86_64_V8_S12,
+                                            args);
+    llvm::Value* casted_result_intrisic = __ CreatePtrToInt(result_intrisic,
+                                                            Types::i32);
     Assert(__ getFalse()); // FIXME(llvm): Not tested this case
     __ CreateBr(done);
 
@@ -3347,10 +3350,12 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     __ SetInsertPoint(no_heap_number);
     // Check for Oddballs. Undefined/False is converted to zero and True to one
     // for truncating conversions.
-    llvm::BasicBlock* check_bools = NewBlock("ChangeTaggedToISlow check_bools");
-    llvm::BasicBlock* no_check_bools = NewBlock("ChangeTaggedToISlow no_check_bools");
-    llvm::Value* cmp_undefined = CompareRoot(Use(val), Heap::kUndefinedValueRootIndex,
-                                        llvm::CmpInst::ICMP_NE);
+    llvm::BasicBlock* check_bools = NewBlock("ChangeTaggedToISlow check_bool");
+    llvm::BasicBlock* no_check_bools = NewBlock("ChangeTaggedToISlow"
+                                                " no_check_bools");
+    llvm::Value* cmp_undefined = CompareRoot(Use(val),
+                                             Heap::kUndefinedValueRootIndex,
+                                             llvm::CmpInst::ICMP_NE);
     __ CreateCondBr(cmp_undefined, check_bools, no_check_bools);
     __ SetInsertPoint(no_check_bools);
     llvm::Value* result_no_check_bools = __ getInt32(0);
@@ -3369,7 +3374,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
 
     __ SetInsertPoint(check_false);
     llvm::Value* cmp_false = CompareRoot(Use(val), Heap::kFalseValueRootIndex,
-                                    llvm::CmpInst::ICMP_NE);
+                                         llvm::CmpInst::ICMP_NE);
     DeoptimizeIf(cmp_false);
     llvm::Value* result_check_false = __ getInt32(0);
     __ CreateBr(merge_inner);
