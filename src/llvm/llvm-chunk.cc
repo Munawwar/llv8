@@ -2386,7 +2386,7 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
                                                      has_side_effects);
   llvm::BasicBlock* current_block = __ GetInsertBlock();
   auto last_instr = current_block-> getTerminator();
-  // if block has terminator we must insert before instruction it
+  // if block has terminator we must insert before last instruction
   if (!last_instr) 
     return __ CreateCall(inline_asm, __ getInt64(intptr_value));
   auto call = llvm::CallInst::Create(inline_asm, __ getInt64(intptr_value), "reloc", last_instr);
@@ -6453,7 +6453,35 @@ void LLVMChunkBuilder::DoTrapAllocationMemento(HTrapAllocationMemento* instr) {
 }
 
 void LLVMChunkBuilder::DoTypeof(HTypeof* instr) {
-  UNIMPLEMENTED();
+  llvm::Value* context = Use(instr->context());
+  llvm::Value* value = Use(instr->value());
+  llvm::BasicBlock* do_call = NewBlock("DoTypeof Call Stub");
+  llvm::BasicBlock* no_call = NewBlock("DoTypeof Fast");
+  llvm::BasicBlock* end = NewBlock("DoTypeof Merge");
+  llvm::Value* not_smi = SmiCheck(value, true);
+  __ CreateCondBr(not_smi, do_call, no_call);
+
+  __ SetInsertPoint(no_call);
+  Factory* factory = isolate()->factory();
+  Handle<String> string = factory->number_string();
+  llvm::Value* val = MoveHeapObject(string);
+  __ CreateBr(end);
+
+  __ SetInsertPoint(do_call);
+
+  AllowHandleAllocation allow_handles;
+  std::vector<llvm::Value*> params;
+  params.push_back(context);
+  params.push_back(value);
+  TypeofStub stub(isolate());
+  Handle<Code> code = stub.GetCode();
+  llvm::Value* call = CallCode(code, llvm::CallingConv::X86_64_V8_S8, params);
+  __ CreateBr(end);
+  __ SetInsertPoint(end);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
+  phi->addIncoming(val, no_call);
+  phi->addIncoming(call, do_call);
+  instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
