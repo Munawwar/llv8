@@ -3331,6 +3331,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
       AllowHeapAllocation allow_heap_alloc;
       code = stub.GetCode();
     }
+    Assert(__ getFalse()); // FIXME(llvm): Not tested this case
     llvm::Value* fictive_val = __ getInt32(0); //fictive
     std::vector<llvm::Value*> args = {fictive_val, truncate_heap_number_result};
     llvm::Value* result_intrisic = CallCode(code,
@@ -3338,7 +3339,6 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
                                             args);
     llvm::Value* casted_result_intrisic = __ CreatePtrToInt(result_intrisic,
                                                             Types::i32);
-    Assert(__ getFalse()); // FIXME(llvm): Not tested this case
     __ CreateBr(done);
 
     __ SetInsertPoint(done);
