@@ -5847,13 +5847,19 @@ void LLVMChunkBuilder::DoStoreKeyedFixedDoubleArray(HStoreKeyed* instr) {
       && instr->IsDehoisted()) {
     UNIMPLEMENTED();
   }
+  llvm::Value* canonical_value = value;
   if (instr->NeedsCanonicalization()) {
     UNIMPLEMENTED();
+    llvm::Function* canonicalize = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::canonicalize, Types::float64);
+    llvm::Value* params[] = { value };
+    canonical_value = __ CreateCall(canonicalize, params);
+
   }
   llvm::Value* address = BuildFastArrayOperand(key, Use(instr->elements()),
                                                elements_kind, inst_offset);
   llvm::Value* casted_address = __ CreateBitCast(address, Types::ptr_float64);
-  llvm::Value* Store = __ CreateStore(value, casted_address);
+  llvm::Value* Store = __ CreateStore(canonical_value, casted_address);
   instr->set_llvm_value(Store);
 }
 
