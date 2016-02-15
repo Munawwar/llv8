@@ -743,8 +743,12 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                              llvm::CmpInst::Predicate = llvm::CmpInst::ICMP_EQ);
   llvm::Value* RecordRelocInfo(uint64_t intptr_value, RelocInfo::Mode rmode);
   void RecordWriteForMap(llvm::Value* object, llvm::Value* map);
-  void RecordWriteField(llvm::Value* object, llvm::Value* key_reg,
-                        int value, PointersToHereCheck ptr_check, RememberedSetAction set);
+  void RecordWriteField(llvm::Value* object,
+                        llvm::Value* key_reg,
+                        int offset,
+                        enum SmiCheck smi_check,
+                        PointersToHereCheck ptr_check,
+                        RememberedSetAction set);
   void RecordWrite(llvm::Value* object, llvm::Value* map, llvm::Value* value,
                    PointersToHereCheck ptr_check, RememberedSetAction set);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);

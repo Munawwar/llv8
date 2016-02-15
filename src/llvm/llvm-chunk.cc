@@ -5686,6 +5686,7 @@ void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
     RecordWriteField(context,
                      value,
                      slot_offset + kHeapObjectTag,
+                     INLINE_SMI_CHECK,
                      kPointersToHereMaybeInteresting,
                      EMIT_REMEMBERED_SET);
   }
@@ -5839,12 +5840,16 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
   }
 }
 
-void LLVMChunkBuilder::RecordWriteField(llvm::Value* object, llvm::Value* value,
-                                   int offset, PointersToHereCheck ptr_check, RememberedSetAction remembered_set) {
+void LLVMChunkBuilder::RecordWriteField(llvm::Value* object,
+                                        llvm::Value* value,
+                                        int offset,
+                                        enum SmiCheck smi_check,
+                                        PointersToHereCheck ptr_check,
+                                        RememberedSetAction remembered_set) {
   //FIXME: Not sure this is right
   //TODO: Find a way to test this function
   llvm::BasicBlock* done = NewBlock("RecordWriteField done");
-  if (INLINE_SMI_CHECK) {
+  if (smi_check == INLINE_SMI_CHECK) {
     llvm::BasicBlock* current_block = NewBlock("RecordWriteField Smi checked");
     // Skip barrier if writing a smi.
     llvm::Value* smi_cond = SmiCheck(value, false);//JumpIfSmi(value, &done);
@@ -6030,8 +6035,12 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
   if (instr->NeedsWriteBarrier()) {
     //FIXME: Not sure this is right
     //TODO: Find a way to test this case
-    RecordWriteField(obj_arg, Use(instr->value()), offset, 
-                     instr->PointersToHereCheckForValue(), EMIT_REMEMBERED_SET);
+    RecordWriteField(obj_arg,
+                     Use(instr->value()),
+                     offset + 1,
+                     instr->SmiCheckForWriteBarrier(),
+                     instr->PointersToHereCheckForValue(),
+                     EMIT_REMEMBERED_SET);
   }
 }
 
