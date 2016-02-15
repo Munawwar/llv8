@@ -1565,7 +1565,7 @@ llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
   return __ CreateICmpEQ(and_result, __ getInt32(0), "CheckPageFlag");
 }
 
-llvm::Value* LLVMChunkBuilder::AllocateHeapNumberSlow() {
+llvm::Value* LLVMChunkBuilder::AllocateHeapNumberSlow(HValue* unuse) {
 
   // return an i8*
   llvm::Value* allocated = CallRuntimeViaId(Runtime::kAllocateHeapNumber);
@@ -1603,73 +1603,11 @@ llvm::Value* LLVMChunkBuilder::LoadAllocationTopHelper(AllocationFlags flags) {
   return result;
 }
 
-llvm::Value* LLVMChunkBuilder::Allocate(int object_size,
-                                        AllocationFlags flags) {
-  DCHECK((flags & (RESULT_CONTAINS_TOP | SIZE_IN_WORDS)) == 0);
-  DCHECK(object_size <= Page::kMaxRegularHeapObjectSize);
-  if (!FLAG_inline_new) {
-    if (emit_debug_code()) {
-      UNIMPLEMENTED();
-      // Trash the registers to simulate an allocation failure.
-    }
-    UNIMPLEMENTED();
-  }
-  // Load address of new object into result.
-  llvm::Value* result = LoadAllocationTopHelper(flags);
-  if ((flags & DOUBLE_ALIGNMENT) != 0) {
-    UNIMPLEMENTED();
-  }
-  // Calculate new top and bail out if new space is exhausted.
-  ExternalReference allocation_limit =
-      AllocationUtils::GetAllocationLimitReference(isolate(), flags);
-  llvm::BasicBlock* not_carry = NewBlock("Allocate add is correct");
-  llvm::BasicBlock* merge = NewBlock("Allocate merge");
-  llvm::BasicBlock* gc_required = NewBlock("Allocate gc_required");
-  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-          llvm::Intrinsic::uadd_with_overflow, Types::i64);
-  llvm::Value* params[] = { result, __ getInt64(object_size) };
-  llvm::Value* call = __ CreateCall(intrinsic, params);
-  llvm::Value* sum = __ CreateExtractValue(call, 0);
-  llvm::Value* overflow = __ CreateExtractValue(call, 1);
-  __ CreateCondBr(overflow, gc_required, not_carry);
-
-  __ SetInsertPoint(not_carry);
-    llvm::Value* top_address = __ getInt64(reinterpret_cast<uint64_t>
-                                             (allocation_limit.address()));
-  llvm::Value* address = __ CreateIntToPtr(top_address, Types::ptr_i64);
-  llvm::Value* limit_operand = __ CreateLoad(address);
-  llvm::BasicBlock* limit_is_valid = NewBlock("Allocate limit is valid");
-  llvm::Value* cmp_limit = __ CreateICmpUGT(sum, limit_operand);
-  __ CreateCondBr(cmp_limit, gc_required, limit_is_valid);
-
-  __ SetInsertPoint(limit_is_valid);
-  // Update allocation top.
-  UpdateAllocationTopHelper(sum, flags);
-  bool tag_result = (flags & TAG_OBJECT) != 0;
-  llvm::Value* final_result = nullptr;
-  if (tag_result) {
-    final_result = __ CreateAdd(result, __ getInt64(1));
-    __ CreateBr(merge);
-  } else {
-    final_result = result;
-    __ CreateBr(merge);
-  }
-
-  __ SetInsertPoint(gc_required);
-  llvm::Value* deferred_result = AllocateHeapNumberSlow();
-  auto casted_deferred = __ CreateBitOrPointerCast(deferred_result,
-                                                    Types::i64);
-  __ CreateBr(merge);
-
-  __ SetInsertPoint(merge);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
-  phi->addIncoming(final_result, limit_is_valid);
-  phi->addIncoming(casted_deferred, gc_required);
-  return phi;
-}
 
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber(MutableMode mode){
-  llvm::Value* result = Allocate(HeapNumber::kSize, TAG_OBJECT);
+  llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*);
+  fptr = &LLVMChunkBuilder::AllocateHeapNumberSlow;
+  llvm::Value* result = Allocate(__ getInt32(HeapNumber::kSize), fptr, TAG_OBJECT);
   Heap::RootListIndex map_index = mode == MUTABLE
       ? Heap::kMutableHeapNumberMapRootIndex
       : Heap::kHeapNumberMapRootIndex;
@@ -2480,8 +2418,83 @@ void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
   UNIMPLEMENTED();
 }
 
-void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
-//  UNIMPLEMENTED();
+
+llvm::Value* LLVMChunkBuilder::Allocate(llvm::Value* object_size,
+                                        llvm::Value* (LLVMChunkBuilder::*fptr)
+                                                     (HValue* instr),
+                                        AllocationFlags flags,
+                                        HValue* instr){
+  DCHECK((flags & (RESULT_CONTAINS_TOP | SIZE_IN_WORDS)) == 0);
+//  DCHECK(object_size <= Page::kMaxRegularHeapObjectSize);
+  if (!FLAG_inline_new) {
+    UNIMPLEMENTED();
+  }
+
+  // Load address of new object into result.
+  llvm::Value* result = LoadAllocationTopHelper(flags);
+
+  if ((flags & DOUBLE_ALIGNMENT) != 0) {
+    if (kPointerSize == kDoubleSize) {
+      if (FLAG_debug_code) {
+        UNIMPLEMENTED();
+      }
+    } else {
+      UNIMPLEMENTED();
+    }
+  }
+
+  // Calculate new top and bail out if new space is exhausted.
+  ExternalReference allocation_limit =
+      AllocationUtils::GetAllocationLimitReference(isolate(), flags);
+  llvm::BasicBlock* not_carry = NewBlock("Allocate add is correct");
+  llvm::BasicBlock* merge = NewBlock("Allocate merge");
+  llvm::BasicBlock* deferred = NewBlock("Allocate deferred");
+  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
+          llvm::Intrinsic::uadd_with_overflow, Types::i64);
+  llvm::Value* size = __ CreateIntCast(object_size, Types::i64, true);
+  llvm::Value* params[] = { result, size };
+  llvm::Value* call = __ CreateCall(intrinsic, params);
+  llvm::Value* sum = __ CreateExtractValue(call, 0);
+  llvm::Value* overflow = __ CreateExtractValue(call, 1);
+  __ CreateCondBr(overflow, deferred, not_carry);
+
+  __ SetInsertPoint(not_carry);
+  llvm::Value* top_address = __ getInt64(reinterpret_cast<uint64_t>
+                                           (allocation_limit.address()));
+  llvm::Value* address = __ CreateIntToPtr(top_address, Types::ptr_i64);
+  llvm::Value* limit_operand = __ CreateLoad(address);
+  llvm::BasicBlock* limit_is_valid = NewBlock("Allocate limit is valid");
+  llvm::Value* cmp_limit = __ CreateICmpUGT(sum, limit_operand);
+  __ CreateCondBr(cmp_limit, deferred, limit_is_valid);
+
+  __ SetInsertPoint(limit_is_valid);
+  // Update allocation top.
+  UpdateAllocationTopHelper(sum, flags);
+  bool tag_result = (flags & TAG_OBJECT) != 0;
+  llvm::Value* final_result = nullptr;
+  if (tag_result) {
+    llvm::Value* inc = __ CreateAdd(result, __ getInt64(1));
+    final_result = __ CreateIntToPtr(inc, Types::tagged);
+    __ CreateBr(merge);
+  } else {
+    final_result = __ CreateIntToPtr(result, Types::tagged);
+    __ CreateBr(merge);
+  }
+
+  __ SetInsertPoint(deferred);
+  llvm::Value* deferred_result = (this->*fptr)(instr);
+  __ CreateBr(merge);
+
+  __ SetInsertPoint(merge);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
+  phi->addIncoming(final_result, limit_is_valid);
+  phi->addIncoming(deferred_result, deferred);
+  return phi;
+}
+
+
+llvm::Value* LLVMChunkBuilder::AllocateSlow(HValue* obj){
+  HAllocate* instr = HAllocate::cast(obj);
   std::vector<llvm::Value*> args;
   llvm::Value* arg1 = Integer32ToSmi(instr->size());
   int flags = 0;
@@ -2496,12 +2509,34 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
   llvm::Value* arg2 = Integer32ToSmi(value);
   args.push_back(arg2);
   args.push_back(arg1);
-  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace, Use(instr->context()), args);
-//  if (instr->MustPrefillWithFiller()) {
-//    UNIMPLEMENTED();
-//  }
-  instr->set_llvm_value(alloc);
+  llvm::Value* alloc = CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
+                                               Use(instr->context()), args);
+  return alloc;
 }
+
+
+void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
+  // Allocate memory for the object.
+  AllocationFlags flags = TAG_OBJECT;
+  if (instr->MustAllocateDoubleAligned()) {
+    flags = static_cast<AllocationFlags>(flags | DOUBLE_ALIGNMENT);
+  }
+  if (instr->IsOldSpaceAllocation()) {
+    DCHECK(!instr->IsNewSpaceAllocation());
+    flags = static_cast<AllocationFlags>(flags | PRETENURE);
+  }
+  if (instr->MustPrefillWithFiller()) {
+    UNIMPLEMENTED();
+  }
+
+  DCHECK(instr->size()->representation().IsInteger32());
+  llvm::Value* size = Use(instr->size());
+  llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*);
+  fptr = &LLVMChunkBuilder::AllocateSlow;
+  llvm::Value* res = Allocate(size, fptr, flags, instr);
+  instr->set_llvm_value(res);
+}
+
 
 void LLVMChunkBuilder::DoApplyArguments(HApplyArguments* instr) {
   UNIMPLEMENTED();

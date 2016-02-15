@@ -723,9 +723,13 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   // Allocate a heap number in new space with undefined value. Returns
   // tagged pointer in result register, or jumps to gc_required if new
   // space is full. // FIXME(llvm): the comment
-  llvm::Value* AllocateHeapNumberSlow();
+  llvm::Value* AllocateHeapNumberSlow(HValue* instr = nullptr);
   llvm::Value* AllocateHeapNumber(MutableMode mode = IMMUTABLE);
-  llvm::Value* Allocate(int object_size, AllocationFlags flags);
+  llvm::Value* Allocate(llvm::Value* object_size,
+                        llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*),
+                        AllocationFlags flag,
+                        HValue* instr = nullptr);
+  llvm::Value* AllocateSlow(HValue* instr);
   llvm::Value* LoadAllocationTopHelper(AllocationFlags flags);
   void UpdateAllocationTopHelper(llvm::Value* result_end, AllocationFlags flags);
   void DirtyHack(int arg_count);
