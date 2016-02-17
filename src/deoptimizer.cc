@@ -1776,7 +1776,10 @@ unsigned Deoptimizer::ComputeInputFrameSize() const {
     unsigned stack_slots = compiled_code_->stack_slots();
     unsigned outgoing_size =
         ComputeOutgoingArgumentSize(compiled_code_, bailout_id_);
-    CHECK(result == fixed_size + (stack_slots * kPointerSize) + outgoing_size);
+    // For llvmed code, the reported number of stack_slots does not include the
+    // slots used for parameter passing although they are statically allocated.
+    CHECK(result == fixed_size + (stack_slots * kPointerSize) + outgoing_size
+          || compiled_code_->is_llvmed());
   }
   return result;
 }
