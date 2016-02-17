@@ -572,9 +572,7 @@ Vector<byte> LLVMChunk::GetFullRelocationInfo(
 }
 
 int LLVMChunk::SpilledCount(const StackMaps& stackmaps) {
-  // One function at a time. And each function must have a stackmap.
-  CHECK(stackmaps.stack_sizes.size() == 1);
-  int stack_size = IntHelper::AsInt(stackmaps.stack_sizes[0].size);
+  int stack_size = IntHelper::AsInt(stackmaps.stackSize());
   DCHECK(stack_size / kStackSlotSize - kPhonySpillCount >= 0);
   return stack_size / kStackSlotSize - kPhonySpillCount;
 }

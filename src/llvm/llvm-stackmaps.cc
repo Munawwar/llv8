@@ -287,11 +287,9 @@ StackMaps::RecordMap StackMaps::computeRecordMap() const {
 }
 
 uint64_t StackMaps::stackSize() const {
-  if (stack_sizes.size() == 0) // No StackMap section at all.
-    return 0;
-
+  // There must always be at least one Stack Map section.
+  // And we don't support multiple functions in a module at the time.
   CHECK(stack_sizes.size() == 1);
-
   return stack_sizes[0].size;
 }
 
