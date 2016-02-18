@@ -753,8 +753,12 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                         enum SmiCheck smi_check,
                         PointersToHereCheck ptr_check,
                         RememberedSetAction set);
-  void RecordWrite(llvm::Value* object, llvm::Value* map, llvm::Value* value,
-                   PointersToHereCheck ptr_check, RememberedSetAction set);
+  void RecordWrite(llvm::Value* object,
+                   llvm::Value* map,
+                   llvm::Value* value,
+                   PointersToHereCheck ptr_check,
+                   RememberedSetAction set,
+                   enum SmiCheck smi_check);
   void ChangeTaggedToDouble(HValue* val, HChange* instr);
   void ChangeDoubleToI(HValue* val, HChange* instr);
   void ChangeDoubleToTagged(HValue* val, HChange* instr);

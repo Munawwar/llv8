@@ -5868,7 +5868,14 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
     llvm::Value* key_l = Use(instr->key());
     llvm::Value* casted_adderss = __ CreateBitCast(address, Types::ptr_i64);
     key_l = __ CreateLoad(casted_adderss);
-    RecordWrite(elem, key_l, value, instr->PointersToHereCheckForValue(), OMIT_REMEMBERED_SET);
+    enum SmiCheck check_needed = instr->value()->type().IsHeapObject()
+            ? OMIT_SMI_CHECK : INLINE_SMI_CHECK;
+    RecordWrite(elem,
+                key_l,
+                value,
+                instr->PointersToHereCheckForValue(),
+                OMIT_REMEMBERED_SET,
+                check_needed);
     //UNIMPLEMENTED();
   }
 }
@@ -5897,7 +5904,7 @@ void LLVMChunkBuilder::RecordWriteField(llvm::Value* object,
     UNIMPLEMENTED();
   }
 
-  RecordWrite(object, map_address, value, ptr_check, remembered_set);
+  RecordWrite(object, map_address, value, ptr_check, remembered_set, smi_check);
   __ CreateBr(done);
   __ SetInsertPoint(done);
 
@@ -5906,8 +5913,12 @@ void LLVMChunkBuilder::RecordWriteField(llvm::Value* object,
   }
 }
 
-void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
-                                   llvm::Value* value, PointersToHereCheck ptr_check, RememberedSetAction remembered_set) {
+void LLVMChunkBuilder::RecordWrite(llvm::Value* object,
+                                   llvm::Value* key_reg,
+                                   llvm::Value* value,
+                                   PointersToHereCheck ptr_check,
+                                   RememberedSetAction remembered_set,
+                                   enum SmiCheck smi_check) {
   if (!FLAG_incremental_marking) {
     return;
   }
@@ -5918,7 +5929,7 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object, llvm::Value* key_reg,
   auto stub_block = NewBlock("RecordWrite after checked page flag");
   llvm::BasicBlock* done = NewBlock("RecordWrite dane");
 
-  if (INLINE_SMI_CHECK) {
+  if (smi_check == INLINE_SMI_CHECK) {
     llvm::BasicBlock* current_block = NewBlock("RecordWrite Smi checked");
     // Skip barrier if writing a smi.
     llvm::Value* smi_cond = SmiCheck(value, false);//JumpIfSmi(value, &done);
