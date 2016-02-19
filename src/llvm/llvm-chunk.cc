@@ -1319,8 +1319,8 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
 
 llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
                                         llvm::CallingConv::ID calling_conv,
-                                        std::vector<llvm::Value*>& params) {
-  bool record_safepoint = true;
+                                        std::vector<llvm::Value*>& params,
+                                        bool record_safepoint) {
   auto index = chunk()->masm().GetCodeTargetIndex(code);
   int nop_size;
   int32_t pp_id;
@@ -5876,7 +5876,7 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
                 instr->PointersToHereCheckForValue(),
                 OMIT_REMEMBERED_SET,
                 check_needed);
-    //UNIMPLEMENTED();
+    UNIMPLEMENTED();
   }
 }
 
@@ -5896,7 +5896,8 @@ void LLVMChunkBuilder::RecordWriteField(llvm::Value* object,
     __ CreateCondBr(smi_cond, done, current_block);
     __ SetInsertPoint(current_block);
   }
-  //DCHECK(IsAligned(offset, kPointerSize));
+
+  DCHECK(IsAligned(offset, kPointerSize));
   auto map_address = FieldOperand(object, offset);
   map_address = __ CreateBitOrPointerCast(map_address, Types::tagged);
 
@@ -5904,7 +5905,8 @@ void LLVMChunkBuilder::RecordWriteField(llvm::Value* object,
     UNIMPLEMENTED();
   }
 
-  RecordWrite(object, map_address, value, ptr_check, remembered_set, smi_check);
+  RecordWrite(object, map_address, value, ptr_check, remembered_set,
+              OMIT_SMI_CHECK);
   __ CreateBr(done);
   __ SetInsertPoint(done);
 
@@ -5914,20 +5916,26 @@ void LLVMChunkBuilder::RecordWriteField(llvm::Value* object,
 }
 
 void LLVMChunkBuilder::RecordWrite(llvm::Value* object,
-                                   llvm::Value* key_reg,
+                                   llvm::Value* address,
                                    llvm::Value* value,
                                    PointersToHereCheck ptr_check,
-                                   RememberedSetAction remembered_set,
+                                   RememberedSetAction remembered_set_action,
                                    enum SmiCheck smi_check) {
-  if (!FLAG_incremental_marking) {
+  AssertNotSmi(object);
+
+  if (remembered_set_action == OMIT_REMEMBERED_SET &&
+      !FLAG_incremental_marking) {
     return;
   }
 
   if (emit_debug_code()) {
-    Assert(Compare(value, LoadFieldOperand(key_reg, 0)));
+    // WRONG: LoadFieldOperand (FieldOperand) subtracts kHeapObject tag,
+    // Operand does not
+//    Assert(Compare(value, LoadFieldOperand(key_reg, 0)));
+    UNIMPLEMENTED();
   }
   auto stub_block = NewBlock("RecordWrite after checked page flag");
-  llvm::BasicBlock* done = NewBlock("RecordWrite dane");
+  llvm::BasicBlock* done = NewBlock("RecordWrite done");
 
   if (smi_check == INLINE_SMI_CHECK) {
     llvm::BasicBlock* current_block = NewBlock("RecordWrite Smi checked");
@@ -5936,17 +5944,17 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object,
     __ CreateCondBr(smi_cond, done, current_block);
     __ SetInsertPoint(current_block);
   }
-  ptr_check = kPointersToHereAreAlwaysInteresting;
-  if(ptr_check != kPointersToHereAreAlwaysInteresting) {
-    llvm::BasicBlock* page_check = NewBlock("RecordWrite page check");
+
+  if (ptr_check != kPointersToHereAreAlwaysInteresting) {
     auto equal = CheckPageFlag(value,
-                             MemoryChunk::kPointersToHereAreInterestingMask);
-    __ CreateCondBr(equal, done, page_check);
-    __ SetInsertPoint(page_check);
+                               MemoryChunk::kPointersToHereAreInterestingMask);
+    llvm::BasicBlock* after_page_check = NewBlock("RecordWrite page check");
+    __ CreateCondBr(equal, done, after_page_check);
+    __ SetInsertPoint(after_page_check);
   }
 
   auto equal = CheckPageFlag(object,
-                             MemoryChunk::kPointersToHereAreInterestingMask);
+                             MemoryChunk::kPointersFromHereAreInterestingMask);
   __ CreateCondBr(equal, done, stub_block);
 
   __ SetInsertPoint(stub_block);
@@ -5954,7 +5962,7 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object,
   Register map_reg = rcx;
   Register dst_reg = rdx;
   RecordWriteStub stub(isolate(), object_reg, map_reg, dst_reg,
-                       remembered_set, kSaveFPRegs);
+                       remembered_set_action, kSaveFPRegs);
   Handle<Code> code = Handle<Code>::null();
   {
     AllowHandleAllocation allow_handles;
@@ -5962,8 +5970,8 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object,
     code = stub.GetCode();
     // FIXME(llvm,gc): respect reloc info mode...
   }
-  std::vector<llvm::Value*> params = { object, key_reg, value };
-  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params);
+  std::vector<llvm::Value*> params = { object, value, address };
+  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params, false);
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
@@ -6547,7 +6555,7 @@ void LLVMChunkBuilder::RecordWriteForMap(llvm::Value* object,
     // FIXME(llvm,gc): respect reloc info mode...
   }
   std::vector<llvm::Value*> params = { object, map, map_address };
-  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params);
+  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params, false);
   __ CreateBr(cont);
 
   __ SetInsertPoint(cont);

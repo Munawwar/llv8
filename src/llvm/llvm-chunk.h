@@ -700,7 +700,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                        bool record_safepoint = true);
   llvm::Value* CallCode(Handle<Code> code,
                         llvm::CallingConv::ID calling_conv,
-                        std::vector<llvm::Value*>& params);
+                        std::vector<llvm::Value*>& params,
+                        bool record_safepoint = true);
   llvm::Value* CallAddress(Address target,
                            llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params,
