@@ -5024,7 +5024,6 @@ void LLVMChunkBuilder::DoLoadNamedField(HLoadNamedField* instr) {
     llvm::Value* casted_address = __ CreateBitCast(obj, Types::ptr_tagged);
     llvm::Value* res = __ CreateLoad(casted_address);
     instr->set_llvm_value(res);
-
   }
 }
 
@@ -6004,7 +6003,7 @@ void LLVMChunkBuilder::DoStoreKeyedGeneric(HStoreKeyedGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
-  Representation representation = instr->representation();
+  Representation representation = instr->field_representation();
 
   HObjectAccess access = instr->access();
   int offset = access.offset() - 1;
@@ -6046,7 +6045,15 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
 
   if (representation.IsSmi() && SmiValuesAre32Bits() &&
       instr->value()->representation().IsInteger32()) {
-    UNIMPLEMENTED();
+    DCHECK(instr->store_mode() == STORE_TO_INITIALIZED_ENTRY);
+    if (FLAG_debug_code) {
+      UNIMPLEMENTED();
+    }
+    // Store int value directly to upper half of the smi.
+    STATIC_ASSERT(kSmiTag == 0);
+    DCHECK(kSmiTagSize + kSmiShiftSize == 32);
+    offset += kPointerSize / 2;
+    representation = Representation::Integer32();
   }
 
   //Operand operand = FieldOperand(write_register, offset);
