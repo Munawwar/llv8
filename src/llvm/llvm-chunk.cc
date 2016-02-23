@@ -3160,8 +3160,7 @@ void LLVMChunkBuilder::DoCallStub(HCallStub* instr) {
       llvm::Value* call = CallCode(stub.GetCode(),
                                    llvm::CallingConv::X86_64_V8_Stub,
                                    params);
-      llvm::Value* result =  __ CreatePtrToInt(call, Types::i64);
-      instr->set_llvm_value(result);
+      instr->set_llvm_value(call);
       break;
     }
     default:
