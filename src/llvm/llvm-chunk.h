@@ -70,6 +70,7 @@ class LLVMRelocationData : public ZoneObject {
        is_reloc_with_nop_(8, zone),
        is_deopt_(8, zone),
        is_safepoint_(8, zone),
+       deopt_reasons_(),
        is_transferred_(false),
        zone_(zone) {}
 
@@ -83,12 +84,13 @@ class LLVMRelocationData : public ZoneObject {
   }
 
   int32_t GetNextUnaccountedPatchpointId();
-  // TODO(llvm): all of these methods have the same typo.
   int32_t GetNextDeoptPatchpointId();
   int32_t GetNextSafepointPatchpointId();
   int32_t GetNextRelocPatchpointId(bool is_safepoint = false);
   int32_t GetNextRelocNopPatchpointId(bool is_safepoint = false);
   int32_t GetNextDeoptRelocPatchpointId();
+  Deoptimizer::DeoptReason GetDeoptReason(int32_t patchpoint_id);
+  void SetDeoptReason(int32_t patchpoint_id, Deoptimizer::DeoptReason reason);
   int GetBailoutId(int32_t patchpoint_id);
   void SetBailoutId(int32_t patchpoint_id, int bailout_id);
   bool IsPatchpointIdDeopt(int32_t patchpoint_id);
@@ -110,6 +112,8 @@ class LLVMRelocationData : public ZoneObject {
   GrowableBitVector is_reloc_with_nop_;
   ZoneList<DeoptIdMap> is_deopt_;
   GrowableBitVector is_safepoint_;
+  // FIXME(llvm): make it a ZoneHashMap
+  std::map<int32_t, Deoptimizer::DeoptReason> deopt_reasons_;
   bool is_transferred_;
   Zone* zone_;
 };
@@ -635,6 +639,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
       ZoneList<HValue*>* objects_to_materialize);
 
   void DeoptimizeIf(llvm::Value* compare,
+                    Deoptimizer::DeoptReason deopt_reason,
                     bool negate = false,
                     llvm::BasicBlock* next_block = nullptr);
 

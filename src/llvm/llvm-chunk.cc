@@ -11,6 +11,7 @@
 #include "src/safepoint-table.h"
 #include "llvm-chunk.h"
 #include "pass-normalize-phis.h"
+#include "src/profiler/cpu-profiler.h"
 #include <llvm/IR/InlineAsm.h>
 #include "llvm-stackmaps.h"
 
@@ -429,20 +430,28 @@ std::vector<RelocInfo> LLVMChunk::SetUpRelativeCalls(
     *pc_offset++ = 0xE8; // Call relative offset.
 
     if (reloc_data_->IsPatchpointIdDeopt(id)) {
+      // Record relocatable runtime entry (deoptimization bailout target).
       RelocInfo reloc_info(pc_offset, RelocInfo::RUNTIME_ENTRY, 0, nullptr);
       result.push_back(reloc_info);
       auto delta = deopt_target_offset_for_ppid_[id];
       Memory::int32_at(pc_offset) = IntHelper::AsInt32(delta);
+
+      // Record deoptimization reason.
+      if (FLAG_trace_deopt || isolate()->cpu_profiler()->is_profiling()) {
+        RelocInfo deopt_reason(pc_offset - 1, RelocInfo::DEOPT_REASON,
+                               reloc_data_->GetDeoptReason(id), nullptr);
+        result.push_back(deopt_reason);
+      }
     } else {
       if (reloc_data_->IsPatchpointIdRelocNop(id)) {
         // TODO(llvm): it's always CODE_TARGET for now.
         RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
         result.push_back(reloc_info);
         Memory::uint32_at(pc_offset) = target_index_for_ppid_[id];
-        pc_offset = pc_offset+4;
+        pc_offset = pc_offset + 4;
         *pc_offset++ = Assembler::kNopByte;
-      }
-      else {
+      } else {
+        DCHECK(reloc_data_->IsPatchpointIdReloc(id));
         // TODO(llvm): it's always CODE_TARGET for now.
         RelocInfo reloc_info(pc_offset, RelocInfo::CODE_TARGET, 0, nullptr);
         result.push_back(reloc_info);
@@ -857,6 +866,17 @@ int32_t LLVMRelocationData::GetNextDeoptRelocPatchpointId() {
   DeoptIdMap map {next_id, -1};
   is_deopt_.Add(map, zone_);
   return next_id;
+}
+
+void LLVMRelocationData::SetDeoptReason(int32_t patchpoint_id,
+                                        Deoptimizer::DeoptReason reason) {
+  deopt_reasons_[patchpoint_id] = reason;
+}
+
+Deoptimizer::DeoptReason LLVMRelocationData::GetDeoptReason(
+    int32_t patchpoint_id) {
+  DCHECK(deopt_reasons_.count(patchpoint_id));
+  return deopt_reasons_[patchpoint_id];
 }
 
 void LLVMRelocationData::SetBailoutId(int32_t patchpoint_id, int bailout_id) {
@@ -1646,6 +1666,7 @@ void LLVMChunkBuilder::GetAllEnvironmentValues(
 }
 
 void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
+                                    Deoptimizer::DeoptReason deopt_reason,
                                     bool negate,
                                     llvm::BasicBlock* next_block) {
   LLVMEnvironment* environment = AssignEnvironment();
@@ -1653,6 +1674,7 @@ void LLVMChunkBuilder::DeoptimizeIf(llvm::Value* compare,
   deopt_data_->Add(environment, patchpoint_id);
   int bailout_id = deopt_data_->DeoptCount() - 1;
   reloc_data_->SetBailoutId(patchpoint_id, bailout_id);
+  reloc_data_->SetDeoptReason(patchpoint_id, deopt_reason);
 
   if (!next_block) next_block = NewBlock("BlockCont");
   llvm::BasicBlock* saved_insert_point = __ GetInsertBlock();
@@ -2385,7 +2407,7 @@ void LLVMChunkBuilder::DoAdd(HAdd* instr) {
       llvm::Value* sum = __ CreateExtractValue(call, 0);
       llvm::Value* overflow = __ CreateExtractValue(call, 1);
       instr->set_llvm_value(sum);
-      DeoptimizeIf(overflow);
+      DeoptimizeIf(overflow, Deoptimizer::kOverflow);
     }
   } else if (instr->representation().IsDouble()) {
       DCHECK(instr->left()->representation().IsDouble());
@@ -2596,6 +2618,7 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
     // Avoid stackmap creation (happens upon DeoptimizeIf call).
     if (index < length || (instr->allow_equality() && index == length)) {
       instr->set_llvm_value(nullptr); // TODO(llvm): incorrect if instr has uses
+      DCHECK(instr->HasNoUses());
       return;
     }
   }
@@ -2612,7 +2635,7 @@ void LLVMChunkBuilder::DoBoundsCheck(HBoundsCheck* instr) {
     UNIMPLEMENTED();
   } else {
     bool negate = true;
-    DeoptimizeIf(compare, negate); // kOutOfBounds
+    DeoptimizeIf(compare, Deoptimizer::kOutOfBounds, negate);
   }
   instr->set_llvm_value(compare);
 }
@@ -2693,7 +2716,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     auto smi_and = __ CreateAnd(value_as_i64, __ getInt64(kSmiTagMask));
     auto is_smi = __ CreateICmpEQ(smi_and, __ getInt64(0));
     next = NewBlock("BranchTagged NeedsMapCont");
-    DeoptimizeIf(is_smi, false, next);
+    DeoptimizeIf(is_smi, Deoptimizer::kSmi, next);
   }
 
   llvm::Value* map = nullptr;
@@ -2765,7 +2788,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     // We've seen something for the first time -> deopt.
     // This can only happen if we are not generic already.
     auto no_condition = __ getTrue();
-    DeoptimizeIf(no_condition); // kUnexpectedObject
+    DeoptimizeIf(no_condition, Deoptimizer::kUnexpectedObject);
 
     // Since we deoptimize on True the continue block is never reached.
     __ CreateUnreachable();
@@ -3274,13 +3297,14 @@ void LLVMChunkBuilder::ChangeTaggedToDouble(HValue* val, HChange* instr) {
       auto is_undefined = CompareRoot(llvm_val, Heap::kUndefinedValueRootIndex);
       conversion_end = NewBlock("can_convert_undefined_to_nan: getting NaN");
       bool deopt_on_not_undefined = true;
-      // kNotAHeapNumberUndefined
-      DeoptimizeIf(is_undefined, deopt_on_not_undefined, conversion_end);
+      DeoptimizeIf(is_undefined, Deoptimizer::kNotAHeapNumberUndefined,
+                   deopt_on_not_undefined, conversion_end);
       nan_value = GetNan();
       __ CreateBr(merge_block);
     } else {
       bool deopt_on_not_equal = true;
-      DeoptimizeIf(is_heap_number, deopt_on_not_equal, merge_block);
+      DeoptimizeIf(is_heap_number, Deoptimizer::kNotAHeapNumber,
+                   deopt_on_not_equal, merge_block);
     }
 
     if (deoptimize_on_minus_zero) {
@@ -3407,7 +3431,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     __ SetInsertPoint(check_false);
     llvm::Value* cmp_false = CompareRoot(Use(val), Heap::kFalseValueRootIndex,
                                          llvm::CmpInst::ICMP_NE);
-    DeoptimizeIf(cmp_false);
+    DeoptimizeIf(cmp_false, Deoptimizer::kNotAHeapNumberUndefinedBoolean);
     llvm::Value* result_check_false = __ getInt32(0);
     __ CreateBr(merge_inner);
 
@@ -3421,7 +3445,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     not_smi_merge = merge_inner;
   } else {
     bool negate = true;
-    DeoptimizeIf(cmp, negate); // Deoptimizer::kNotAHeapNumber
+    DeoptimizeIf(cmp, Deoptimizer::kNotAHeapNumber, negate);
 
     auto address = FieldOperand(Use(val), HeapNumber::kValueOffset);
     auto double_addr = __ CreateBitCast(address, Types::ptr_float64);
@@ -3433,7 +3457,9 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     auto converted_double = __ CreateSIToFP(relult_for_not_smi, Types::float64);
     auto ordered_and_equal = __ CreateFCmpOEQ(double_val, converted_double);
     negate = true;
-    DeoptimizeIf(ordered_and_equal, negate);
+    // TODO(llvm): in case they are unordered or equal, reason should be
+    // kLostPrecision.
+    DeoptimizeIf(ordered_and_equal, Deoptimizer::kNaN, negate);
     if (instr->GetMinusZeroMode() == FAIL_ON_MINUS_ZERO) {
       zero_block = NewBlock("TaggedToISlow ZERO");
       auto equal_ = __ CreateICmpEQ(relult_for_not_smi, __ getInt32(0));
@@ -3490,7 +3516,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
       if (!val->type().IsSmi()) {
         bool not_smi = true;
         llvm::Value* cond = SmiCheck(Use(val), not_smi);
-        DeoptimizeIf(cond); // Deoptimizer::kNotASmi
+        DeoptimizeIf(cond, Deoptimizer::kNotASmi);
       }
       auto val_as_smi = __ CreateBitOrPointerCast(Use(val), Types::smi);
       instr->set_llvm_value(val_as_smi);
@@ -3536,7 +3562,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
             UNIMPLEMENTED();
             DCHECK(SmiValuesAre31Bits());
          }
-         DeoptimizeIf(cmp);
+         DeoptimizeIf(cmp, Deoptimizer::kOverflow);
          // UNIMPLEMENTED();
       }
       llvm::Value* result = Integer32ToSmi(val);
@@ -3604,7 +3630,7 @@ void LLVMChunkBuilder::UIntToTag(HChange* instr ){
 void LLVMChunkBuilder::DoCheckHeapObject(HCheckHeapObject* instr) {
   if (!instr->value()->type().IsHeapObject()) {
     llvm::Value* is_smi = SmiCheck(Use(instr->value()));
-    DeoptimizeIf(is_smi);
+    DeoptimizeIf(is_smi, Deoptimizer::kSmi);
   }
 }
 
@@ -3622,15 +3648,15 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
     // If there is only one type in the interval check for equality.
     if (first == last) {
       llvm::Value* cmp = __ CreateICmpNE(instance, imm_first);
-      DeoptimizeIf(cmp);
+      DeoptimizeIf(cmp, Deoptimizer::kWrongInstanceType);
     } else {
       llvm::Value* cmp = __ CreateICmpULT(instance, imm_first);
-      DeoptimizeIf(cmp);
+      DeoptimizeIf(cmp, Deoptimizer::kWrongInstanceType);
       // Omit check for the last type.
       if (last != LAST_TYPE) {
         llvm::Value* imm_last = __ getInt64(static_cast<int>(last));
         llvm::Value* cmp = __ CreateICmpUGT(instance, imm_last);
-        DeoptimizeIf(cmp);
+        DeoptimizeIf(cmp, Deoptimizer::kWrongInstanceType);
       }
     }
   } else {
@@ -3649,7 +3675,7 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
       } else {
         cmp = __ CreateICmpEQ(test, __ getInt64(0));
       }
-      DeoptimizeIf(cmp, true); 
+      DeoptimizeIf(cmp, Deoptimizer::kWrongInstanceType, true);
     } else {
       //TODO: not tested (fail form string-tagcloud.js in function ""
       //                  fail form date-format-tofte.js in arrayExists)
@@ -3660,7 +3686,7 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
       llvm::Value* and_value = __ CreateAnd(casted_offset, __ getInt64(0x000000ff));
       llvm::Value* and_mask = __ CreateAnd(and_value, __ getInt64(mask));
       llvm::Value* cmp = __ CreateICmpEQ(and_mask, __ getInt64(tag));
-      DeoptimizeIf(cmp, true);
+      DeoptimizeIf(cmp, Deoptimizer::kWrongInstanceType, true);
     }
   }
 }
@@ -3719,14 +3745,14 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
     llvm::Value* casted = __ CreateBitOrPointerCast(result, Types::i64);
     llvm::Value* and_result = __ CreateAnd(casted, __ getInt64(kSmiTagMask));
     llvm::Value* compare_result = __ CreateICmpEQ(and_result, __ getInt64(0));
-    DeoptimizeIf(compare_result, deopt_on_equal, success);
+    DeoptimizeIf(compare_result, Deoptimizer::kInstanceMigrationFailed,
+                 deopt_on_equal, success);
     pending_pushed_args_.Clear();
     // Don't let the success BB go stray (__ SetInsertPoint).
     
   } else {
     bool deopt_on_not_equal = true;
-    // kWrongMap
-    DeoptimizeIf(compare, deopt_on_not_equal, success);
+    DeoptimizeIf(compare, Deoptimizer::kWrongMap, deopt_on_not_equal, success);
   }
 }
 
@@ -3734,8 +3760,7 @@ void LLVMChunkBuilder::DoCheckMapValue(HCheckMapValue* instr) {
   llvm::Value* val = Use(instr->value());
   llvm::Value* int_val = __ CreatePtrToInt(FieldOperand(val, HeapObject::kMapOffset), Types::i64);
   llvm::Value* cmp = __ CreateICmpNE(Use(instr->map()), int_val);
-  DeoptimizeIf(cmp, true);
-  //UNIMPLEMENTED();
+  DeoptimizeIf(cmp, Deoptimizer::kWrongMap, true);
 }
 
 void LLVMChunkBuilder::DoCheckSmi(HCheckSmi* instr) {
@@ -3755,7 +3780,7 @@ void LLVMChunkBuilder::DoCheckValue(HCheckValue* instr) {
     auto obj = MoveHeapObject(instr->object().handle());
     cmp = __ CreateICmpNE(reg, obj);
   }
-  DeoptimizeIf(cmp);
+  DeoptimizeIf(cmp, Deoptimizer::kValueMismatch);
 }
 
 void LLVMChunkBuilder::DoClampToUint8(HClampToUint8* instr) {
@@ -4119,17 +4144,18 @@ void LLVMChunkBuilder::DoDateField(HDateField* instr) {
   llvm::BasicBlock* DateFieldResult = NewBlock("Result block of DateField");
   llvm::Value* date_field_result_equal = nullptr;
   Smi* index = instr->index();
-  llvm::Value* is_smi = SmiCheck(Use(instr->value()), false);
-  DeoptimizeIf(is_smi);
 
-  llvm::Value* map = FieldOperand(Use(instr->value()),
-          HeapObject::kMapOffset);
-  llvm::Value* cast_int = __ CreateBitCast(map, Types::ptr_i64);
-  llvm::Value* address = __ CreateLoad(cast_int);
-  llvm::Value* DateObject = LoadFieldOperand(address, Map::kMapOffset);
-  llvm::Value* not_equal = __ CreateICmpNE(DateObject,
-         __ getInt64(static_cast<int8_t>(JS_DATE_TYPE)));
-  DeoptimizeIf(not_equal, true);
+  if (FLAG_debug_code) {
+    AssertNotSmi(Use(instr->value()));
+    llvm::Value* map = FieldOperand(Use(instr->value()),
+            HeapObject::kMapOffset);
+    llvm::Value* cast_int = __ CreateBitCast(map, Types::ptr_i64);
+    llvm::Value* address = __ CreateLoad(cast_int);
+    llvm::Value* DateObject = LoadFieldOperand(address, Map::kMapOffset);
+    llvm::Value* object_type_check = __ CreateICmpEQ(DateObject,
+           __ getInt64(static_cast<int8_t>(JS_DATE_TYPE)));
+    Assert(object_type_check);
+  }
 
   if (index->value() == 0) {
     llvm::Value* map = LoadFieldOperand(Use(instr->value()), JSDate::kValueOffset);
@@ -4194,8 +4220,7 @@ void LLVMChunkBuilder::DoDeoptimize(HDeoptimize* instr) {
   // It's unreacheable, but we don't care. We need it so that DeoptimizeIf()
   // does not create a new basic block which ends up unterminated.
   auto next_block = Use(instr->SuccessorAt(0));
-  DeoptimizeIf(__ getTrue(), negate_condition, next_block);
-
+  DeoptimizeIf(__ getTrue(), instr->reason(), negate_condition, next_block);
 }
 
 void LLVMChunkBuilder::DoDiv(HDiv* instr) {
@@ -4287,7 +4312,7 @@ void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   phi->addIncoming(result1, done_block1);
   phi->addIncoming(int64_res, load_cache);
   llvm::Value* cond = SmiCheck(phi, true);
-  DeoptimizeIf(cond, true);
+  DeoptimizeIf(cond,  Deoptimizer::kNoCache, true);
   instr->set_llvm_value(phi);
   //UNIMPLEMENTED();
 }
@@ -4350,51 +4375,45 @@ void LLVMChunkBuilder::CheckEnumCache(llvm::Value* enum_val, llvm::Value* val, l
 }
 
 void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
-  llvm::Value* enum_val = Use(instr->enumerable());
-  llvm::Value* cmp = CompareRoot(enum_val,
-          Heap::kUndefinedValueRootIndex);
-  DeoptimizeIf(cmp, true);
-
-  llvm::Value* load_r = LoadRoot(Heap::kNullValueRootIndex);
-  llvm::Value* cmp_eq = __ CreateICmpEQ(enum_val, load_r);
-  DeoptimizeIf(cmp_eq, true);
-
-  llvm::Value* smi_check = SmiCheck(enum_val, true);
-  DeoptimizeIf(smi_check, true);
-
-  STATIC_ASSERT(FIRST_JS_PROXY_TYPE == FIRST_SPEC_OBJECT_TYPE);
-  llvm::Value* address = FieldOperand(enum_val,
-          HeapObject::kMapOffset);
-  llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
-  llvm::Value* map = __ CreateLoad(cast_int);
-  llvm::Value* map_f = LoadFieldOperand(map, Map::kInstanceTypeOffset);
-  llvm::Value* cmp_below_eq = __ CreateICmpULE(map_f, 
-         __ getInt64(static_cast<int8_t>(LAST_JS_PROXY_TYPE)));
-  DeoptimizeIf(cmp_below_eq, true);
-
-  llvm::BasicBlock* call_runtime = NewBlock("CALL RUNTIME");
-  llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
-  std::vector<llvm::Value*> args;
-  args.push_back(enum_val);
-  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
-          Use(instr->context()), args);
-  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
-  CheckEnumCache(enum_val, load_r, call_runtime);
-  
-  llvm::Value* addr = FieldOperand(enum_val, HeapObject::kMapOffset);
-  llvm::Value* int64 = __ CreateBitCast(addr, Types::ptr_i64);
-  __ CreateLoad(int64);
-  __ CreateBr(use_cache);
-
-  __ SetInsertPoint(call_runtime);
-  instr->set_llvm_value(alloc_casted);
-  llvm::Value* tmp = LoadFieldOperand(enum_val, HeapObject::kMapOffset);
-  llvm::Value* cmp_root = CompareRoot(tmp, Heap::kMetaMapRootIndex);
-  DeoptimizeIf(cmp_root, true);
-  __ CreateBr(use_cache);
-  __ SetInsertPoint(use_cache);
-  
-  //UNIMPLEMENTED();
+  // TODO(llvm): I don't like the commented code below. Check carefully.
+  UNIMPLEMENTED();
+//  llvm::Value* enumerable = Use(instr->enumerable());
+//
+//  llvm::Value* load_r = LoadRoot(Heap::kNullValueRootIndex);
+//
+//  llvm::Value* smi_check = SmiCheck(enumerable, true);
+//  DeoptimizeIf(smi_check, Deoptimizer::kSmi);
+//
+//  STATIC_ASSERT(FIRST_JS_PROXY_TYPE == FIRST_SPEC_OBJECT_TYPE);
+//  llvm::Value* address = FieldOperand(enumerable, HeapObject::kMapOffset);
+//  llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
+//  llvm::Value* map = __ CreateLoad(cast_int);
+//  llvm::Value* map_f = LoadFieldOperand(map, Map::kInstanceTypeOffset);
+//  llvm::Value* cmp_below_eq = __ CreateICmpULE(map_f,
+//         __ getInt64(static_cast<int8_t>(LAST_JS_PROXY_TYPE)));
+//  DeoptimizeIf(cmp_below_eq, Deoptimizer::kWrongInstanceType);
+//
+//  llvm::BasicBlock* call_runtime = NewBlock("CALL RUNTIME");
+//  llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
+//  std::vector<llvm::Value*> args;
+//  args.push_back(enumerable);
+//  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
+//          Use(instr->context()), args);
+//  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
+//  CheckEnumCache(enumerable, load_r, call_runtime);
+//
+//  llvm::Value* addr = FieldOperand(enumerable, HeapObject::kMapOffset);
+//  llvm::Value* int64 = __ CreateBitCast(addr, Types::ptr_i64);
+//  __ CreateLoad(int64);
+//  __ CreateBr(use_cache);
+//
+//  __ SetInsertPoint(call_runtime);
+//  instr->set_llvm_value(alloc_casted);
+//  llvm::Value* tmp = LoadFieldOperand(enumerable, HeapObject::kMapOffset);
+//  llvm::Value* cmp_root = CompareRoot(tmp, Heap::kMetaMapRootIndex);
+//  DeoptimizeIf(cmp_root, Deoptimizer::kWrongMap, true);
+//  __ CreateBr(use_cache);
+//  __ SetInsertPoint(use_cache);
 }
 
 void LLVMChunkBuilder::DoGetCachedArrayIndex(HGetCachedArrayIndex* instr) {
@@ -4684,7 +4703,7 @@ void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
 
   // Check that the function has a prototype or an initial map.
   llvm::Value* cmp_root = CompareRoot(load_func, Heap::kTheHoleValueRootIndex);
-  DeoptimizeIf(cmp_root);
+  DeoptimizeIf(cmp_root, Deoptimizer::kHole);
 
   // If the function does not have an initial map, we're done.
   llvm::Value* result = LoadFieldOperand(load_func, HeapObject::kMapOffset);
@@ -4922,7 +4941,6 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
       UNIMPLEMENTED();
     }
     inst_offset += kPointerSize / 2;
-    
   }
   llvm::Value* address = BuildFastArrayOperand(key, Use(instr->elements()),
                                        FAST_DOUBLE_ELEMENTS, inst_offset);
@@ -4933,13 +4951,16 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
 
   if (requires_hole_check) {
     if (IsFastSmiElementsKind(instr->elements_kind())) {
-      llvm::Value* cmp = SmiCheck(load, false);
-      DeoptimizeIf(cmp, true);
+      bool check_non_smi = true;
+      llvm::Value* cmp = SmiCheck(load, check_non_smi);
+      DeoptimizeIf(cmp, Deoptimizer::kNotASmi);
     } else {
       // FIXME(access-nsieve): not tested
       llvm::Value* cmp = CompareRoot(load, Heap::kTheHoleValueRootIndex);
-      DeoptimizeIf(cmp); // kHole
+      DeoptimizeIf(cmp, Deoptimizer::kHole);
     }
+  } else if (instr->hole_mode() == CONVERT_HOLE_TO_UNDEFINED) {
+    UNIMPLEMENTED();
   }
   instr->set_llvm_value(load);
 }
@@ -5274,12 +5295,13 @@ void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
 
      __ SetInsertPoint(remainder_zero);
      llvm::Value* cmp_divident = __ CreateICmpSLT(left, zero);
-     DeoptimizeIf(cmp_divident, false, remainder_not_zero);
-        
+     DeoptimizeIf(cmp_divident, Deoptimizer::kMinusZero, false,
+                  remainder_not_zero);
      __ SetInsertPoint(remainder_not_zero);
   }
   instr->set_llvm_value(result);
 
+  // FIXME(llvm): say no commented code!
 /*  HValue* dividend = instr->left();
   llvm::Value* l_dividend = Use(dividend);
   llvm::Value* l_rax = nullptr;
@@ -5370,8 +5392,8 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
   llvm::Value* result = nullptr;
   llvm::Value* div_res = nullptr;
   if (instr->CheckFlag(HValue::kCanBeDivByZero)) {
-    llvm::Value* test  = __ CreateICmpNE(right, zero);
-    DeoptimizeIf(test, true);
+    llvm::Value* is_zero  = __ CreateICmpEQ(right, zero);
+    DeoptimizeIf(is_zero, Deoptimizer::kDivisionByZero);
   }
 
   int phi_in = 1;
@@ -5388,15 +5410,16 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
 
     __ SetInsertPoint(after_cmp_minInt);
     llvm::Value* minus_one = __ getInt32(-1);
-    llvm::Value* cmp_one = __ CreateICmpNE(right, minus_one);
+    llvm::Value* is_not_minus_one = __ CreateICmpNE(right, minus_one);
     if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-      DeoptimizeIf(cmp_one, true);
+      bool negate = true;
+      DeoptimizeIf(is_not_minus_one, Deoptimizer::kMinusZero, negate);
     } else {
-    phi_in++;
-    __ CreateCondBr(cmp_one, no_overflow_possible, after_cmp_one);
-    __ SetInsertPoint(after_cmp_one);
-    result = zero;
-      __ CreateBr(done);
+      phi_in++;
+      __ CreateCondBr(is_not_minus_one, no_overflow_possible, after_cmp_one);
+      __ SetInsertPoint(after_cmp_one);
+      result = zero;
+        __ CreateBr(done);
     }
     __ SetInsertPoint(no_overflow_possible);
     }
@@ -5413,8 +5436,8 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
 
     __ SetInsertPoint(negative);
     div_res = __ CreateSRem(left, right);
-    llvm::Value* cmp_zero = __ CreateICmpNE(div_res, zero);
-    DeoptimizeIf(cmp_zero, true);
+    llvm::Value* cmp_zero = __ CreateICmpEQ(div_res, zero);
+    DeoptimizeIf(cmp_zero, Deoptimizer::kMinusZero);
     __ CreateBr(done);
 
     __ SetInsertPoint(positive);
@@ -5439,15 +5462,15 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoMul(HMul* instr) {
-  if(instr->representation().IsInteger32() || instr->representation().IsSmi()) {
+  if(instr->representation().IsSmiOrInteger32()) {
     DCHECK(instr->left()->representation().Equals(instr->representation()));
     DCHECK(instr->right()->representation().Equals(instr->representation()));
     HValue* left = instr->left();
     HValue* right = instr->right();
     llvm::Value* llvm_left = Use(left);
     llvm::Value* llvm_right = Use(right);
-    bool can_overflow =
-      instr->CheckFlag(HValue::kCanOverflow);
+    bool can_overflow = instr->CheckFlag(HValue::kCanOverflow);
+    // TODO(llvm): use raw mul, not the intrinsic, if (!can_overflow).
     llvm::Value* overflow = nullptr;
     if (instr->representation().IsSmi()) {
       // FIXME (llvm):
@@ -5476,9 +5499,7 @@ void LLVMChunkBuilder::DoMul(HMul* instr) {
       overflow = __ CreateExtractValue(call, 1);
       instr->set_llvm_value(mul);
     }
-    if (can_overflow) {
-      DeoptimizeIf(overflow);
-    }
+    if (can_overflow) DeoptimizeIf(overflow, Deoptimizer::kOverflow);
   } else if (instr->representation().IsDouble()) {
     DCHECK(instr->representation().IsDouble());
     DCHECK(instr->left()->representation().IsDouble());
@@ -5521,7 +5542,7 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
     __ SetInsertPoint(deopt);
     llvm::Value* cmp = CmpObjectType(tagged_exponent,
                                      HEAP_NUMBER_TYPE, llvm::CmpInst::ICMP_NE);
-    DeoptimizeIf(cmp, false, no_deopt);
+    DeoptimizeIf(cmp, Deoptimizer::kNotAHeapNumber, false, no_deopt);
 
     __ SetInsertPoint(no_deopt);
     MathPowStub stub(isolate(), MathPowStub::TAGGED);
@@ -6435,7 +6456,7 @@ void LLVMChunkBuilder::DoSub(HSub* instr) {
       llvm::Value* call = __ CreateCall(intrinsic, params);
       llvm::Value* sub = __ CreateExtractValue(call, 0);
       llvm::Value* overflow = __ CreateExtractValue(call, 1);
-      DeoptimizeIf(overflow);
+      DeoptimizeIf(overflow, Deoptimizer::kOverflow);
       instr->set_llvm_value(sub);
     }
   } else if (instr->representation().IsDouble()) {
@@ -6735,7 +6756,7 @@ void LLVMChunkBuilder::DoIntegerMathAbs(HUnaryMathOperation* instr) {
   __ SetInsertPoint(is_negative);
   llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
   llvm::Value* is_neg = __ CreateICmpSLT(neg_val, zero);
-  DeoptimizeIf(is_neg, false, is_positive);
+  DeoptimizeIf(is_neg, Deoptimizer::kOverflow, false, is_positive);
   __ SetInsertPoint(is_positive);
   llvm::Value* val = Use(instr->value());
   llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
@@ -6755,9 +6776,9 @@ void LLVMChunkBuilder::DoSmiMathAbs(HUnaryMathOperation* instr) {
   __ SetInsertPoint(is_negative);
   llvm::Value* neg_val =  __ CreateNeg(Use(instr->value()));
   llvm::Value* is_neg = __ CreateICmpSLT(neg_val, __ getInt64(0));
-  DeoptimizeIf(is_neg, false, is_positive);
+  DeoptimizeIf(is_neg, Deoptimizer::kOverflow, false, is_positive);
   __ SetInsertPoint(is_positive);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi = __ CreatePHI(Types::smi, 2);
   phi->addIncoming(neg_val, is_negative);
   phi->addIncoming(value, insert_block);
   instr->set_llvm_value(phi);
@@ -6830,7 +6851,7 @@ void LLVMChunkBuilder::DoMathRound(HUnaryMathOperation* instr) {
   llvm::Value* params[] = { output_reg1, __ getInt32(0x1) };
   llvm::Value* call = __ CreateCall(intrinsic, params);
   llvm::Value* overflow = __ CreateExtractValue(call, 1);
-  DeoptimizeIf(overflow);
+  DeoptimizeIf(overflow, Deoptimizer::kOverflow);
   __ CreateBr(round_result);
 
   __ SetInsertPoint(below_one_half);
@@ -6846,7 +6867,7 @@ void LLVMChunkBuilder::DoMathRound(HUnaryMathOperation* instr) {
   llvm::Value* parameters[] = { output_reg2, __ getInt32(0x1) };
   llvm::Value* call_intrinsic = __ CreateCall(ssub_intrinsic, parameters);
   llvm::Value* cmp_overflow = __ CreateExtractValue(call_intrinsic, 1);
-  DeoptimizeIf(cmp_overflow);
+  DeoptimizeIf(cmp_overflow, Deoptimizer::kOverflow);
   xmm_scratch = __ CreateSIToFP(output_reg2, Types::float64);
   cmp = __ CreateFCmpOEQ(xmm_scratch, input_reg);
   __ CreateCondBr(cmp, round_result, not_equal);
@@ -6859,7 +6880,7 @@ void LLVMChunkBuilder::DoMathRound(HUnaryMathOperation* instr) {
   if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
     //UNIMPLEMENTED();
     llvm::Value* cmp_zero = __ CreateFCmpOLT(input_reg, __ CreateSIToFP(__ getInt64(0), Types::float64));
-    DeoptimizeIf(cmp_zero);
+    DeoptimizeIf(cmp_zero, Deoptimizer::kMinusZero);
   }
   llvm::Value* output_reg4 = __ getInt32(6);
   __ CreateBr(round_result);
@@ -7023,11 +7044,11 @@ void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
   // The receiver should be a JS object
   __ SetInsertPoint(not_equal);
   llvm::Value* is_smi = SmiCheck(receiver);
-  DeoptimizeIf(is_smi);
+  DeoptimizeIf(is_smi, Deoptimizer::kSmi);
   llvm::Value* compare_obj = CmpObjectType(receiver,
                                           FIRST_SPEC_OBJECT_TYPE,
                                           llvm::CmpInst::ICMP_ULT);
-  DeoptimizeIf(compare_obj);
+  DeoptimizeIf(compare_obj, Deoptimizer::kNotAJavaScriptObject);
   __ CreateBr(receiver_ok);
 
   __ SetInsertPoint(global_object);
@@ -7068,8 +7089,7 @@ void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(
   llvm::Value* shift = __ getInt64(1 << JSArrayBuffer::WasNeutered::kShift);
   llvm::Value* test = __ CreateAnd(bit_field_offset, shift);
   llvm::Value* cmp = __ CreateICmpNE(test, __ getInt64(0));
-  DeoptimizeIf(cmp);
-  //UNIMPLEMENTED();
+  DeoptimizeIf(cmp, Deoptimizer::kOutOfBounds);
 }
 
 void LLVMChunkBuilder::DoLoadGlobalViaContext(HLoadGlobalViaContext* instr) {
@@ -7138,8 +7158,8 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
                                   params);
 //  RecordSafepointWithLazyDeopt(instr, RECORD_SAFEPOINT_WITH_REGISTERS, 0);
   // __ StoreToSafepointRegisterSlot(result, result);
-  llvm::Value* is_smi = SmiCheck(result_from_deferred, false);
-  DeoptimizeIf(is_smi);
+  llvm::Value* is_smi = SmiCheck(result_from_deferred);
+  DeoptimizeIf(is_smi, Deoptimizer::kSmi);
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
@@ -7148,7 +7168,6 @@ void LLVMChunkBuilder::DoMaybeGrowElements(HMaybeGrowElements* instr) {
   phi->addIncoming(result, insert);
   phi->addIncoming(result_from_deferred, deferred);
   instr->set_llvm_value(phi);
-  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoPrologue(HPrologue* instr) {
