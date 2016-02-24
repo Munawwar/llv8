@@ -5713,11 +5713,12 @@ void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
   __ CreateStore(value, casted_address);
   if (instr->NeedsWriteBarrier()) {
     int slot_offset = Context::SlotOffset(instr->slot_index());
-    //FIXME: check_needed argument ?
+    enum SmiCheck check_needed = instr->value()->type().IsHeapObject()
+          ? OMIT_SMI_CHECK : INLINE_SMI_CHECK;
     RecordWriteField(context,
                      value,
                      slot_offset + kHeapObjectTag,
-                     INLINE_SMI_CHECK,
+                     check_needed,
                      kPointersToHereMaybeInteresting,
                      EMIT_REMEMBERED_SET);
   }
@@ -5969,7 +5970,7 @@ void LLVMChunkBuilder::RecordWrite(llvm::Value* object,
     // FIXME(llvm,gc): respect reloc info mode...
   }
   std::vector<llvm::Value*> params = { object, value, address };
-  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params, false);
+  CallCode(code, llvm::CallingConv::X86_64_V8_RWS, params, true);
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
