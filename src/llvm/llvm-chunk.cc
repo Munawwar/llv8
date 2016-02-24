@@ -3444,8 +3444,8 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     relult_for_not_smi = phi_inner;
     not_smi_merge = merge_inner;
   } else {
-    bool negate = true;
-    DeoptimizeIf(cmp, Deoptimizer::kNotAHeapNumber, negate);
+    // The comparison is already done with NE, so no need for negation here.
+    DeoptimizeIf(cmp, Deoptimizer::kNotAHeapNumber);
 
     auto address = FieldOperand(Use(val), HeapNumber::kValueOffset);
     auto double_addr = __ CreateBitCast(address, Types::ptr_float64);
@@ -3456,7 +3456,7 @@ void LLVMChunkBuilder::ChangeTaggedToISlow(HValue* val, HChange* instr) {
     relult_for_not_smi = __ CreateFPToSI(double_val, Types::i32);
     auto converted_double = __ CreateSIToFP(relult_for_not_smi, Types::float64);
     auto ordered_and_equal = __ CreateFCmpOEQ(double_val, converted_double);
-    negate = true;
+    bool negate = true;
     // TODO(llvm): in case they are unordered or equal, reason should be
     // kLostPrecision.
     DeoptimizeIf(ordered_and_equal, Deoptimizer::kNaN, negate);
