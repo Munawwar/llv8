@@ -1583,7 +1583,7 @@ llvm::Value* LLVMChunkBuilder::CheckPageFlag(llvm::Value* object, int mask) {
   return __ CreateICmpEQ(and_result, __ getInt32(0), "CheckPageFlag");
 }
 
-llvm::Value* LLVMChunkBuilder::AllocateHeapNumberSlow(HValue* unuse) {
+llvm::Value* LLVMChunkBuilder::AllocateHeapNumberSlow(HValue* unuse, llvm::Value* null_ptr) {
 
   // return an i8*
   llvm::Value* allocated = CallRuntimeViaId(Runtime::kAllocateHeapNumber);
@@ -1623,7 +1623,7 @@ llvm::Value* LLVMChunkBuilder::LoadAllocationTopHelper(AllocationFlags flags) {
 
 
 llvm::Value* LLVMChunkBuilder::AllocateHeapNumber(MutableMode mode){
-  llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*);
+  llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*, llvm::Value*);
   fptr = &LLVMChunkBuilder::AllocateHeapNumberSlow;
   llvm::Value* result = Allocate(__ getInt32(HeapNumber::kSize), fptr, TAG_OBJECT);
   Heap::RootListIndex map_index = mode == MUTABLE
@@ -2441,9 +2441,11 @@ void LLVMChunkBuilder::DoAllocateBlockContext(HAllocateBlockContext* instr) {
 
 llvm::Value* LLVMChunkBuilder::Allocate(llvm::Value* object_size,
                                         llvm::Value* (LLVMChunkBuilder::*fptr)
-                                                     (HValue* instr),
+                                                     (HValue* instr,
+                                                      llvm::Value* temp),
                                         AllocationFlags flags,
-                                        HValue* instr){
+                                        HValue* instr,
+                                        llvm::Value* temp){
   DCHECK((flags & (RESULT_CONTAINS_TOP | SIZE_IN_WORDS)) == 0);
 //  DCHECK(object_size <= Page::kMaxRegularHeapObjectSize);
   if (!FLAG_inline_new) {
@@ -2502,7 +2504,7 @@ llvm::Value* LLVMChunkBuilder::Allocate(llvm::Value* object_size,
   }
 
   __ SetInsertPoint(deferred);
-  llvm::Value* deferred_result = (this->*fptr)(instr);
+  llvm::Value* deferred_result = (this->*fptr)(instr, temp);
   __ CreateBr(merge);
 
   __ SetInsertPoint(merge);
@@ -2513,7 +2515,7 @@ llvm::Value* LLVMChunkBuilder::Allocate(llvm::Value* object_size,
 }
 
 
-llvm::Value* LLVMChunkBuilder::AllocateSlow(HValue* obj){
+llvm::Value* LLVMChunkBuilder::AllocateSlow(HValue* obj, llvm::Value* temp){
   HAllocate* instr = HAllocate::cast(obj);
   std::vector<llvm::Value*> args;
   llvm::Value* arg1 = Integer32ToSmi(instr->size());
@@ -2551,7 +2553,7 @@ void LLVMChunkBuilder::DoAllocate(HAllocate* instr) {
 
   DCHECK(instr->size()->representation().IsInteger32());
   llvm::Value* size = Use(instr->size());
-  llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*);
+  llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*, llvm::Value*);
   fptr = &LLVMChunkBuilder::AllocateSlow;
   llvm::Value* res = Allocate(size, fptr, flags, instr);
   instr->set_llvm_value(res);
@@ -5597,6 +5599,19 @@ void LLVMChunkBuilder::DoPower(HPower* instr) {
   }
 }
 
+llvm::Value* LLVMChunkBuilder::RegExpLiteralSlow(HValue* instr,
+                                                 llvm::Value* phi) {
+  int size = JSRegExp::kSize + JSRegExp::kInObjectFieldCount * kPointerSize;
+
+  Smi* smi_size = Smi::FromInt(size);
+  DCHECK(pending_pushed_args_.is_empty());
+  pending_pushed_args_.Add(ValueFromSmi(smi_size), info()->zone());
+  pending_pushed_args_.Add(phi, info()->zone());
+  llvm::Value* call_result = CallRuntimeViaId(Runtime::kAllocateInNewSpace);
+  pending_pushed_args_.Clear();
+  return call_result;
+}
+
 void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
   //TODO: not tested string-validate-input.js in doTest
   llvm::BasicBlock* materialized = NewBlock("DoRegExpLiteral materialized");
@@ -5622,18 +5637,16 @@ void LLVMChunkBuilder::DoRegExpLiteral(HRegExpLiteral* instr) {
 
   __ SetInsertPoint(materialized);
   int size = JSRegExp::kSize + JSRegExp::kInObjectFieldCount * kPointerSize;
+  llvm::Value* l_size = __ getInt32(size);
   //TODO(llvm) impement Allocate(size, rax, rcx, rdx, &runtime_allocate, TAG_OBJECT);
   //                    jmp(&allocated, Label::kNear);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
   phi->addIncoming(call_result, near);
   phi->addIncoming(fild_literal, input);
+  llvm::Value* (LLVMChunkBuilder::*fptr)(HValue*, llvm::Value*);
+  fptr = &LLVMChunkBuilder::RegExpLiteralSlow;
+  llvm::Value* value = Allocate(l_size, fptr, TAG_OBJECT, nullptr, phi);
 
-  Smi* smi_size = Smi::FromInt(size);
-  DCHECK(pending_pushed_args_.is_empty());
-  pending_pushed_args_.Add(ValueFromSmi(smi_size), info()->zone());
-  pending_pushed_args_.Add(phi, info()->zone());
-  llvm::Value* result = CallRuntimeViaId(Runtime::kAllocateInNewSpace);
-  llvm::Value* value = __ CreateBitOrPointerCast(result, Types::i64);
   llvm::Value* temp = nullptr;    //rdx
   llvm::Value* temp2 = nullptr;     //rcx
   for (int i = 0; i < size - kPointerSize; i += 2 * kPointerSize) {
