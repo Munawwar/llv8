@@ -820,7 +820,8 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
   llvm::Value* CallCFunction(ExternalReference function, std::vector<llvm::Value*>, int num_arguments);
   llvm::Value* LoadAddress(ExternalReference);
   void DumpPointerValues();
-  llvm::Value* CmpInstanceType(llvm::Value*, InstanceType, llvm::CmpInst::Predicate);
+  llvm::Value* CmpInstanceType(llvm::Value* value, InstanceType type,
+                               llvm::CmpInst::Predicate pred = llvm::CmpInst::ICMP_EQ);
   // TODO(llvm): probably pull these up to LowChunkBuilderBase
   HInstruction* current_instruction_;
   HBasicBlock* current_block_;

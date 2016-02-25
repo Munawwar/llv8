@@ -2660,8 +2660,21 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
   for (auto i = ToBooleanStub::UNDEFINED;
       i < ToBooleanStub::NUMBER_OF_TYPES;
       i = static_cast<ToBooleanStub::Type>(i + 1)) {
-    if (expected.Contains(i))
+    if (i == ToBooleanStub::SMI){
+      if (expected.Contains(i)){
+        check_blocks.push_back(NewBlock("BranchTagged Check Block"));
+      } else if (expected.NeedsMap()){
+        check_blocks.push_back(NewBlock("BranchTagged NeedsMapCont"));
+      }
+      if (expected.NeedsMap()) {
+        if (!expected.CanBeUndetectable())
+          check_blocks.push_back(NewBlock("BranchTagged NonUndetachable"));
+        else
+          check_blocks.push_back(NewBlock("BranchTagged CanBeUndetectable"));
+      }
+    } else if (expected.Contains(i)) {
       check_blocks.push_back(NewBlock("BranchTagged Check Block"));
+    }
   }
   llvm::BasicBlock* merge_block = NewBlock("BranchTagged Merge Block");
   check_blocks.push_back(merge_block);
@@ -2699,6 +2712,7 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ CreateCondBr(is_null, false_target, check_blocks[++cur_block]);
     next = check_blocks[cur_block];
   }
+
   // TODO: Test (till the end) 3d-cube.js DrawQube
   if (expected.Contains(ToBooleanStub::SMI)) {
     __ SetInsertPoint(next);
@@ -2710,29 +2724,31 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     llvm::Value* smi_cond = SmiCheck(value, false);
     __ CreateCondBr(smi_cond, true_target, check_blocks[++cur_block]);
     next = check_blocks[cur_block];
- 
   } else if (expected.NeedsMap()) {
     // If we need a map later and have a Smi -> deopt.
     //TODO: Not tested, string-fasta fastaRandom
     __ SetInsertPoint(next);
     auto smi_and = __ CreateAnd(value_as_i64, __ getInt64(kSmiTagMask));
     auto is_smi = __ CreateICmpEQ(smi_and, __ getInt64(0));
-    next = NewBlock("BranchTagged NeedsMapCont");
-    DeoptimizeIf(is_smi, Deoptimizer::kSmi, next);
+    DeoptimizeIf(is_smi, Deoptimizer::kSmi, false, check_blocks[++cur_block]);
+    next = check_blocks[cur_block];
   }
 
   llvm::Value* map = nullptr;
   if (expected.NeedsMap()) {
     __ SetInsertPoint(next);
     map = LoadFieldOperand(value, HeapObject::kMapOffset);
-    if (expected.CanBeUndetectable()) {
+    if (!expected.CanBeUndetectable()) {
+      __ CreateBr(check_blocks[++cur_block]);
+      next = check_blocks[cur_block];
+    } else {
       auto map_bit_offset = LoadFieldOperand(map, Map::kBitFieldOffset);
       auto int_map_bit_offset = __ CreatePtrToInt(map_bit_offset, Types::i64);
       auto map_detach = __ getInt64(1 << Map::kIsUndetectable);
       auto test = __ CreateAnd(int_map_bit_offset, map_detach);
       auto cmp_zero = __ CreateICmpEQ(test, __ getInt64(0));
-      next = NewBlock("BracnhTagged NonUndetachable");
-      __ CreateCondBr(cmp_zero, next, false_target);
+      __ CreateCondBr(cmp_zero, check_blocks[++cur_block], false_target);
+      next = check_blocks[cur_block];
     }
   }
 
@@ -2741,39 +2757,52 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     DCHECK(map); //FIXME: map can be null here
     __ SetInsertPoint(next);
     llvm::Value* cmp_instance = CmpInstanceType(map, FIRST_SPEC_OBJECT_TYPE, llvm::CmpInst::ICMP_UGE);
-    __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);    
+    __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);
+    next = check_blocks[cur_block];
   }
 
   if (expected.Contains(ToBooleanStub::STRING)) {
     // String value -> false iff empty.
     DCHECK(map); //FIXME: map can be null here
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     llvm::BasicBlock* is_string_bb = NewBlock("BranchTagged ToBoolString IsString");
     llvm::Value* cmp_instance = CmpInstanceType(map, FIRST_NONSTRING_TYPE, llvm::CmpInst::ICMP_UGE);
      __ CreateCondBr(cmp_instance, check_blocks[++cur_block], is_string_bb);
      __ SetInsertPoint(is_string_bb);
+     next = check_blocks[cur_block];
      auto str_length = LoadFieldOperand(value, String::kLengthOffset);
      auto casted_str_length = __ CreatePtrToInt(str_length, Types::i64);
      auto cmp_length = __ CreateICmpEQ(casted_str_length, __ getInt64(0));
      __ CreateCondBr(cmp_length, false_target, true_target);
   }
 
+  if (expected.Contains(ToBooleanStub::SIMD_VALUE)) {
+    // SIMD value -> true.
+    DCHECK(map); //FIXME: map can be null here
+    __ SetInsertPoint(next);
+    llvm::Value* cmp_simd = CmpInstanceType(map, SIMD128_VALUE_TYPE);
+    __ CreateCondBr(cmp_simd, true_target, check_blocks[++cur_block]);
+    next = check_blocks[cur_block];
+  }
+
   if (expected.Contains(ToBooleanStub::SYMBOL)) {
     // Symbol value -> true.
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     DCHECK(map); //FIXME: map can be null here
     llvm::Value* cmp_instance = CmpInstanceType(map, SYMBOL_TYPE, llvm::CmpInst::ICMP_EQ);
     __ CreateCondBr(cmp_instance, true_target, check_blocks[++cur_block]);
+    next = check_blocks[cur_block];
   }
 
   if (expected.Contains(ToBooleanStub::HEAP_NUMBER)) {
     // heap number -> false iff +0, -0, or NaN.
     DCHECK(map); //FIXME: map can be null here
-    __ SetInsertPoint(check_blocks[cur_block]);
+    __ SetInsertPoint(next);
     llvm::BasicBlock* is_heap_bb = NewBlock("BranchTagged ToBoolString IsHeapNumber");
     auto cmp_root = CompareRoot(map, Heap::kHeapNumberMapRootIndex, llvm::CmpInst::ICMP_NE); 
-    __ CreateCondBr(cmp_root, merge_block, is_heap_bb);
+    __ CreateCondBr(cmp_root, check_blocks[++cur_block], is_heap_bb);
     __ SetInsertPoint(is_heap_bb);
+    next = check_blocks[cur_block];
     llvm::Value* zero_val = llvm::ConstantFP::get(Types::float64, 0);    
     auto value_addr = FieldOperand(value, HeapNumber::kValueOffset);
     llvm::Value* value_as_double_addr = __ CreateBitCast(value_addr,
@@ -2784,14 +2813,13 @@ void LLVMChunkBuilder::BranchTagged(HBranch* instr,
     __ CreateCondBr(compare, false_target, true_target);  
   }
 
-  __ SetInsertPoint(merge_block) ; // TODO(llvm): not sure
+  __ SetInsertPoint(next) ; // TODO(llvm): not sure
 
   if (!expected.IsGeneric()) {
     // We've seen something for the first time -> deopt.
     // This can only happen if we are not generic already.
     auto no_condition = __ getTrue();
     DeoptimizeIf(no_condition, Deoptimizer::kUnexpectedObject);
-
     // Since we deoptimize on True the continue block is never reached.
     __ CreateUnreachable();
   } else {
@@ -3760,8 +3788,8 @@ void LLVMChunkBuilder::DoCheckMaps(HCheckMaps* instr) {
 
 void LLVMChunkBuilder::DoCheckMapValue(HCheckMapValue* instr) {
   llvm::Value* val = Use(instr->value());
-  llvm::Value* int_val = __ CreatePtrToInt(FieldOperand(val, HeapObject::kMapOffset), Types::i64);
-  llvm::Value* cmp = __ CreateICmpNE(Use(instr->map()), int_val);
+  llvm::Value* tagged_val = FieldOperand(val, HeapObject::kMapOffset);
+  llvm::Value* cmp = __ CreateICmpNE(Use(instr->map()), tagged_val);
   DeoptimizeIf(cmp, Deoptimizer::kWrongMap, true);
 }
 
@@ -4307,16 +4335,14 @@ void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   result = LoadFieldOperand(map_val, Map::kDescriptorsOffset);
   result = LoadFieldOperand(result, DescriptorArray::kEnumCacheOffset);
   result = LoadFieldOperand(result, FixedArray::SizeFor(HForInCacheArray::cast(instr)->idx()));
-  llvm::Value* int64_res = __ CreatePtrToInt(result, Types::i64);
   __ CreateBr(done_block);
   __ SetInsertPoint(done_block);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
   phi->addIncoming(result1, done_block1);
-  phi->addIncoming(int64_res, load_cache);
+  phi->addIncoming(result, load_cache);
   llvm::Value* cond = SmiCheck(phi, true);
   DeoptimizeIf(cond,  Deoptimizer::kNoCache, true);
   instr->set_llvm_value(phi);
-  //UNIMPLEMENTED();
 }
 
 llvm::Value* LLVMChunkBuilder::EnumLength(llvm::Value* map) {
@@ -4370,7 +4396,8 @@ void LLVMChunkBuilder::CheckEnumCache(llvm::Value* enum_val, llvm::Value* val, l
   llvm::Value* val_addr = FieldOperand(map_1, Map::kPrototypeOffset);
   llvm::Value* int64 = __ CreateBitCast(val_addr, Types::ptr_i64);
   llvm::Value* val_map = __ CreateLoad(int64);
-  llvm::Value* cmp_n_equal = __ CreateICmpNE(val_map, val);
+  llvm::Value* val_map_int = __ CreateIntToPtr(val_map, Types::tagged);
+  llvm::Value* cmp_n_equal = __ CreateICmpNE(val_map_int, val);
   __ CreateCondBr(cmp_n_equal, next, final_block);
   __ SetInsertPoint(final_block);
   
@@ -4646,8 +4673,15 @@ void LLVMChunkBuilder::DoLoadContextSlot(HLoadContextSlot* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
-  llvm::Value* val1 = Use(instr->object());
-  llvm::Value* val2 = Use(instr->index());
+  llvm::Value* object = Use(instr->object());
+  llvm::Value* index = nullptr;
+  if (instr->index()->representation().IsTagged()) {
+    llvm::Value* temp = Use(instr->index());
+    index = __ CreatePtrToInt(temp, Types::i64);
+  } else {
+    index = Use(instr->index());
+  }
+
   // DeferredLoadMutableDouble case does not implemented,
   llvm::BasicBlock* out_of_obj = NewBlock("OUT OF OBJECT");
   llvm::BasicBlock* done1 = NewBlock("DONE1");
@@ -4656,18 +4690,18 @@ void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
   llvm::Value* smi_val = __ CreateShl(smi_tmp_val, kSmiShift);*/
   /*llvm::Value* tmp_val = __ CreateAnd(val2, smi_val);
   llvm::Value* test = __ CreateICmpNE(tmp_val, __ getInt64(0));*/
-  llvm::Value* smi_tmp = __ CreateAShr(val2, __ getInt64(1));
-  val2 = __ CreateLShr(smi_tmp, kSmiShift);
-  val2 = __ CreateTrunc(val2, Types::i32);
-  llvm::Value* cmp_less = __ CreateICmpSLT(val2, __ getInt32(0));
+  llvm::Value* smi_tmp = __ CreateAShr(index, __ getInt64(1));
+  index = __ CreateLShr(smi_tmp, kSmiShift);
+  index = __ CreateTrunc(index, Types::i32);
+  llvm::Value* cmp_less = __ CreateICmpSLT(index, __ getInt32(0));
   __ CreateCondBr(cmp_less, out_of_obj, done1);
   __ SetInsertPoint(done1);
   //FIXME: Use BuildFastArrayOperand
   llvm::Value* scale = __ getInt32(8);
   llvm::Value* offset = __ getInt32(JSObject::kHeaderSize);
-  llvm::Value* mul = __ CreateMul(val2, scale);
+  llvm::Value* mul = __ CreateMul(index, scale);
   llvm::Value* add = __ CreateAdd(mul, offset);
-  llvm::Value* int_ptr = __ CreateIntToPtr(val1, Types::ptr_i8);
+  llvm::Value* int_ptr = __ CreateIntToPtr(object, Types::ptr_i8);
   llvm::Value* gep_0 = __ CreateGEP(int_ptr, add);
   llvm::Value* tmp1 = __ CreateBitCast(gep_0, Types::ptr_i64);
   llvm::Value* int64_val1 = __ CreateLoad(tmp1);
@@ -4675,7 +4709,7 @@ void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
   __ SetInsertPoint(out_of_obj);
   scale = __ getInt64(8);
   offset = __ getInt64(JSObject::kHeaderSize-kPointerSize);
-  llvm::Value* v2 = LoadFieldOperand(val1, JSObject::kPropertiesOffset);
+  llvm::Value* v2 = LoadFieldOperand(object, JSObject::kPropertiesOffset);
   llvm::Value* int64_val = __ CreatePtrToInt(v2, Types::i64);
   llvm::Value* neg_val1 = __ CreateNeg(int64_val);
   llvm::Value* mul1 = __ CreateMul(neg_val1, scale);
@@ -4689,8 +4723,8 @@ void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
   llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
   phi->addIncoming(int64_val1, done1);
   phi->addIncoming(int64_val2, out_of_obj);
-  instr->set_llvm_value(phi); 
-  //UNIMPLEMENTED();
+  llvm::Value* phi_tagged = __ CreateIntToPtr(phi, Types::tagged);
+  instr->set_llvm_value(phi_tagged);
 }
 
 void LLVMChunkBuilder::DoLoadFunctionPrototype(HLoadFunctionPrototype* instr) {
