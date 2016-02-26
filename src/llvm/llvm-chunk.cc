@@ -4976,6 +4976,7 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
     if (FLAG_debug_code) {
       UNIMPLEMENTED();
     }
+    DCHECK(kSmiTagSize + kSmiShiftSize == 32);
     inst_offset += kPointerSize / 2;
   }
   llvm::Value* address = BuildFastArrayOperand(key, Use(instr->elements()),
@@ -4996,7 +4997,37 @@ void LLVMChunkBuilder::DoLoadKeyedFixedArray(HLoadKeyed* instr) {
       DeoptimizeIf(cmp, Deoptimizer::kHole);
     }
   } else if (instr->hole_mode() == CONVERT_HOLE_TO_UNDEFINED) {
-    UNIMPLEMENTED();
+    DCHECK(instr->elements_kind() == FAST_HOLEY_ELEMENTS);
+    llvm::BasicBlock* merge = NewBlock("DoLoadKeyedFixedArray merge");
+    llvm::BasicBlock* after_cmp = NewBlock("DoLoadKeyedFixedArray after cmp");
+    llvm::BasicBlock* insert = __ GetInsertBlock();
+    llvm::Value* cmp = CompareRoot(load, Heap::kTheHoleValueRootIndex,
+                                   llvm::CmpInst::ICMP_NE);
+    __ CreateCondBr(cmp, merge, after_cmp);
+
+    __ SetInsertPoint(after_cmp);
+    llvm::BasicBlock* check_info = NewBlock("DoLoadKeyedFixedArray check_info");
+    if (info()->IsStub()) {
+      // A stub can safely convert the hole to undefined only if the array
+      // protector cell contains (Smi) Isolate::kArrayProtectorValid. Otherwise
+      // it needs to bail out.
+
+      //You should be jump to check_info block
+      //DeoptimizeIf(cond, check_info);
+      UNIMPLEMENTED();
+    } else {
+      __ CreateBr(check_info);
+    }
+    __ SetInsertPoint(check_info);
+    auto undefined = MoveHeapObject(isolate()->factory()->undefined_value());
+    __ CreateBr(merge);
+
+    __ SetInsertPoint(merge);
+    llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
+    phi->addIncoming(undefined, check_info);
+    phi->addIncoming(load, insert);
+    instr->set_llvm_value(phi);
+    return;
   }
   instr->set_llvm_value(load);
 }
