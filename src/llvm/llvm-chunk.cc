@@ -6165,6 +6165,11 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
 
   if (FLAG_unbox_double_fields && representation.IsDouble()) {
     UNIMPLEMENTED();
+    llvm::Value* obj_address = FieldOperand(Use(instr->object()), offset);
+    llvm::Value* casted_obj_add =  __ CreateBitCast(obj_address,
+                                                    Types::ptr_float64);
+    __ CreateStore(Use(instr->value()), casted_obj_add);
+    return;
   } else {
     HValue* hValue = instr->value();
     if (hValue->representation().IsInteger32()) {
