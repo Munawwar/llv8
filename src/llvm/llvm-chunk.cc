@@ -145,6 +145,8 @@ Handle<Code> LLVMChunk::Codegen() {
   std::cerr << "\n";
 
   DumpSafepoints(*code);
+#else
+  USE(DumpSafepoints);
 #endif
   return code;
 }

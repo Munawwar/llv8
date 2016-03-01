@@ -342,7 +342,7 @@ private:
 };
 }
 
-#ifndef NDEBUG
+#ifdef DEBUG
 static raw_ostream &operator<<(raw_ostream &OS, const BDVState &State) {
   State.print(OS);
   return OS;
