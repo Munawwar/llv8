@@ -5952,37 +5952,34 @@ void LLVMChunkBuilder::DoStoreKeyedFixedArray(HStoreKeyed* instr) {
                                                elements_kind, inst_offset); 
   HValue* hValue = instr->value();
   llvm::Value* store = nullptr;
+  llvm::Value* casted_address = nullptr;
 
   if (!hValue->IsConstant() || hValue->representation().IsSmi() ||
       hValue->representation().IsInteger32()) {
     auto pointer_type = GetLLVMType(hValue->representation())->getPointerTo();
-    llvm::Value* casted_adderss = __ CreateBitCast(address, pointer_type);
-    store = __ CreateStore(Use(hValue), casted_adderss);
+    casted_address = __ CreateBitOrPointerCast(address, pointer_type);
+    store = __ CreateStore(Use(hValue), casted_address);
   } else {
     DCHECK(hValue->IsConstant());
     HConstant* constant = HConstant::cast(instr->value());
     Handle<Object> handle_value = constant->handle(isolate());
-    llvm::Value* casted_adderss = __ CreateBitCast(address, Types::ptr_tagged);
+    casted_address = __ CreateBitOrPointerCast(address, Types::ptr_tagged);
     auto llvm_val = MoveHeapObject(handle_value);
-    store = __ CreateStore(llvm_val, casted_adderss);
+    store = __ CreateStore(llvm_val, casted_address);
   } 
   instr->set_llvm_value(store);
   if (instr->NeedsWriteBarrier()) {
-    //Must be FIXED !!! // FIXME(llvm): look into this (WTF, man...)
-    llvm::Value* elem = Use(instr->elements());
+    llvm::Value* elements = Use(instr->elements());
     llvm::Value* value = Use(instr->value());
-    llvm::Value* key_l = Use(instr->key());
-    llvm::Value* casted_adderss = __ CreateBitCast(address, Types::ptr_i64);
-    key_l = __ CreateLoad(casted_adderss);
     enum SmiCheck check_needed = instr->value()->type().IsHeapObject()
             ? OMIT_SMI_CHECK : INLINE_SMI_CHECK;
-    RecordWrite(elem,
-                key_l,
+    // FIXME(llvm): kSaveFPRegs
+    RecordWrite(elements,
+                casted_address,
                 value,
                 instr->PointersToHereCheckForValue(),
-                OMIT_REMEMBERED_SET,
+                EMIT_REMEMBERED_SET,
                 check_needed);
-    UNIMPLEMENTED();
   }
 }
 
