@@ -312,6 +312,7 @@ struct Types final : public AllStatic {
    static llvm::PointerType* ptr_tagged;
 
    static llvm::Type* i8;
+   static llvm::Type* i16;
    static llvm::Type* i32;
    static llvm::Type* i64;
    static llvm::Type* float32;
@@ -326,6 +327,7 @@ struct Types final : public AllStatic {
 
   static void Init(llvm::IRBuilder<>* ir_builder) {
     i8 = ir_builder->getInt8Ty();
+    i16 = ir_builder->getInt16Ty();
     i32 = ir_builder->getInt32Ty();
     i64 = ir_builder->getInt64Ty();
     float32 = ir_builder->getFloatTy();
@@ -333,7 +335,7 @@ struct Types final : public AllStatic {
 
     auto address_space = 0;
     ptr_i8 = ir_builder->getInt8PtrTy();
-    ptr_i16 = llvm::PointerType::get(ir_builder->getHalfTy(), address_space);
+    ptr_i16 = i16->getPointerTo();
     ptr_i32 = llvm::PointerType::get(ir_builder->getInt32Ty(), address_space);
     ptr_i64 = llvm::PointerType::get(ir_builder->getInt64Ty(), address_space);
     ptr_float32 = llvm::PointerType::get(ir_builder->getFloatTy(), address_space);

@@ -24,6 +24,7 @@ auto LLVMGranularity::x64_target_triple = "x86_64-unknown-linux-gnu";
 const char* LLVMChunkBuilder::kGcStrategyName = "v8-gc";
 const std::string LLVMChunkBuilder::kPointersPrefix = "pointer_";
 llvm::Type* Types::i8 = nullptr;
+llvm::Type* Types::i16 = nullptr;
 llvm::Type* Types::i32 = nullptr;
 llvm::Type* Types::i64 = nullptr;
 llvm::Type* Types::float32 = nullptr;
@@ -4801,6 +4802,7 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
   ElementsKind kind = instr->elements_kind();
   int32_t base_offset = instr->base_offset();
   llvm::Value* casted_address = nullptr;
+  // FIXME(llvm): this is bad. Limit the scope to a block.
   llvm::Value* load = nullptr;
 
   if (kPointerSize == kInt32Size && !key->IsConstant()) {
@@ -4821,6 +4823,7 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
     load = __ CreateLoad(casted_address);
     instr->set_llvm_value(load);
   } else {
+    // TODO(llvm): DRY: hoist the common part.
     switch (kind) {
       case INT8_ELEMENTS: {
         //movsxbl(result, operand)
@@ -4852,9 +4855,13 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
         instr->set_llvm_value(result);
         break;
       }
-      case INT16_ELEMENTS:
-        UNIMPLEMENTED();
+      case INT16_ELEMENTS: {
+        casted_address = __ CreateBitOrPointerCast(address, Types::ptr_i16);
+        load = __ CreateLoad(casted_address);
+        auto extended = __ CreateSExt(load, Types::i32);
+        instr->set_llvm_value(extended);
         break;
+      }
       case UINT16_ELEMENTS:
         UNIMPLEMENTED();
         break;
@@ -5868,9 +5875,13 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
         break;
       }
       case INT16_ELEMENTS:
-      case UINT16_ELEMENTS:
-        UNIMPLEMENTED();
+      case UINT16_ELEMENTS: {
+        auto casted_address = __ CreateBitCast(address, Types::ptr_i16);
+        auto result = __ CreateTruncOrBitCast(Use(instr->value()), Types::i16);
+        auto store = __ CreateStore(result, casted_address);
+        instr->set_llvm_value(store);
         break;
+      }
       case INT32_ELEMENTS:
       case UINT32_ELEMENTS:
         casted_address = __ CreateBitCast(address, Types::ptr_i32);
