@@ -3707,7 +3707,7 @@ void LLVMChunkBuilder::DoCheckInstanceType(HCheckInstanceType* instr) {
       } else {
         cmp = __ CreateICmpEQ(test, __ getInt64(0));
       }
-      DeoptimizeIf(cmp, Deoptimizer::kWrongInstanceType, true);
+      DeoptimizeIf(cmp, Deoptimizer::kWrongInstanceType);
     } else {
       //TODO: not tested (fail form string-tagcloud.js in function ""
       //                  fail form date-format-tofte.js in arrayExists)
