@@ -4455,12 +4455,17 @@ void LLVMChunkBuilder::DoHasCachedArrayIndexAndBranch(HHasCachedArrayIndexAndBra
   UNIMPLEMENTED();
 }
 
+static InstanceType TestType(HHasInstanceTypeAndBranch* instr) {
+  InstanceType from = instr->from();
+  InstanceType to = instr->to();
+  if (from == FIRST_TYPE) return to;
+  DCHECK(from == to || to == LAST_TYPE);
+  return from;
+}
+
 void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* instr) {
   llvm::Value* input = Use(instr->value());
   llvm::BasicBlock* near = NewBlock("HasInstanceTypeAndBranch Near");
-  InstanceType from = instr->from();
-  InstanceType to = instr->to();
-  llvm::CmpInst::Predicate cond = llvm::CmpInst::ICMP_EQ;
   llvm::BranchInst* branch = nullptr;
  
   if (!instr->value()->type().IsHeapObject()) {
@@ -4468,24 +4473,11 @@ void LLVMChunkBuilder::DoHasInstanceTypeAndBranch(HHasInstanceTypeAndBranch* ins
     branch = __ CreateCondBr(smi_cond, Use(instr->SuccessorAt(1)), near);
     __ SetInsertPoint(near);
   }
-  
-  llvm::Value* map = LoadFieldOperand(input, HeapObject::kMapOffset);
-  auto imm = static_cast<int8_t>((from == FIRST_TYPE ? to : from));  
-  DCHECK(from == to || to == LAST_TYPE);
 
-  if (from == to) {
-    cond = llvm::CmpInst::ICMP_EQ;
-  } else if (to == LAST_TYPE) {
-    cond = llvm::CmpInst::ICMP_UGE;
-  } else if (from == FIRST_TYPE) {
-    cond = llvm::CmpInst::ICMP_ULE;
-  }
 
-  llvm::Value* cmp = __ CreateICmp(cond, LoadFieldOperand(map, 
-                            Map::kInstanceTypeOffset), __ getInt64(imm));
+  auto cmp = CmpObjectType(input, TestType(instr));
   branch = __ CreateCondBr(cmp, Use(instr->SuccessorAt(0)), 
-                            Use(instr->SuccessorAt(1)));
-
+                           Use(instr->SuccessorAt(1)));
   instr->set_llvm_value(branch);
 }
 
@@ -7159,11 +7151,13 @@ void LLVMChunkBuilder::DoWrapReceiver(HWrapReceiver* instr) {
 llvm::Value* LLVMChunkBuilder::CmpObjectType(llvm::Value* heap_object,
                                              InstanceType type,
                                              llvm::CmpInst::Predicate predicate) {
-  llvm::Value* operand = LoadFieldOperand(heap_object, HeapObject::kMapOffset);
-  llvm::Value* map = LoadFieldOperand(operand, Map::kInstanceTypeOffset);
-  llvm::Value* casted_map = __ CreatePtrToInt(map, Types::i64);
-  llvm::Value* imm = __ getInt64(static_cast<int>(type));
-  return __ CreateICmp(predicate, casted_map, imm);
+  llvm::Value* map = LoadFieldOperand(heap_object, HeapObject::kMapOffset);
+  llvm::Value* map_as_ptr_to_i8 = __ CreateBitOrPointerCast(map, Types::ptr_i8);
+  llvm::Value* object_type_addr = ConstructAddress(
+      map_as_ptr_to_i8, Map::kInstanceTypeOffset - kHeapObjectTag);
+  llvm::Value* object_type = __ CreateLoad(object_type_addr);
+  llvm::Value* expected_type = __ getInt8(static_cast<int8_t>(type));
+  return __ CreateICmp(predicate, object_type, expected_type);
 }
 
 void LLVMChunkBuilder::DoCheckArrayBufferNotNeutered(
