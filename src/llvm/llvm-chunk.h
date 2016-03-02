@@ -711,7 +711,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                            llvm::CallingConv::ID calling_conv,
                            std::vector<llvm::Value*>& params,
                            llvm::Type* return_type = nullptr);
-  void CheckEnumCache(llvm::Value* enum_val, llvm::Value* val, llvm::BasicBlock* bb);
+  void CheckEnumCache(HValue* enum_val, llvm::Value* val, llvm::BasicBlock* bb);
   llvm::Value* EnumLength(llvm::Value* map_);
   llvm::Value* FieldOperand(llvm::Value* base, int offset);
   llvm::Value* LoadFieldOperand(llvm::Value* base,

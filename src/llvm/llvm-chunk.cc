@@ -4328,7 +4328,7 @@ void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
   llvm::BasicBlock* done_block = NewBlock("DONE");
   
   llvm::Value* result = EnumLength(map_val);
-  llvm::Value* cmp_neq = __ CreateICmpNE(result, __ getInt32(0));
+  llvm::Value* cmp_neq = __ CreateICmpNE(result, __ getInt64(0));
   __ CreateCondBr(cmp_neq, load_cache, done_block1);
   __ SetInsertPoint(done_block1);
   llvm::Value* result1 = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
@@ -4348,103 +4348,100 @@ void LLVMChunkBuilder::DoForInCacheArray(HForInCacheArray* instr) {
 }
 
 llvm::Value* LLVMChunkBuilder::EnumLength(llvm::Value* map) {
-  llvm::Value* address = FieldOperand(map, Map::kBitField3Offset);
-  llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i32);
-  llvm::Value* value = __ CreateLoad(cast_int);
-  llvm::Value* dst = __ CreateAnd(value, __ getInt32(Map::EnumLengthBits::kMask));
-  return dst;
+  STATIC_ASSERT(Map::EnumLengthBits::kShift == 0);
+  llvm::Value* length = LoadFieldOperand(map, Map::kBitField3Offset);
+  llvm::Value* tagged = __ CreatePtrToInt(length, Types::i64);
+  llvm::Value* length32 = __ CreateIntCast(tagged, Types::i32, true);
+  llvm::Value* imm = __ getInt32(Map::EnumLengthBits::kMask);
+  llvm::Value* result = __ CreateAnd(length32, imm);
+  return Integer32ToSmi(result);
 }
 
-void LLVMChunkBuilder::CheckEnumCache(llvm::Value* enum_val, llvm::Value* val, llvm::BasicBlock* bb) {
-  llvm::BasicBlock* next = NewBlock("NEXT");
-  llvm::BasicBlock* start = NewBlock("CHECK ENUM C START");
-
-  llvm::Value* arr_val = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
-  //llvm::Value* load_val = Use(instr->enumerable());
-  llvm::Value* address = FieldOperand(enum_val, HeapObject::kMapOffset);
-  llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
-  llvm::Value* map = __ CreateLoad(cast_int);
-  //EnumLength
-  llvm::Value* length_val = EnumLength(map);
-  //IntegerToSmi in EnumLength
-  llvm::Value* smi_tmp_val = __ CreateZExt(length_val, Types::i64);
-  llvm::Value* smi_val = __ CreateShl(smi_tmp_val, kSmiShift);
-  //Cmp
-  llvm::Value* cmp_arg = __ getInt64(kInvalidEnumCacheSentinel);
-  llvm::Value* cmp = __ CreateICmpEQ(smi_val, cmp_arg);
-  llvm::Value* val_address = FieldOperand(enum_val, HeapObject::kMapOffset);
-  llvm::Value* cast_int64 = __ CreateBitCast(val_address, Types::ptr_i64);
-  llvm::Value* map_1 = __ CreateLoad(cast_int64);
-  __ CreateCondBr(cmp, bb, start);
+void LLVMChunkBuilder::CheckEnumCache(HValue* enum_val, llvm::Value* val,
+                                      llvm::BasicBlock* call_runtime) {
+  llvm::BasicBlock* next = NewBlock("CheckEnumCache next");
+  llvm::BasicBlock* start = NewBlock("CheckEnumCache start");
+  llvm::Value* copy_enumerable = Use(enum_val);
+  llvm::Value* empty_array = LoadRoot(Heap::kEmptyFixedArrayRootIndex);
+  // Check if the enum length field is properly initialized, indicating that
+  // there is an enum cache.
+  llvm::Value* map = LoadFieldOperand(copy_enumerable, HeapObject::kMapOffset);
+  llvm::Value* length = EnumLength(map);
+  Smi* invalidEnum = Smi::FromInt(kInvalidEnumCacheSentinel);
+  llvm::Value* enum_length = ValueFromSmi(invalidEnum);
+  llvm::Value* cmp = __ CreateICmpEQ(length, enum_length);
+  __ CreateCondBr(cmp, call_runtime, start);
 
   __ SetInsertPoint(next);
-  
-  length_val = EnumLength(map_1);
-  llvm::Value* cmp_val = __ CreateICmpNE(length_val , __ getInt32(0));
-  __ CreateCondBr(cmp_val, bb, start);
+  map = LoadFieldOperand(copy_enumerable, HeapObject::kMapOffset);
+
+  // For all objects but the receiver, check that the cache is empty.
+  length = EnumLength(map);
+  llvm::Value* test = __ CreateAnd(length, length);
+  llvm::Value* zero = __ getInt64(0);
+  llvm::Value* cmp_zero = __ CreateICmpNE(test, zero);
+  __ CreateCondBr(cmp_zero, call_runtime, start);
+
   __ SetInsertPoint(start);
+  // Check that there are no elements. Register rcx contains the current JS
+  // object we've reached through the prototype chain.
+  llvm::BasicBlock* no_elements = NewBlock("CheckEnumCache no_elements");
+  llvm::BasicBlock* second_chance = NewBlock("CheckEnumCache Second chance");
+  llvm::Value* object = LoadFieldOperand(copy_enumerable,
+                                         JSObject::kElementsOffset);
+  llvm::Value* cmp_obj = __ CreateICmpEQ(empty_array, object);
+  __ CreateCondBr(cmp_obj, no_elements, second_chance);
+
+  __ SetInsertPoint(second_chance);
+  llvm::Value* slow = LoadRoot( Heap::kEmptySlowElementDictionaryRootIndex);
+  llvm::Value* second_cmp_obj = __ CreateICmpNE(slow, object);
+  __ CreateCondBr(second_cmp_obj, call_runtime, no_elements);
   
-  llvm::BasicBlock* no_elements = NewBlock("IF NO ELEMENTS");
-  llvm::BasicBlock* continue_block = NewBlock("IF ELEMENTS EXIST");
-  llvm::BasicBlock* final_block = NewBlock("CHECH ENUM C END");
-  llvm::Value* temp = LoadFieldOperand(enum_val, JSObject::kElementsOffset);
-  llvm::Value* cmp_equal = __ CreateICmpEQ(arr_val, temp);
-  __ CreateCondBr(cmp_equal, no_elements, continue_block);
-  __ SetInsertPoint(continue_block);
-  llvm::Value* r_value = LoadRoot(Heap::kEmptySlowElementDictionaryRootIndex);
-  llvm::Value* cmp_not_equal = __ CreateICmpNE(r_value, temp);
-  __ CreateCondBr(cmp_not_equal, bb, no_elements);
   __ SetInsertPoint(no_elements);
-  llvm::Value* val_addr = FieldOperand(map_1, Map::kPrototypeOffset);
-  llvm::Value* int64 = __ CreateBitCast(val_addr, Types::ptr_i64);
-  llvm::Value* val_map = __ CreateLoad(int64);
-  llvm::Value* val_map_int = __ CreateIntToPtr(val_map, Types::tagged);
-  llvm::Value* cmp_n_equal = __ CreateICmpNE(val_map_int, val);
-  __ CreateCondBr(cmp_n_equal, next, final_block);
-  __ SetInsertPoint(final_block);
+  copy_enumerable = LoadFieldOperand(map, Map::kPrototypeOffset);
+  llvm::BasicBlock* final_block = NewBlock("CheckEnumCache end");
+  llvm::Value* final_cmp = __ CreateICmpNE(copy_enumerable, val);
+  __ CreateCondBr(final_cmp, next, final_block);
   
+  __ SetInsertPoint(final_block);
 }
 
+
 void LLVMChunkBuilder::DoForInPrepareMap(HForInPrepareMap* instr) {
-  // TODO(llvm): I don't like the commented code below. Check carefully.
-  UNIMPLEMENTED();
-//  llvm::Value* enumerable = Use(instr->enumerable());
-//
-//  llvm::Value* load_r = LoadRoot(Heap::kNullValueRootIndex);
-//
-//  llvm::Value* smi_check = SmiCheck(enumerable, true);
-//  DeoptimizeIf(smi_check, Deoptimizer::kSmi);
-//
-//  STATIC_ASSERT(FIRST_JS_PROXY_TYPE == FIRST_SPEC_OBJECT_TYPE);
-//  llvm::Value* address = FieldOperand(enumerable, HeapObject::kMapOffset);
-//  llvm::Value* cast_int = __ CreateBitCast(address, Types::ptr_i64);
-//  llvm::Value* map = __ CreateLoad(cast_int);
-//  llvm::Value* map_f = LoadFieldOperand(map, Map::kInstanceTypeOffset);
-//  llvm::Value* cmp_below_eq = __ CreateICmpULE(map_f,
-//         __ getInt64(static_cast<int8_t>(LAST_JS_PROXY_TYPE)));
-//  DeoptimizeIf(cmp_below_eq, Deoptimizer::kWrongInstanceType);
-//
-//  llvm::BasicBlock* call_runtime = NewBlock("CALL RUNTIME");
-//  llvm::BasicBlock* use_cache = NewBlock("USE CACHE");
-//  std::vector<llvm::Value*> args;
-//  args.push_back(enumerable);
-//  llvm::Value* alloc =  CallRuntimeFromDeferred(Runtime::kAllocateInTargetSpace,
-//          Use(instr->context()), args);
-//  auto alloc_casted = __ CreatePtrToInt(alloc, Types::i64);
-//  CheckEnumCache(enumerable, load_r, call_runtime);
-//
-//  llvm::Value* addr = FieldOperand(enumerable, HeapObject::kMapOffset);
-//  llvm::Value* int64 = __ CreateBitCast(addr, Types::ptr_i64);
-//  __ CreateLoad(int64);
-//  __ CreateBr(use_cache);
-//
-//  __ SetInsertPoint(call_runtime);
-//  instr->set_llvm_value(alloc_casted);
-//  llvm::Value* tmp = LoadFieldOperand(enumerable, HeapObject::kMapOffset);
-//  llvm::Value* cmp_root = CompareRoot(tmp, Heap::kMetaMapRootIndex);
-//  DeoptimizeIf(cmp_root, Deoptimizer::kWrongMap, true);
-//  __ CreateBr(use_cache);
-//  __ SetInsertPoint(use_cache);
+  llvm::Value* enumerable = Use(instr->enumerable());
+  llvm::Value* smi_check = SmiCheck(enumerable);
+  DeoptimizeIf(smi_check, Deoptimizer::kSmi);
+
+  STATIC_ASSERT(FIRST_JS_PROXY_TYPE == FIRST_SPEC_OBJECT_TYPE);
+  llvm::Value* cmp_type = CmpObjectType(enumerable, LAST_JS_PROXY_TYPE,
+                                        llvm::CmpInst::ICMP_ULE);
+  DeoptimizeIf(cmp_type, Deoptimizer::kWrongInstanceType);
+
+  llvm::Value* root = LoadRoot(Heap::kNullValueRootIndex);
+  llvm::BasicBlock* call_runtime = NewBlock("DoForInPrepareMap call runtime");
+  llvm::BasicBlock* merge = NewBlock("DoForInPrepareMap use cache");
+  CheckEnumCache(instr->enumerable(), root, call_runtime);
+  llvm::BasicBlock* insert = __ GetInsertBlock();
+  llvm::Value* map = LoadFieldOperand(enumerable, HeapObject::kMapOffset);
+  __ CreateBr(merge);
+
+  // Get the set of properties to enumerate.
+  __ SetInsertPoint(call_runtime);
+  std::vector<llvm::Value*> args;
+  args.push_back(enumerable);
+  llvm::Value* set =  CallRuntimeFromDeferred(Runtime::kGetPropertyNamesFast,
+                                                Use(instr->context()), args);
+  llvm::Value* runtime_map = LoadFieldOperand(set, HeapObject::kMapOffset);
+  llvm::Value* cmp_root = CompareRoot(runtime_map, Heap::kMetaMapRootIndex,
+                                      llvm::CmpInst::ICMP_NE);
+  DeoptimizeIf(cmp_root, Deoptimizer::kWrongMap);
+  __ CreateBr(merge);
+
+  __ SetInsertPoint(merge);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
+  phi->addIncoming(map, insert);
+  phi->addIncoming(set, call_runtime);
+  instr->set_llvm_value(phi);
 }
 
 void LLVMChunkBuilder::DoGetCachedArrayIndex(HGetCachedArrayIndex* instr) {
@@ -6156,10 +6153,12 @@ void LLVMChunkBuilder::DoStoreNamedField(HStoreNamedField* instr) {
 
   if (FLAG_unbox_double_fields && representation.IsDouble()) {
     UNIMPLEMENTED();
-    llvm::Value* obj_address = FieldOperand(Use(instr->object()), offset);
+    DCHECK(access.IsInobject());
+    llvm::Value* obj_address = ConstructAddress(Use(instr->object()), offset);
     llvm::Value* casted_obj_add =  __ CreateBitCast(obj_address,
                                                     Types::ptr_float64);
-    __ CreateStore(Use(instr->value()), casted_obj_add);
+    llvm::Value* value = Use(instr->value());
+    __ CreateStore(value, casted_obj_add);
     return;
   } else {
     HValue* hValue = instr->value();
