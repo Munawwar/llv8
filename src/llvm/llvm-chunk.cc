@@ -5416,33 +5416,46 @@ void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
-  llvm::BasicBlock* is_not_negative = NewBlock("DIVIDEND_IS_NOT_NEGATIVE");
-  llvm::BasicBlock* near = NewBlock("Near");
-  llvm::BasicBlock* done = NewBlock("DONE");
+  llvm::BasicBlock* is_not_negative = NewBlock("DoModByPowerOf2I"
+                                               " divident is not negative");
+  llvm::BasicBlock* negative = NewBlock("DoModByPowerOf2I negative");
+  llvm::BasicBlock* done = NewBlock("DoModByPowerOf2I done");
 
-  HValue* dividend = instr->left();
+  llvm::Value* dividend = Use(instr->left());
   int32_t divisor = instr->right()->GetInteger32Constant();
   int32_t mask = divisor < 0 ? -(divisor + 1) : (divisor - 1);
   llvm::Value* l_mask = __ getInt32(mask);
+  bool canNegative = instr->CheckFlag(HValue::kLeftCanBeNegative);
+  int phi_count = 1;
   llvm::Value* div1 = nullptr;
-  if (instr->CheckFlag(HValue::kLeftCanBeNegative)) {
+  if (canNegative) {
+    phi_count++;
     llvm::Value* zero = __ getInt32(0);
-    llvm::Value* cmp =  __ CreateICmpSGT(Use(dividend), zero);
-    __ CreateCondBr(cmp, is_not_negative, near);
-    __ SetInsertPoint(near);
-    __ CreateNeg(Use(dividend));
-    div1 =  __ CreateAnd(Use(dividend), l_mask);
+    llvm::Value* cmp =  __ CreateICmpSGT(dividend, zero);
+    __ CreateCondBr(cmp, is_not_negative, negative);
+
+    __ SetInsertPoint(negative);
+    llvm::Value* neg_divident = __ CreateNeg(dividend);
+    llvm::Value* temp =  __ CreateAnd(neg_divident, l_mask);
+    div1 = __ CreateNeg(temp);
     if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-      UNIMPLEMENTED();
+      llvm::Value* cmp = __ CreateICmpEQ(div1, zero);
+      DeoptimizeIf(cmp, Deoptimizer::kMinusZero);
     }
     __ CreateBr(done);
   }
+  else {
+    __ CreateBr(is_not_negative);
+  }
+
   __ SetInsertPoint(is_not_negative);
-  llvm::Value* div2 = __ CreateAnd(Use(dividend), l_mask);
+  llvm::Value* div2 = __ CreateAnd(dividend, l_mask);
   __ CreateBr(done);
+
   __ SetInsertPoint(done);
-  llvm::PHINode* phi = __ CreatePHI(Types::i32, 2);
-  phi->addIncoming(div1, near);
+  llvm::PHINode* phi = __ CreatePHI(Types::i32, phi_count);
+  if (canNegative)
+    phi->addIncoming(div1, negative);
   phi->addIncoming(div2, is_not_negative);
   instr->set_llvm_value(phi);
 }
