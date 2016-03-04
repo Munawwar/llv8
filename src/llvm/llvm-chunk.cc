@@ -5431,7 +5431,6 @@ void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoModI(HMod* instr) {
-  //TODO: not tested, test case string-unpack-code.js in e finction
   llvm::Value* left = Use(instr->left());
   llvm::Value* right = Use(instr->right());
   llvm::Value* zero = __ getInt32(0);
@@ -5446,7 +5445,6 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
   int phi_in = 1;
   llvm::BasicBlock* after_cmp_one = nullptr;
   if (instr->CheckFlag(HValue::kCanOverflow)) {
-//    UNIMPLEMENTED(); // because not tested
     after_cmp_one = NewBlock("DoModI after compare minus one");
     llvm::BasicBlock* possible_overflow = NewBlock("DoModI possible_overflow");
     llvm::BasicBlock* no_overflow_possible = NewBlock("DoModI "
@@ -5572,8 +5570,6 @@ void LLVMChunkBuilder::DoOsrEntry(HOsrEntry* instr) {
   llvm::InlineAsm* inline_asm = llvm::InlineAsm::get(
       inl_asm_f_type, final_strig, "~{dirflag},~{fpsr},~{flags}", true);
   __ CreateCall(inline_asm);
-
-  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoPower(HPower* instr) {
@@ -5821,7 +5817,6 @@ void LLVMChunkBuilder::DoStoreKeyed(HStoreKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
-  //UNIMPLEMENTED();
   //TODO: not tested string-validate-input.js in doTest
   ElementsKind elements_kind = instr->elements_kind();
   uint32_t offset = instr->base_offset();
@@ -5845,7 +5840,6 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
     auto result = __ CreateFPTrunc(Use(instr->value()), Types::float32);
     store = __ CreateStore(result, casted_address);
     instr->set_llvm_value(store);
-    //UNIMPLEMENTED();
   } else if (elements_kind == FLOAT64_ELEMENTS) {
     UNIMPLEMENTED();
   } else {
