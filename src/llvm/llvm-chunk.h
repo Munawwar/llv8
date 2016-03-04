@@ -645,7 +645,7 @@ class LLVMChunkBuilder final : public LowChunkBuilderBase {
                     bool negate = false,
                     llvm::BasicBlock* next_block = nullptr);
 
-  void UIntToTag(HChange* instr);
+  void DoNumberTagU(HChange* instr);
   // Declare methods that deal with the individual node types.
 #define DECLARE_DO(type) void Do##type(H##type* node);
   HYDROGEN_CONCRETE_INSTRUCTION_LIST(DECLARE_DO)

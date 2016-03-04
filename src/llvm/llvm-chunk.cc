@@ -1288,23 +1288,12 @@ void LLVMChunkBuilder::AssertNotSmi(llvm::Value* value) {
 
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(HValue* value) {
   llvm::Value* int32_val = Use(value);
-  llvm::Value* extended_width_val = __ CreateZExt(int32_val, Types::i64);
-  return __ CreateShl(extended_width_val, kSmiShift);
+  return Integer32ToSmi(int32_val);
 }
 
 llvm::Value* LLVMChunkBuilder::Integer32ToSmi(llvm::Value* value) {
-  llvm::Value* extended_width_val = __ CreateZExt(value, Types::i64);
+  llvm::Value* extended_width_val = __ CreateZExt(value, Types::smi);
   return __ CreateShl(extended_width_val, kSmiShift);
-}
-
-
-llvm::Value* LLVMChunkBuilder::CallVoid(Address target) {
-  llvm::Value* target_adderss = __ getInt64(reinterpret_cast<uint64_t>(target));
-  auto calling_conv = llvm::CallingConv::C; // We don't really care.
-  auto empty = std::vector<llvm::Value*>();
-  bool record_safepoint = false;
-  return CallVal(target_adderss, calling_conv, empty, __ getVoidTy(),
-                 record_safepoint);
 }
 
 llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
@@ -1638,7 +1627,6 @@ llvm::Value* LLVMChunkBuilder::AllocateHeapNumber(MutableMode mode){
   llvm::Value* casted_address = __ CreatePointerCast(address,
                                                      Types::ptr_tagged);
   __ CreateStore(root, casted_address);
-  __ CreatePtrToInt(casted_address, Types::i64);
   return result;
 }
 
@@ -2578,35 +2566,34 @@ void LLVMChunkBuilder::DoArgumentsLength(HArgumentsLength* instr) {
 void LLVMChunkBuilder::DoBitwise(HBitwise* instr) {
   DCHECK(instr->left()->representation().Equals(instr->representation()));
   DCHECK(instr->right()->representation().Equals(instr->representation()));
-  HValue* left = instr->left();
-  HValue* right = instr->right();
-  int32_t right_operand;
-  if (right->IsConstant())
-    right_operand = right->GetInteger32Constant();
-  switch (instr->op()) {
-    case Token::BIT_AND: {
-      llvm::Value* And = __ CreateAnd(Use(left), Use(right),"");
-      instr->set_llvm_value(And);
-      break;
-    }
-    case Token::BIT_OR: {
-      llvm::Value* Or = __ CreateOr(Use(left), Use(right),"");
-      instr->set_llvm_value(Or);
-      break;
-    }
-    case Token::BIT_XOR: {
-      if(right->IsConstant() && right_operand == int32_t(~0)) {
-        llvm::Value* Not = __ CreateNot(Use(left), "");
-        instr->set_llvm_value(Not);
-      } else {
-        llvm::Value* Xor = __ CreateXor(Use(left), Use(right), "");
-        instr->set_llvm_value(Xor);
+  llvm::Value* left = Use(instr->left());
+  llvm::Value* right = Use(instr->right());
+  if (instr->representation().IsSmiOrInteger32()) {
+    switch (instr->op()) {
+      case Token::BIT_AND: {
+        instr->set_llvm_value(__ CreateAnd(left, right));
+        break;
       }
-      break;
+      case Token::BIT_OR: {
+        instr->set_llvm_value(__ CreateOr(left, right));
+        break;
+      }
+      case Token::BIT_XOR: {
+        instr->set_llvm_value(__ CreateXor(left, right));
+        break;
+      }
+      default:
+        UNREACHABLE();
+        break;
     }
-    default:
-      UNREACHABLE();
-      break;
+  } else {
+    // TODO(llvm): refactor (DRY) -- same code in DoSub.
+    AllowHandleAllocation allow_handles;
+    Handle<Code> code =
+        CodeFactory::BinaryOpIC(isolate(), instr->op(), instr->strength()).code();
+    std::vector<llvm::Value*> params { Use(instr->context()), left, right };
+    auto call_ic = CallCode(code, llvm::CallingConv::X86_64_V8_S10, params);
+    instr->set_llvm_value(call_ic);
   }
 }
 
@@ -3233,12 +3220,10 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   // TODO(llvm): this case in Crankshaft utilizes deferred calling.
   llvm::Value* new_heap_number = nullptr;
   DCHECK(Use(val)->getType()->isDoubleTy());
-  if (FLAG_inline_new) {
+  if (FLAG_inline_new)
     new_heap_number = AllocateHeapNumber();
-  } else {
-    auto slow_heap = AllocateHeapNumberSlow(); // i8*
-    new_heap_number = __ CreateBitOrPointerCast(slow_heap, Types::i64);
-  }
+  else
+    new_heap_number = AllocateHeapNumberSlow(); // i8*
 
   llvm::Value* store_address = FieldOperand(new_heap_number,
                                             HeapNumber::kValueOffset);
@@ -3249,8 +3234,7 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
                                                       Types::i64);
   // [(i8*)new_heap_number + offset] = val;
   __ CreateStore(casted_val, casted_address);
-  auto result = __ CreateIntToPtr(new_heap_number, Types::tagged);
-  instr->set_llvm_value(result); // no offset
+  instr->set_llvm_value(new_heap_number); // no offset
 
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
 }
@@ -3578,7 +3562,7 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
                                                        Types::tagged);
         instr->set_llvm_value(smi_as_tagged);
       } else if (instr->value()->CheckFlag(HInstruction::kUint32)) {
-        UIntToTag(instr);
+        DoNumberTagU(instr);
       } else {
         UNIMPLEMENTED();
       }
@@ -3612,51 +3596,37 @@ void LLVMChunkBuilder::DoChange(HChange* instr) {
     }
   }
 }
-void LLVMChunkBuilder::UIntToTag(HChange* instr ){
-
+void LLVMChunkBuilder::DoNumberTagU(HChange* instr){
   llvm::Value* val = Use(instr->value());
-  llvm::Value* cmp = __ CreateICmpUGT(val, __ getInt32(Smi::kMaxValue));
-  llvm::BasicBlock* def_entr = NewBlock("IntToTag Deferred entry");
-  llvm::BasicBlock* cont = NewBlock("IntToTag Continue");
+  llvm::Value* above_max = __ CreateICmpUGT(val, __ getInt32(Smi::kMaxValue));
+  llvm::BasicBlock* deferred = NewBlock("IntToTag Deferred entry");
+  llvm::BasicBlock* is_valid_smi = NewBlock("IntToTag Continue");
   llvm::BasicBlock* done = NewBlock("IntToTag Done");
-  __ CreateCondBr(cmp, def_entr, cont);
+  __ CreateCondBr(above_max, deferred, is_valid_smi);
 
-  __ SetInsertPoint(cont);
-  
-  llvm::Value* result = Integer32ToSmi(val);
+  __ SetInsertPoint(is_valid_smi);
+  auto smi_result = Integer32ToSmi(val);
+  auto smi_result_tagged = __ CreateBitOrPointerCast(smi_result, Types::tagged);
   __ CreateBr(done);
 
-  __ SetInsertPoint(def_entr);
-  
-  if (FLAG_debug_code) {
+  __ SetInsertPoint(deferred);
+  auto number_as_double = __ CreateUIToFP(val, Types::float64);
+  llvm::Value* new_heap_number = nullptr;
+  // FIXME(llvm): we do not provide gc_required label...
+  if (FLAG_inline_new) {
+    new_heap_number = AllocateHeapNumber();
+    auto double_addr = FieldOperand(new_heap_number, HeapNumber::kValueOffset);
+    double_addr = __ CreateBitOrPointerCast(double_addr, Types::ptr_float64);
+    __ CreateStore(number_as_double, double_addr);
+  } else {
     UNIMPLEMENTED();
   }
-
-  // Trap, wrong implementation.
-  InsertDebugTrap();
-  auto new_heap_number_casted = __ getInt64(0);
-  /*llvm::Value* double_value = __ CreateSIToFP(val, Types::float64);
-  
-  if (FLAG_inline_new) {
-   UNIMPLEMENTED();
-  }
-  
-  llvm::Value* new_heap_number = AllocateHeapNumber();
-  
-  llvm::Value* store_address = FieldOperand(new_heap_number,
-                                            HeapNumber::kValueOffset);
-  llvm::Value* casted_adderss = __ CreateBitCast(store_address,
-                                                 Types::ptr_tagged);
-  llvm::Value* casted_val = __ CreateBitCast(double_value, Types::tagged);
-  __ CreateStore(casted_val, casted_adderss);
-  llvm::Value* new_heap_number_casted = __ CreatePtrToInt(new_heap_number,
-                                                          Types::tagged); */
   __ CreateBr(done);
 
   __ SetInsertPoint(done);
-  llvm::PHINode* phi = __ CreatePHI(Types::i64, 2);
-  phi->addIncoming(result, cont);
-  phi->addIncoming(new_heap_number_casted, def_entr);
+  llvm::PHINode* phi = __ CreatePHI(Types::tagged, 2);
+  phi->addIncoming(smi_result_tagged, is_valid_smi);
+  phi->addIncoming(new_heap_number, deferred);
   instr->set_llvm_value(phi);
 }
 
@@ -5461,7 +5431,6 @@ void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
 }
 
 void LLVMChunkBuilder::DoModI(HMod* instr) {
-  llvm::BasicBlock* insert = __ GetInsertBlock();
   //TODO: not tested, test case string-unpack-code.js in e finction
   llvm::Value* left = Use(instr->left());
   llvm::Value* right = Use(instr->right());
@@ -5477,35 +5446,35 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
   int phi_in = 1;
   llvm::BasicBlock* after_cmp_one = nullptr;
   if (instr->CheckFlag(HValue::kCanOverflow)) {
-    UNIMPLEMENTED(); // because not tested
-    after_cmp_one = NewBlock("DoModI after cmpare minus one");
-    llvm::BasicBlock* after_cmp_minInt = NewBlock("DoModI after cmpare MinInt");
-    llvm::BasicBlock* no_overflow_possible = NewBlock("DoModI"
+//    UNIMPLEMENTED(); // because not tested
+    after_cmp_one = NewBlock("DoModI after compare minus one");
+    llvm::BasicBlock* possible_overflow = NewBlock("DoModI possible_overflow");
+    llvm::BasicBlock* no_overflow_possible = NewBlock("DoModI "
                                                       "no_overflow_possible");
     llvm::Value* min_int = __ getInt32(kMinInt);
-    llvm::Value* cmp_min = __ CreateICmpEQ(left, min_int);
-    __ CreateCondBr(cmp_min, no_overflow_possible, after_cmp_minInt);
+    llvm::Value* left_is_min_int = __ CreateICmpEQ(left, min_int);
+    __ CreateCondBr(left_is_min_int, possible_overflow, no_overflow_possible);
 
-    __ SetInsertPoint(after_cmp_minInt);
+    __ SetInsertPoint(possible_overflow);
     llvm::Value* minus_one = __ getInt32(-1);
-    llvm::Value* is_not_minus_one = __ CreateICmpNE(right, minus_one);
+    llvm::Value* right_is_minus_one = __ CreateICmpEQ(right, minus_one);
     if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-      bool negate = true;
-      DeoptimizeIf(is_not_minus_one, Deoptimizer::kMinusZero, negate);
+      DeoptimizeIf(right_is_minus_one, Deoptimizer::kMinusZero);
+      __ CreateBr(no_overflow_possible);
     } else {
       phi_in++;
-      __ CreateCondBr(is_not_minus_one, no_overflow_possible, after_cmp_one);
+      __ CreateCondBr(right_is_minus_one, after_cmp_one, no_overflow_possible);
       __ SetInsertPoint(after_cmp_one);
       result = zero;
-        __ CreateBr(done);
+      __ CreateBr(done);
     }
     __ SetInsertPoint(no_overflow_possible);
-    }
+  }
 
    llvm::BasicBlock* negative = nullptr;
    llvm::BasicBlock* positive = nullptr;
 
- if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
+  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
     phi_in++;
     negative = NewBlock("DoModI left is negative");
     positive = NewBlock("DoModI left is positive");
@@ -5521,6 +5490,7 @@ void LLVMChunkBuilder::DoModI(HMod* instr) {
     __ SetInsertPoint(positive);
   }
 
+  llvm::BasicBlock* insert = __ GetInsertBlock();
   llvm::Value* div = __ CreateSRem(left, right);
   __ CreateBr(done);
 
@@ -5816,10 +5786,12 @@ void LLVMChunkBuilder::DoStoreContextSlot(HStoreContextSlot* instr) {
 
   llvm::Value* target = ConstructAddress(context, offset);
   llvm::Value* casted_address = nullptr;
+
   if (instr->value()->representation().IsTagged())
     casted_address = __ CreateBitCast(target, Types::ptr_tagged);
   else
     casted_address = __ CreateBitCast(target, Types::ptr_i64);
+
   __ CreateStore(value, casted_address);
   if (instr->NeedsWriteBarrier()) {
     int slot_offset = Context::SlotOffset(instr->slot_index());
