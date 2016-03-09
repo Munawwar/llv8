@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <iomanip>
+#include <set>
 
 #include "src/code-factory.h"
 #include "src/disassembler.h"
@@ -610,6 +611,9 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
       DeoptimizationInputData::New(isolate(),
                                    IntHelper::AsInt(true_deopt_count), TENURED);
 
+  // FIXME(llvm): This invariant fails when optimizer duplicates a deopt branch.
+  CHECK_EQ(std::set<int>(sorted_ids.begin(), sorted_ids.end()).size(),
+           sorted_ids.size());
   if (true_deopt_count == 0) return;
 
   // It's important. It seems something expects deopt entries to be stored
