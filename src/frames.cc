@@ -645,11 +645,18 @@ void StandardFrame::IterateCompiledFrame(ObjectVisitor* v) const {
 
   // Visit the outgoing parameters.
   Object** parameters_base = &Memory::Object_at(sp());
-  Object** parameters_limit = &Memory::Object_at(
+  Object** locals_base = &Memory::Object_at(
       fp() + JavaScriptFrameConstants::kFunctionOffset - slot_space);
+  Object** parameters_limit = nullptr;
+
+  if (!code->is_llvmed())
+    parameters_limit = locals_base;
+  else
+    parameters_limit = parameters_base + safepoint_entry.num_function_args();
 
   // Visit the parameters that may be on top of the saved registers.
   if (safepoint_entry.argument_count() > 0) {
+    if (code->is_llvmed()) UNIMPLEMENTED();
     v->VisitPointers(parameters_base,
                      parameters_base + safepoint_entry.argument_count());
     parameters_base += safepoint_entry.argument_count();
@@ -688,7 +695,7 @@ void StandardFrame::IterateCompiledFrame(ObjectVisitor* v) const {
     int byte_index = index >> kBitsPerByteLog2;
     int bit_index = index & (kBitsPerByte - 1);
     if ((safepoint_bits[byte_index] & (1U << bit_index)) != 0) {
-      v->VisitPointer(parameters_limit + index);
+      v->VisitPointer(locals_base + index);
     }
   }
 

@@ -71,6 +71,7 @@ class LLVMRelocationData : public ZoneObject {
        is_deopt_(8, zone),
        is_safepoint_(8, zone),
        deopt_reasons_(),
+       num_safepoint_function_args_(),
        is_transferred_(false),
        zone_(zone) {}
 
@@ -85,10 +86,13 @@ class LLVMRelocationData : public ZoneObject {
 
   int32_t GetNextUnaccountedPatchpointId();
   int32_t GetNextDeoptPatchpointId();
-  int32_t GetNextSafepointPatchpointId();
-  int32_t GetNextRelocPatchpointId(bool is_safepoint = false);
-  int32_t GetNextRelocNopPatchpointId(bool is_safepoint = false);
+  int32_t GetNextSafepointPatchpointId(size_t num_passed_args);
+  int32_t GetNextRelocPatchpointId(size_t num_passed_args = -1,
+                                   bool is_safepoint = false);
+  int32_t GetNextRelocNopPatchpointId(size_t num_passed_args = -1,
+                                      bool is_safepoint = false);
   int32_t GetNextDeoptRelocPatchpointId();
+  size_t GetNumSafepointFuncionArgs(int32_t patchpoint_id);
   Deoptimizer::DeoptReason GetDeoptReason(int32_t patchpoint_id);
   void SetDeoptReason(int32_t patchpoint_id, Deoptimizer::DeoptReason reason);
   int GetBailoutId(int32_t patchpoint_id);
@@ -114,6 +118,7 @@ class LLVMRelocationData : public ZoneObject {
   GrowableBitVector is_safepoint_;
   // FIXME(llvm): make it a ZoneHashMap
   std::map<int32_t, Deoptimizer::DeoptReason> deopt_reasons_;
+  std::map<int32_t, size_t> num_safepoint_function_args_;
   bool is_transferred_;
   Zone* zone_;
 };
