@@ -39,20 +39,41 @@ class SafepointEntry BASE_EMBEDDED {
     return DeoptimizationIndexField::decode(info_);
   }
 
+  // FIXME(llvm): it effectively limits number of function arguments to 2**10.
+  static const int kNumPassedArgumentsFieldBits = 10;
   static const int kArgumentsFieldBits = 3;
   static const int kSaveDoublesFieldBits = 1;
   static const int kDeoptIndexBits =
-      32 - kArgumentsFieldBits - kSaveDoublesFieldBits;
+      32 - kNumPassedArgumentsFieldBits -
+      kArgumentsFieldBits - kSaveDoublesFieldBits;
+
+  static const int kDeoptIndexShift = 0;
+  static const int kNumPassedArgumentsShift =
+      kDeoptIndexShift + kDeoptIndexBits;
+  static const int kArgumentsShift =
+      kNumPassedArgumentsShift + kNumPassedArgumentsFieldBits;
+  static const int kSaveDoublesShift =
+      kArgumentsShift + kArgumentsFieldBits;
+
   class DeoptimizationIndexField:
-    public BitField<int, 0, kDeoptIndexBits> {};  // NOLINT
+    public BitField<int, kDeoptIndexShift, kDeoptIndexBits> {};  // NOLINT
+  class NumPassedArgumentsField:
+      public BitField<size_t,
+                      kNumPassedArgumentsShift,
+                      kNumPassedArgumentsFieldBits> {};
   class ArgumentsField:
     public BitField<unsigned,
-                    kDeoptIndexBits,
+                    kArgumentsShift,
                     kArgumentsFieldBits> {};  // NOLINT
   class SaveDoublesField:
     public BitField<bool,
-                    kDeoptIndexBits + kArgumentsFieldBits,
+                    kSaveDoublesShift,
                     kSaveDoublesFieldBits> { }; // NOLINT
+
+  size_t num_function_args() const {
+    DCHECK(is_valid());
+    return NumPassedArgumentsField::decode(info_);
+  }
 
   int argument_count() const {
     DCHECK(is_valid());
@@ -199,7 +220,8 @@ class SafepointTableBuilder BASE_EMBEDDED {
   Safepoint DefineSafepoint(unsigned pc,
                             Safepoint::Kind kind,
                             int arguments,
-                            Safepoint::DeoptMode mode);
+                            Safepoint::DeoptMode mode,
+                            size_t num_passed_arguments);
 
   // Record deoptimization index for lazy deoptimization for the last
   // outstanding safepoints.
@@ -218,6 +240,7 @@ class SafepointTableBuilder BASE_EMBEDDED {
     unsigned pc;
     unsigned arguments;
     bool has_doubles;
+    size_t num_function_args;
   };
 
   uint32_t EncodeExceptPC(const DeoptimizationInfo& info, unsigned index);

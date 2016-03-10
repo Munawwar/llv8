@@ -103,11 +103,13 @@ Safepoint SafepointTableBuilder::DefineSafepoint(
     unsigned pc,
     Safepoint::Kind kind,
     int arguments,
-    Safepoint::DeoptMode deopt_mode) {
+    Safepoint::DeoptMode deopt_mode,
+    size_t num_function_args) {
   DCHECK(arguments >= 0);
   DeoptimizationInfo info;
   info.pc = pc;
   info.arguments = arguments;
+  info.num_function_args = num_function_args;
   info.has_doubles = (kind & Safepoint::kWithDoubles);
   deoptimization_info_.Add(info, zone_);
   deopt_index_list_.Add(Safepoint::kNoDeoptimizationIndex, zone_);
@@ -128,7 +130,7 @@ Safepoint SafepointTableBuilder::DefineSafepoint(
     Safepoint::Kind kind,
     int arguments,
     Safepoint::DeoptMode deopt_mode) {
-  return DefineSafepoint(assembler->pc_offset(), kind, arguments, deopt_mode);
+  return DefineSafepoint(assembler->pc_offset(), kind, arguments, deopt_mode, 0);
 }
 
 
@@ -218,6 +220,8 @@ void SafepointTableBuilder::Emit(Assembler* assembler,
 uint32_t SafepointTableBuilder::EncodeExceptPC(const DeoptimizationInfo& info,
                                                unsigned index) {
   uint32_t encoding = SafepointEntry::DeoptimizationIndexField::encode(index);
+  encoding |= SafepointEntry::NumPassedArgumentsField::encode(
+      info.num_function_args);
   encoding |= SafepointEntry::ArgumentsField::encode(info.arguments);
   encoding |= SafepointEntry::SaveDoublesField::encode(info.has_doubles);
   return encoding;

@@ -516,13 +516,15 @@ void LLVMChunk::EmitSafepointTable(Assembler* assembler,
     auto patchpoint_id = stackmap_record.patchpointID;
     if (!reloc_data_->IsPatchpointIdSafepoint(patchpoint_id)) continue;
 
+    auto num_passed_args =
+        reloc_data_->GetNumSafepointFuncionArgs(patchpoint_id);
     unsigned pc_offset = stackmap_record.instructionOffset;
     int call_instr_size = LLVMGranularity::getInstance().CallInstructionSizeAt(
         instruction_start + pc_offset);
     DCHECK_GT(call_instr_size, 0);
     pc_offset += call_instr_size;
     Safepoint safepoint = safepoints_builder.DefineSafepoint(
-        pc_offset, kind, safepoint_arguments, deopt_mode);
+        pc_offset, kind, safepoint_arguments, deopt_mode, num_passed_args);
 
     // First three locations are constants describing the calling convention,
     // flags passed to the statepoint intrinsic and the number of following
@@ -848,22 +850,28 @@ int32_t LLVMRelocationData::GetNextDeoptPatchpointId() {
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextSafepointPatchpointId() {
+int32_t LLVMRelocationData::GetNextSafepointPatchpointId(
+    size_t num_passed_args) {
   int32_t next_id = ++last_patchpoint_id_;
   is_safepoint_.Add(next_id, zone_);
+  num_safepoint_function_args_[next_id] = num_passed_args;
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextRelocPatchpointId(bool is_safepoint) {
-  int32_t next_id = ++last_patchpoint_id_;
-  is_reloc_.Add(next_id, zone_);
+int32_t LLVMRelocationData::GetNextRelocPatchpointId(size_t num_passed_args,
+                                                     bool is_safepoint) {
+  int32_t next_id;
   if (is_safepoint)
-    is_safepoint_.Add(next_id, zone_);
+    next_id = GetNextSafepointPatchpointId(num_passed_args);
+  else
+    next_id = ++last_patchpoint_id_;
+  is_reloc_.Add(next_id, zone_);
   return next_id;
 }
 
-int32_t LLVMRelocationData::GetNextRelocNopPatchpointId(bool is_safepoint) {
-  int32_t next_id = GetNextRelocPatchpointId(is_safepoint);
+int32_t LLVMRelocationData::GetNextRelocNopPatchpointId(
+    size_t num_passed_args, bool is_safepoint) {
+  int32_t next_id = GetNextRelocPatchpointId(num_passed_args, is_safepoint);
   is_reloc_with_nop_.Add(next_id, zone_);
   return next_id;
 }
@@ -873,6 +881,10 @@ int32_t LLVMRelocationData::GetNextDeoptRelocPatchpointId() {
   DeoptIdMap map {next_id, -1};
   is_deopt_.Add(map, zone_);
   return next_id;
+}
+
+size_t LLVMRelocationData::GetNumSafepointFuncionArgs(int32_t patchpoint_id) {
+  return num_safepoint_function_args_[patchpoint_id];
 }
 
 void LLVMRelocationData::SetDeoptReason(int32_t patchpoint_id,
@@ -1300,6 +1312,87 @@ llvm::Value* LLVMChunkBuilder::Integer32ToSmi(llvm::Value* value) {
   return __ CreateShl(extended_width_val, kSmiShift);
 }
 
+// See llvm/lib/Target/X86/X86CallingConv.td
+static size_t number_stack_params(size_t overall_params_num,
+                                  llvm::CallingConv::ID calling_conv) {
+  size_t passed_in_registers = 0;
+  switch (calling_conv) {
+    case llvm::CallingConv::X86_64_V8: {
+      passed_in_registers = 3;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_E: {
+      passed_in_registers = 4;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_CES: {
+      passed_in_registers = 3;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_RWS: {
+      passed_in_registers = 3;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S1: {
+      passed_in_registers = 5;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S2: {
+      UNIMPLEMENTED();
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S3: {
+      passed_in_registers = 4;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S4: {
+      passed_in_registers = 4;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S5: {
+      passed_in_registers = 3;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S6: {
+      passed_in_registers = 4;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S7: {
+      passed_in_registers = 4;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S8: {
+      passed_in_registers = 2;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S9: {
+      passed_in_registers = 5;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S10: {
+      passed_in_registers = 3;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S11: {
+      passed_in_registers = 2;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S12: {
+      passed_in_registers = 2;
+      break;
+    }
+    case llvm::CallingConv::X86_64_V8_S13: {
+      passed_in_registers = 2;
+      break;
+    }
+    default: {
+      UNREACHABLE();
+    }
+  }
+  return overall_params_num >= passed_in_registers ?
+      overall_params_num - passed_in_registers : 0;
+}
+
 llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
                                        llvm::CallingConv::ID calling_conv,
                                        std::vector<llvm::Value*>& params,
@@ -1322,7 +1415,9 @@ llvm::Value* LLVMChunkBuilder::CallVal(llvm::Value* callable_value,
   call_inst->setCallingConv(calling_conv);
 
   if (record_safepoint) {
-    int32_t stackmap_id = reloc_data_->GetNextSafepointPatchpointId();
+    auto stack_params = number_stack_params(params.size(), calling_conv);
+    int32_t stackmap_id =
+        reloc_data_->GetNextSafepointPatchpointId(stack_params);
     call_inst->addAttribute(llvm::AttributeSet::FunctionIndex,
                             "statepoint-id", std::to_string(stackmap_id));
   } else {
@@ -1340,12 +1435,15 @@ llvm::Value* LLVMChunkBuilder::CallCode(Handle<Code> code,
   auto index = chunk()->masm().GetCodeTargetIndex(code);
   int nop_size;
   int32_t pp_id;
+  auto stack_params = number_stack_params(params.size(), calling_conv);
   if (code->kind() == Code::BINARY_OP_IC ||
       code->kind() == Code::COMPARE_IC) {
-    pp_id = reloc_data_->GetNextRelocNopPatchpointId(record_safepoint);
+    pp_id = reloc_data_->GetNextRelocNopPatchpointId(stack_params,
+                                                     record_safepoint);
     nop_size = 6; // call relative i32 takes 5 bytes: `e8` + i32 + nop
   } else {
-    pp_id = reloc_data_->GetNextRelocPatchpointId(record_safepoint);
+    pp_id = reloc_data_->GetNextRelocPatchpointId(stack_params,
+                                                  record_safepoint);
     nop_size = 5; // call relative i32 takes 5 bytes: `e8` + i32
   }
 
@@ -3232,12 +3330,10 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   llvm::Value* store_address = FieldOperand(new_heap_number,
                                             HeapNumber::kValueOffset);
   llvm::Value* casted_address = __ CreateBitCast(store_address,
-                                                 Types::ptr_i64);
-  llvm::Value* casted_intermediate = __ CreateBitCast(Use(val), Types::i64);
-  llvm::Value* casted_val = __ CreateBitOrPointerCast(casted_intermediate,
-                                                      Types::i64);
+                                                 Types::ptr_float64);
+
   // [(i8*)new_heap_number + offset] = val;
-  __ CreateStore(casted_val, casted_address);
+  __ CreateStore(Use(val), casted_address);
   instr->set_llvm_value(new_heap_number); // no offset
 
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
