@@ -3330,12 +3330,10 @@ void LLVMChunkBuilder::ChangeDoubleToTagged(HValue* val, HChange* instr) {
   llvm::Value* store_address = FieldOperand(new_heap_number,
                                             HeapNumber::kValueOffset);
   llvm::Value* casted_address = __ CreateBitCast(store_address,
-                                                 Types::ptr_i64);
-  llvm::Value* casted_intermediate = __ CreateBitCast(Use(val), Types::i64);
-  llvm::Value* casted_val = __ CreateBitOrPointerCast(casted_intermediate,
-                                                      Types::i64);
+                                                 Types::ptr_float64);
+
   // [(i8*)new_heap_number + offset] = val;
-  __ CreateStore(casted_val, casted_address);
+  __ CreateStore(Use(val), casted_address);
   instr->set_llvm_value(new_heap_number); // no offset
 
   //  TODO(llvm): AssignPointerMap(Define(result, result_temp));
