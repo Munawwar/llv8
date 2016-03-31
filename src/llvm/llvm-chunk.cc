@@ -4877,9 +4877,6 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
   HValue* key = instr->key();
   ElementsKind kind = instr->elements_kind();
   int32_t base_offset = instr->base_offset();
-  llvm::Value* casted_address = nullptr;
-  // FIXME(llvm): this is bad. Limit the scope to a block.
-  llvm::Value* load = nullptr;
 
   if (kPointerSize == kInt32Size && !key->IsConstant()) {
     UNIMPLEMENTED();
@@ -4889,22 +4886,22 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
   llvm::Value* address = BuildFastArrayOperand(key, elements, 
                                                kind, base_offset);
   if (kind == FLOAT32_ELEMENTS) {
-    casted_address = __ CreateBitCast(address, Types::ptr_float32);
-    load = __ CreateLoad(casted_address);
+    auto casted_address = __ CreateBitCast(address, Types::ptr_float32);
+    auto load = __ CreateLoad(casted_address);
     auto result = __ CreateFPExt(load, Types::float64);
     instr->set_llvm_value(result);
     // UNIMPLEMENTED();
   } else if (kind == FLOAT64_ELEMENTS) {
-    casted_address = __ CreateBitCast(address, Types::ptr_float64);
-    load = __ CreateLoad(casted_address);
+    auto casted_address = __ CreateBitCast(address, Types::ptr_float64);
+    auto load = __ CreateLoad(casted_address);
     instr->set_llvm_value(load);
   } else {
     // TODO(llvm): DRY: hoist the common part.
     switch (kind) {
       case INT8_ELEMENTS: {
         //movsxbl(result, operand)
-        casted_address = __ CreateBitCast(address, Types::ptr_i8);
-        load = __ CreateLoad(casted_address);
+        auto casted_address = __ CreateBitCast(address, Types::ptr_i8);
+        auto load = __ CreateLoad(casted_address);
         llvm::Value* result = __ CreateSExt(load, Types::i32);
         instr->set_llvm_value(result);
         /*
@@ -4925,30 +4922,35 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
       case UINT8_ELEMENTS:
       case UINT8_CLAMPED_ELEMENTS:{
         //movzxbl(result, operand)
-        casted_address = __ CreateBitCast(address, Types::ptr_i8);
-        load = __ CreateLoad(casted_address);
+        auto casted_address = __ CreateBitCast(address, Types::ptr_i8);
+        auto load = __ CreateLoad(casted_address);
         llvm::Value* result = __ CreateZExt(load, Types::i32);
         instr->set_llvm_value(result);
         break;
       }
       case INT16_ELEMENTS: {
-        casted_address = __ CreateBitOrPointerCast(address, Types::ptr_i16);
-        load = __ CreateLoad(casted_address);
+        auto casted_address = __ CreateBitOrPointerCast(address, Types::ptr_i16);
+        auto load = __ CreateLoad(casted_address);
         auto extended = __ CreateSExt(load, Types::i32);
         instr->set_llvm_value(extended);
         break;
       }
-      case UINT16_ELEMENTS:
-        UNIMPLEMENTED();
+      case UINT16_ELEMENTS: {
+        auto casted_address = __ CreateBitOrPointerCast(address, Types::ptr_i16);
+        auto load = __ CreateLoad(casted_address);
+        auto extended = __ CreateZExt(load, Types::i32);
+        instr->set_llvm_value(extended);
         break;
-      case INT32_ELEMENTS:
-        casted_address = __ CreateBitCast(address, Types::ptr_i32);
-        load = __ CreateLoad(casted_address);
+      }
+      case INT32_ELEMENTS: {
+        auto casted_address = __ CreateBitCast(address, Types::ptr_i32);
+        auto load = __ CreateLoad(casted_address);
         instr->set_llvm_value(load);
         break;
-      case UINT32_ELEMENTS:
-        casted_address = __ CreateBitCast(address, Types::ptr_i32);
-        load = __ CreateLoad(casted_address);
+      }
+      case UINT32_ELEMENTS: {
+        auto casted_address = __ CreateBitCast(address, Types::ptr_i32);
+        auto load = __ CreateLoad(casted_address);
         instr->set_llvm_value(load);
         if (!instr->CheckFlag(HInstruction::kUint32)) {
           UNIMPLEMENTED();
@@ -4956,6 +4958,7 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
           //DeoptimizeIf(negative, instr, Deoptimizer::kNegativeValue);
         }
         break;
+      }
       case FLOAT32_ELEMENTS:
       case FLOAT64_ELEMENTS:
       case FAST_ELEMENTS:
@@ -4966,9 +4969,10 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
       case FAST_HOLEY_DOUBLE_ELEMENTS:
       case DICTIONARY_ELEMENTS:
       case FAST_SLOPPY_ARGUMENTS_ELEMENTS:
-      case SLOW_SLOPPY_ARGUMENTS_ELEMENTS:
+      case SLOW_SLOPPY_ARGUMENTS_ELEMENTS: {
         UNREACHABLE();
         break;
+      }
     }
   }
 }
