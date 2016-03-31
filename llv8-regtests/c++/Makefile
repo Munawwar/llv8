@@ -1,7 +1,11 @@
 .PHONY: clean all
 
-all: remdi.js il.js 407.js cunning-fox.js 257.js 111.js
+all: remdi.js il.js 407.js cunning-fox.js 257.js 111.js generating-funciton.js vector-double.js
 
+vector-double.js: vector-double.cc
+	/media/big/code-external/emsdk_portable/emscripten/master/em++ -std=c++11 -g -O3 vector-double.cc -o vector-double.js
+generating-funciton.js: generating-funciton.cc
+	/media/big/code-external/emsdk_portable/emscripten/master/em++ -std=c++11 -g -O3 generating-funciton.cc -o generating-funciton.js
 remdi.js: remdi.cc /tmp/gen.cc
 	/media/big/code-external/emsdk_portable/emscripten/master/em++ -std=c++11 -g -O3 remdi.cc -o remdi.js
 il.js: il.cc /tmp/gen.cc
