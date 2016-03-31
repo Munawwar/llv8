@@ -4861,10 +4861,8 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
-  //UNIMPLEMENTED(); // FIXME(llvm): there's no more is_typed_elements()
   if (instr->is_fixed_typed_array()) {
     DoLoadKeyedExternalArray(instr);
-
   } else if (instr->representation().IsDouble()) {
     DoLoadKeyedFixedDoubleArray(instr);
   } else {
@@ -5949,7 +5947,9 @@ void LLVMChunkBuilder::DoStoreKeyedExternalArray(HStoreKeyed* instr) {
     store = __ CreateStore(result, casted_address);
     instr->set_llvm_value(store);
   } else if (elements_kind == FLOAT64_ELEMENTS) {
-    UNIMPLEMENTED();
+    casted_address = __ CreateBitCast(address, Types::ptr_float64);
+    auto store = __ CreateStore(Use(instr->value()), casted_address);
+    instr->set_llvm_value(store);
   } else {
     switch (elements_kind) {
       case INT8_ELEMENTS:
