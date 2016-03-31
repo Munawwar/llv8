@@ -496,14 +496,6 @@ StackMaps LLVMChunk::GetStackMaps() {
   // Because we only have one function. This could change in the future.
   DCHECK(stackmaps.stack_sizes.size() == 1);
 
-//  uint64_t address = LLVMGranularity::getInstance().GetFunctionAddress(
-//      llvm_function_id_);
-//  auto it = std::find_if(stackmaps.stack_sizes.begin(),
-//                         stackmaps.stack_sizes.end(),
-//                         [address](const StackMaps::StackSize& s) {
-//                           return s.functionOffset ==  address;
-//                         });
-//  DCHECK(it != std::end(stackmaps.stack_sizes));
   return stackmaps;
 }
 
@@ -687,7 +679,6 @@ void LLVMChunk::SetUpDeoptimizationData(Handle<Code> code,
   }
   data->SetWeakCellCache(Smi::FromInt(0)); // I don't know what this is.
   data->SetOsrAstId(Smi::FromInt(info()->osr_ast_id().ToInt()));
-  // TODO(llvm): OSR entry point
   data->SetOsrPcOffset(Smi::FromInt(6));
 
   code->set_deoptimization_data(*data);
@@ -831,7 +822,6 @@ LLVMChunk* LLVMChunk::NewChunk(HGraph *graph) {
   DisallowHandleAllocation no_handles;
   DisallowHeapAllocation no_gc;
   graph->DisallowAddingNewValues();
-  // int values = graph->GetMaximumValueID();
   CompilationInfo* info = graph->info();
 
   LLVMChunkBuilder builder(info, graph);
@@ -973,14 +963,6 @@ LLVMChunkBuilder& LLVMChunkBuilder::Build() {
   Types::Init(llvm_ir_builder_.get());
   status_ = BUILDING;
 
-  // If compiling for OSR, reserve space for the unoptimized frame,
-  // which will be subsumed into this frame.
-  //if (graph()->has_osr()) {
-  //  for (int i = graph()->osr()->UnoptimizedFrameSlots(); i > 0; i--) {
-  //    chunk()->GetNextSpillIndex(GENERAL_REGISTERS);
-  //  }
-  //}
-
   // TODO(llvm): decide whether to have llvm insert safepoint polls.
   //  CreateSafepointPollFunction();
 
@@ -1081,45 +1063,9 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
     case Representation::Kind::kDouble:
       return Types::float64;
     default:
-      //UNIMPLEMENTED(); //3d-cube->DrawQube flows here
+      UNREACHABLE();
       return nullptr;
   }
-}
-
-// FIXME(llvm): unused (remove).
-std::vector<llvm::Value*> LLVMChunkBuilder::GetSafepointValues(
-    HInstruction* call_instr) {
-  // TODO(llvm): Refactor out the AssingPointerMap() part.
-
-  // TODO(llvm): obviously it's a very naive and unoptimal algorithm.
-  // Why? Because the biggest improvement in performance is the
-  // non-working-to-working. Other words: optimization would be premature.
-
-  std::vector<llvm::Value*> mapped_values;
-
-  // FIXME(llvm): what about phi-functions?
-  const ZoneList<HBasicBlock*>* blocks = graph()->blocks();
-  for (int i = 0; i < blocks->length(); i++) {
-    HBasicBlock* block = blocks->at(i);
-    // Iterate over all instructions of the graph.
-    for (HInstructionIterator it(block); !it.Done(); it.Advance()) {
-      HInstruction* def = it.Current();
-      if (!def->llvm_value()) continue;
-      if (def == call_instr) continue;
-      if (!HasTaggedValue(def)) continue;
-      if (!def->Dominates(call_instr)) continue;
-      for (HUseIterator it(def->uses()); !it.Done(); it.Advance()) {
-        HValue* use = it.value();
-        if (use == HValue::cast(call_instr)) continue;
-        if (use->IsReacheableFrom(call_instr)) {
-          // Use(def) goes to stackmap
-          if (def->llvm_value()) mapped_values.push_back(def->llvm_value());
-          break;
-        }
-      }
-    }
-  }
-  return mapped_values;
 }
 
 void LLVMChunkBuilder::DoDummyUse(HInstruction* instr) {
@@ -2141,7 +2087,6 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
     argument_count_ = pred->argument_count();
   }
   HInstruction* current = block->first();
-//  int start = chunk()->instructions()->length();
   while (current != NULL && !is_aborted()) {
     // Code for constants in registers is generated lazily.
     if (!current->EmitAtUses()) {
@@ -2149,11 +2094,6 @@ void LLVMChunkBuilder::DoBasicBlock(HBasicBlock* block,
     }
     current = current->next();
   }
-//  int end = chunk()->instructions()->length() - 1;
-//  if (end >= start) {
-//    block->set_first_instruction_index(start);
-//    block->set_last_instruction_index(end);
-//  }
   block->set_argument_count(argument_count_);
   block->set_llvm_end_basic_block(__ GetInsertBlock());
   next_block_ = NULL;
@@ -2223,7 +2163,6 @@ LLVMEnvironment* LLVMChunkBuilder::CreateEnvironment(
 
     HValue* value = hydrogen_env->values()->at(i);
     if (value->IsArgumentsObject() || value->IsCapturedObject()) {
-//      AddObjectToMaterialize(value, objects_to_materialize, result);
       UNIMPLEMENTED();
     }
   }
@@ -2245,7 +2184,6 @@ void LLVMChunkBuilder::DoPhi(HPhi* phi) {
 void LLVMChunkBuilder::DoBlockEntry(HBlockEntry* instr) {
   Use(instr->block());
   // TODO(llvm): LGap & parallel moves (OSR support)
-  // return new(zone()) LLabel(instr->block());
 }
 
 void LLVMChunkBuilder::DoContext(HContext* instr) {
@@ -2449,7 +2387,6 @@ llvm::Value* LLVMChunkBuilder::RecordRelocInfo(uint64_t intptr_value,
   if (!last_instr) 
     return __ CreateCall(inline_asm, __ getInt64(intptr_value));
   auto call = llvm::CallInst::Create(inline_asm, __ getInt64(intptr_value), "reloc", last_instr);
-  //call->insertBefore(last_instr);
   return call;
 }
 
@@ -3062,7 +2999,6 @@ void LLVMChunkBuilder::DoPushArguments(HPushArguments* instr) {
 }
 
 void LLVMChunkBuilder::DoCallJSFunction(HCallJSFunction* instr) {
-
   // Code that follows relies on this assumption
   // (well, maybe it's not, we haven't seen a test case yet)
   if (!instr->function()->IsConstant()) UNIMPLEMENTED();
@@ -3109,7 +3045,6 @@ void LLVMChunkBuilder::DoCallFunction(HCallFunction* instr) {
   llvm::Value* result = nullptr;
 
   if (instr->HasVectorAndSlot()) {
-    //UNIMPLEMENTED();
     AllowDeferredHandleDereference vector_structure_check;
     AllowHandleAllocation allow_handles;
     Handle<TypeFeedbackVector> feedback_vector = instr->feedback_vector();
@@ -4035,7 +3970,6 @@ void LLVMChunkBuilder::DoCompareNumericAndBranch(
         Use(instr->SuccessorAt(0)), Use(instr->SuccessorAt(1)));
     instr->set_llvm_value(branch);
     //FIXME: Hanlde Nan case, parity_even case
-    //UNIMPLEMENTED();
   }
 }
 
@@ -4080,11 +4014,10 @@ void LLVMChunkBuilder::DoCompareGeneric(HCompareGeneric* instr) {
   phi->addIncoming(true_value, compare_true);
   phi->addIncoming(false_value, compare_false);
   instr->set_llvm_value(phi);
-  //UNIMPLEMENTED(); // calling convention should be v8_ic
+  // calling convention should be v8_ic
 }
 
 void LLVMChunkBuilder::DoCompareMinusZeroAndBranch(HCompareMinusZeroAndBranch* instr) {
-  //UNIMPLEMENTED();
   Representation rep = instr->value()->representation();
 
   if (rep.IsDouble()) {
@@ -4156,17 +4089,15 @@ int64_t LLVMChunkBuilder::RootRegisterDelta(ExternalReference other) {
 }
 
 llvm::Value* LLVMChunkBuilder::ExternalOperand(ExternalReference target) {
-  //if (root_array_available_ && oserializer_enabled()) {
-    int64_t delta = RootRegisterDelta(target);
-    Address root_array_start_address =
-          ExternalReference::roots_array_start(isolate()).address();
-    auto int64_address =
-        __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
-    auto load_address = ConstructAddress(int64_address, delta);
-    auto casted_address = __ CreateBitCast(load_address, Types::ptr_i64);
-    llvm::Value* object = __ CreateLoad(casted_address);
-    return object;
-  //}
+  int64_t delta = RootRegisterDelta(target);
+  Address root_array_start_address =
+        ExternalReference::roots_array_start(isolate()).address();
+  auto int64_address =
+      __ getInt64(reinterpret_cast<uint64_t>(root_array_start_address));
+  auto load_address = ConstructAddress(int64_address, delta);
+  auto casted_address = __ CreateBitCast(load_address, Types::ptr_i64);
+  llvm::Value* object = __ CreateLoad(casted_address);
+  return object;
 }
 
 void LLVMChunkBuilder::PrepareCallCFunction(int num_arguments) {
@@ -4373,7 +4304,6 @@ void LLVMChunkBuilder::DoDummyUse(HDummyUse* instr) {
 }
 
 void LLVMChunkBuilder::DoEnterInlined(HEnterInlined* instr) {
-  //UNIMPLEMENTED();
   HEnvironment* outer = current_block_->last_environment();
   outer->set_ast_id(instr->ReturnId());
   HConstant* undefined = graph()->GetConstantUndefined();
@@ -4562,11 +4492,9 @@ void LLVMChunkBuilder::DoInnerAllocatedObject(HInnerAllocatedObject* instr) {
     uint32_t offset = (HConstant::cast(instr->offset()))->Integer32Value();
     llvm::Value* gep = ConstructAddress(Use(instr->base_object()), offset);
     instr->set_llvm_value(gep);
-    //UNIMPLEMENTED();
   } else {
     UNIMPLEMENTED();
   }
-  //UNIMPLEMENTED();
 }
 
 void LLVMChunkBuilder::DoInstanceOf(HInstanceOf* instr) {
@@ -4665,7 +4593,6 @@ void LLVMChunkBuilder::DoIsStringAndBranch(HIsStringAndBranch* instr) {
 }
 
 void LLVMChunkBuilder::DoIsSmiAndBranch(HIsSmiAndBranch* instr) {
-  //UNIMPLEMENTED();
   llvm::Value* input = Use(instr->value());
   llvm::Value* is_smi = SmiCheck(input);
   llvm::BranchInst* branch = __ CreateCondBr(is_smi,
@@ -4688,14 +4615,10 @@ void LLVMChunkBuilder::DoIsUndetectableAndBranch(HIsUndetectableAndBranch* instr
 }
 
 void LLVMChunkBuilder::DoLeaveInlined(HLeaveInlined* instr) {
-  //UNIMPLEMENTED();
   HEnvironment* env = current_block_->last_environment();
 
   if (env->entry()->arguments_pushed()) {
     UNIMPLEMENTED();
-    /*int argument_count = env->arguments_environment()->parameter_count();
-    pop = new(zone()) LDrop(argument_count);
-    DCHECK(instr->argument_delta() == -argument_count);*/
   }
 
   HEnvironment* outer = current_block_->last_environment()->
@@ -4756,10 +4679,6 @@ void LLVMChunkBuilder::DoLoadFieldByIndex(HLoadFieldByIndex* instr) {
   llvm::BasicBlock* out_of_obj = NewBlock("OUT OF OBJECT");
   llvm::BasicBlock* done1 = NewBlock("DONE1");
   llvm::BasicBlock* done = NewBlock("DONE");
-  /*llvm::Value* smi_tmp_val = __ CreateZExt(__ getInt64(1), Types::i64);
-  llvm::Value* smi_val = __ CreateShl(smi_tmp_val, kSmiShift);*/
-  /*llvm::Value* tmp_val = __ CreateAnd(val2, smi_val);
-  llvm::Value* test = __ CreateICmpNE(tmp_val, __ getInt64(0));*/
   llvm::Value* smi_tmp = __ CreateAShr(index, __ getInt64(1));
   index = __ CreateLShr(smi_tmp, kSmiShift);
   index = __ CreateTrunc(index, Types::i32);
@@ -4836,7 +4755,6 @@ void LLVMChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
   llvm::Value* context = Use(instr->context());
   llvm::Value* global_object = Use(instr->global_object());
   llvm::Value* name = MoveHeapObject(instr->name());
-  //llvm::Value* vector = nullptr;
    
   AllowDeferredHandleDereference vector_structure_check;
   Handle<TypeFeedbackVector> feedback_vector = instr->feedback_vector();
@@ -4871,7 +4789,6 @@ void LLVMChunkBuilder::DoLoadKeyed(HLoadKeyed* instr) {
 }
 
 void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
-  //  UNIMPLEMENTED();
   //TODO: not tested string-validate-input.js in doTest 
   //TODO: Compare generated asm while testing
   HValue* key = instr->key();
@@ -4899,24 +4816,10 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
     // TODO(llvm): DRY: hoist the common part.
     switch (kind) {
       case INT8_ELEMENTS: {
-        //movsxbl(result, operand)
         auto casted_address = __ CreateBitCast(address, Types::ptr_i8);
         auto load = __ CreateLoad(casted_address);
         llvm::Value* result = __ CreateSExt(load, Types::i32);
         instr->set_llvm_value(result);
-        /*
-        llvm::Value* check_sign = __ CreateAnd(load, __ getInt64(0x80));
-        llvm::Value* cmp = __ CreateICmpSGE(check_sign, __ getInt64(0)); 
-        llvm::BasicBlock* negative = NewBlock("DoLoadKeyedExternalArray" 
-                                              " negative");
-        llvm::BasicBlock* positive = NewBlock("DoLoadKeyedExternalArray"
-                                              " positive");
-        llvm::BasicBlock* merge = NewBlock("DoLoadKeyedExternalArray merge");
-        __ CreateCondBr(cmp, positive, negative);
-        
-        __ SetInsertPoint(positive);
-        llvm::Value* positiv_result = __ CreateAnd()
-        */
         break;
       }
       case UINT8_ELEMENTS:
@@ -4954,8 +4857,6 @@ void LLVMChunkBuilder::DoLoadKeyedExternalArray(HLoadKeyed* instr) {
         instr->set_llvm_value(load);
         if (!instr->CheckFlag(HInstruction::kUint32)) {
           UNIMPLEMENTED();
-          //__ testl(result, result);
-          //DeoptimizeIf(negative, instr, Deoptimizer::kNegativeValue);
         }
         break;
       }
@@ -5247,87 +5148,12 @@ void LLVMChunkBuilder::DoMathFloorOfDiv(HMathFloorOfDiv* instr) {
   UNIMPLEMENTED();
 }
 
-/*void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
-  llvm::Value* value = Use(instr->value());
-  llvm::Value* output_reg = nullptr;
-  llvm::Value* output_reg_s = __ getInt32(0);
-  llvm::Value* output_reg_p = nullptr;
-  // Let's assume we don't support this feature
-  //if (CpuFeatures::IsSupported(SSE4_1))
-
-  llvm::BasicBlock* negative_sign = NewBlock("Negative Sign");
-  llvm::BasicBlock* non_negative_sign = NewBlock("Non Negative Sign");
-  llvm::BasicBlock* positive_sign = NewBlock("Positive Sign");
-  llvm::BasicBlock* sign = NewBlock("Probably zero sign");
-  llvm::BasicBlock* check_overflow = NewBlock("Check Overflow");
-  llvm::BasicBlock* done = NewBlock("Done");
-  llvm::Value* l_zero = __ getInt64(0);
-  llvm::Value* l_double_zero = __ CreateSIToFP(l_zero, Types::float64);
-  llvm::Value* cmp = __ CreateFCmpOLT(value, l_double_zero);
-  //To do deoptimize with condition parity_even
-  //DeoptimizeIf()
-  __ CreateCondBr(cmp, negative_sign, non_negative_sign);
-  __ SetInsertPoint(non_negative_sign);
-  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-    llvm::Value* cmp_gr = __ CreateFCmpOGT(value, l_double_zero);
-    __ CreateCondBr(cmp_gr, positive_sign, sign);
-    __ SetInsertPoint(sign);
-    llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-        llvm::Intrinsic::x86_sse2_movmsk_pd);
-    llvm::Value* param_vect = __ CreateVectorSplat(2, value);
-    llvm::Value* movms = __ CreateCall(intrinsic, param_vect);
-    llvm::Value* not_zero = __ CreateICmpNE(movms, __ getInt32(0));
-    DeoptimizeIf(not_zero);
-    output_reg_s = __ getInt32(0);
-    __ CreateBr(done);
-  } else __ CreateBr(positive_sign);
-  __ SetInsertPoint(positive_sign);
-  llvm::Value* floor_result = __ CreateFPToSI(value, Types::i32);
-  output_reg_p = floor_result;
-  auto type = instr->representation().IsSmi() ? Types::i64 : Types::i32;
-  llvm::Function* intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
-        llvm::Intrinsic::ssub_with_overflow, type);
-
-  llvm::Value* params[] = { floor_result, __ getInt32(0x1) };
-  llvm::Value* call = __ CreateCall(intrinsic, params);
-
-  llvm::Value* overflow = __ CreateExtractValue(call, 1);
-  DeoptimizeIf(overflow);
-  __ CreateBr(done);
-  __ SetInsertPoint(negative_sign);
-  llvm::Value* floor_result_int = __ CreateFPToSI(value, Types::i32);
-  llvm::Value* floor_result_double = __ CreateSIToFP(floor_result_int, Types::float64);
-  output_reg = floor_result_int;
-  llvm::Value* cmp_eq = __ CreateFCmpOEQ(value, floor_result_double);
-  __ CreateCondBr(cmp_eq, done, check_overflow);
-  __ SetInsertPoint(check_overflow);
-
-  llvm::Function* intrinsic_sub_overflow = llvm::Intrinsic::getDeclaration(module_.get(),
-        llvm::Intrinsic::ssub_with_overflow, Types::i32);
-  llvm::Value* par[] = { floor_result_int, __ getInt32(1) };
-  llvm::Value* call_intrinsic = __ CreateCall(intrinsic_sub_overflow, par);
-  overflow = __ CreateExtractValue(call_intrinsic, 1);
-  DeoptimizeIf(overflow);
-  llvm::Value* result = output_reg;
-  __ CreateBr(done);
-
-  __ SetInsertPoint(done);
-  llvm::PHINode* phi = __ CreatePHI(Types::i32, 4);
-  phi->addIncoming(output_reg, negative_sign);
-  phi->addIncoming(output_reg_p, positive_sign);
-  phi->addIncoming(result, check_overflow);
-  phi->addIncoming(output_reg_s, sign);
-  instr->set_llvm_value(phi);
-}
-*/
-
 void LLVMChunkBuilder::DoMathFloor(HUnaryMathOperation* instr) {
   llvm::Function* floor_intrinsic = llvm::Intrinsic::getDeclaration(module_.get(),
          llvm::Intrinsic::floor, Types::float64);
   std::vector<llvm::Value*> params;
   params.push_back(Use(instr->value()));
   llvm::Value* floor = __ CreateCall(floor_intrinsic, params);
-  //llvm::Value* casted_floor = __ CreateBitCast(floor, Types::i32); 
   llvm::Value* casted_int =  __ CreateFPToSI(floor, Types::i64);
      // FIXME: Figure out why we need this step. Fix for bitops-nsieve-bits
   auto result = __ CreateTruncOrBitCast(casted_int, Types::i32);
@@ -5415,7 +5241,6 @@ void LLVMChunkBuilder::DoMod(HMod* instr) {
     instr->set_llvm_value(result);
   } else {
     UNIMPLEMENTED();
-    //return DoArithmeticT(Token::MOD, instr);
   }
 }
 
@@ -5445,54 +5270,6 @@ void LLVMChunkBuilder::DoModByConstI(HMod* instr) {
      __ SetInsertPoint(remainder_not_zero);
   }
   instr->set_llvm_value(result);
-
-  // FIXME(llvm): say no commented code!
-/*  HValue* dividend = instr->left();
-  llvm::Value* l_dividend = Use(dividend);
-  llvm::Value* l_rax = nullptr;
-  llvm::Value* l_rdx = nullptr;
-  int32_t divisor = instr->right()->GetInteger32Constant();
-
-  if (divisor == 0) {
-    UNIMPLEMENTED();
-  }
-  //__TruncatingDiv(dividend, divisor);
-  int32_t abs_div = Abs(divisor);
-  base::MagicNumbersForDivision<uint32_t> mag =
-      base::SignedDivisionByConstant(static_cast<uint32_t>(abs_div));
-  llvm::Value* l_mag = __ getInt32(mag.multiplier);
-  l_rdx = __ CreateNSWMul(l_dividend, l_mag);
-  bool neg = (mag.multiplier & (static_cast<uint32_t>(1) << 31)) != 0;
-  if (abs_div > 0 && neg)
-    l_rdx = __ CreateNSWAdd(l_rdx, l_dividend);
-  if (abs_div < 0 && !neg && mag.multiplier > 0)
-    l_rdx = __ CreateNSWSub(l_rdx, l_dividend);
-  if (mag.shift > 0) {
-    llvm::Value* shift = __ getInt32(mag.shift);
-    l_rdx = __ CreateAShr(l_rdx, shift);
-  }
-  llvm::Value* shift = __ getInt32(31);
-  l_rax = __ CreateLShr(l_dividend, shift);
-  l_rdx = __ CreateAdd(l_rdx, l_dividend);
-  //over
-  llvm::Value* l_abs_div = __ getInt32(abs_div);
-  l_rdx = __ CreateNSWMul(l_rdx, l_abs_div);
-  l_rax = l_dividend;
-  l_rax = __ CreateNSWSub(l_rax, l_rdx);
-
-  if (instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
-    llvm::BasicBlock* remainder_not_zero = NewBlock("Remainder not zero");
-    llvm::BasicBlock* near = NewBlock("Near");
-
-    llvm::Value* zero = __ getInt32(0);
-    llvm::Value* cmp_zero = __ CreateICmpNE(l_rax, zero);
-    __ CreateCondBr(cmp_zero, remainder_not_zero, near);
-    __ SetInsertPoint(near);
-    DeoptimizeIf(cmp_zero, instr->block());
-    __ CreateBr(remainder_not_zero);
-    __ SetInsertPoint(remainder_not_zero);
-  }
-  instr->set_llvm_value(l_rax);*/
 }
 
 void LLVMChunkBuilder::DoModByPowerOf2I(HMod* instr) {
@@ -6801,7 +6578,6 @@ void LLVMChunkBuilder::DoTypeofIsAndBranch(HTypeofIsAndBranch* instr) {
   llvm::Value* input = Use(instr->value());
   Factory* factory = isolate()->factory();
   llvm::BasicBlock* not_smi = NewBlock("DoTypeofIsAndBranch NotSmi");
-//  llvm::BranchInst* branch = nullptr;
   Handle<String> type_name = instr->type_literal();
   if (String::Equals(type_name, factory->number_string())) {
     llvm::Value* smi_cond = SmiCheck(input);
@@ -7105,12 +6881,10 @@ void LLVMChunkBuilder::DoUnaryMathOperation(HUnaryMathOperation* instr) {
        break;
       }
     case kMathLog: {
-      //UNIMPLEMENTED();
       DoMathLog(instr);
       break;
     }
     case kMathExp: {
-      //UNIMPLEMENTED();
       DoMathExp(instr);
       break;
     }
