@@ -10,6 +10,8 @@ file_suffix = ".js"
 v8_options = ["--allow-natives-syntax", "--expose-gc",]
 llv8_options = v8_options + [
     "--llvm-filter=foo*",
+    "--noturbo",
+    "--noturbo-asm",
 #    "--noconcurrent-recompilation",
 #    "--noconcurrent-osr",
 #    "--noinline-new",
