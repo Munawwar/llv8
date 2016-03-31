@@ -328,18 +328,26 @@ void LLVMChunk::AddToTranslation(
     // this block has not really been thoroughly tested
     auto value = constants[location.offset].integer;
 
-    if (reloc_data_->reloc_map().count(value)) {
-      auto pair = reloc_data_->reloc_map()[value];
-      LLVMRelocationData::ExtendedInfo minfo = pair.second;
-      if (minfo.cell_extended) {
-        DCHECK((value & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
-        value >>= 32;
+    if ((value & kSmiTagMask) == 0) { // A smi.
+      auto int_val = IntHelper::AsInt32(value >> (kSmiTagSize + kSmiShiftSize));
+      // FIXME(llvm): is it an OK way to create a handle for a Smi?
+      int literal_id = deopt_data_->DefineDeoptimizationLiteral(
+          isolate()->factory()->NewNumberFromInt(int_val, TENURED));
+      translation->StoreLiteral(literal_id);
+    } else {
+      if (reloc_data_->reloc_map().count(value)) {
+        auto pair = reloc_data_->reloc_map()[value];
+        LLVMRelocationData::ExtendedInfo minfo = pair.second;
+        if (minfo.cell_extended) {
+          DCHECK((value & 0xffffffff) == LLVMChunkBuilder::kExtFillingValue);
+          value >>= 32;
+        }
       }
+      Handle<Object> const_obj =  bit_cast<Handle<HeapObject> >(
+          static_cast<intptr_t>(value));
+      int literal_id = deopt_data_->DefineDeoptimizationLiteral(const_obj);
+      translation->StoreLiteral(literal_id);
     }
-    Handle<Object> const_obj =  bit_cast<Handle<HeapObject> >(
-        static_cast<intptr_t>(value));
-    int literal_id = deopt_data_->DefineDeoptimizationLiteral(const_obj);
-    translation->StoreLiteral(literal_id);
   } else if (location.kind == StackMaps::Location::kConstant) {
     int literal_id = deopt_data_->DefineDeoptimizationLiteral(
         isolate()->factory()->NewNumberFromInt(location.offset, TENURED));
