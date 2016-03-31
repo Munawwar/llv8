@@ -1062,8 +1062,10 @@ llvm::Type* LLVMChunkBuilder::GetLLVMType(Representation r) {
       return Types::smi;
     case Representation::Kind::kDouble:
       return Types::float64;
+    case Representation::Kind::kNone:
+      return nullptr;
     default:
-      UNREACHABLE();
+      UNIMPLEMENTED();
       return nullptr;
   }
 }
