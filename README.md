@@ -33,8 +33,7 @@ Fetch all the code:
 fetch v8
 cd v8
 git remote add llv8 https://github.com/ispras/llv8.git
-git pull llv8 llv8
-git checkout llv8
+git checkout -b llv8 llv8/llv8
 gclient sync
 ```
 Note that we don't run make yet, since first we need to build LLVM libraries to link against.
@@ -62,7 +61,7 @@ But this makes the subsequent compilation of llv8 a bit more involved (the C++ c
 Finally, run make (substitute "release" for "debug" if you'd like to test performance):
 ```
 cd $LLV8_ROOT/v8
-export LINK="" # V8's make uses third-party linker anyway.
+export LINK=$CXX
 make x64.debug -j9 i18nsupport=off gdbjit=off
 ```
 
