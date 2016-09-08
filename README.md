@@ -33,6 +33,7 @@ Fetch all the code:
 fetch v8
 cd v8
 git remote add llv8 https://github.com/ispras/llv8.git
+git fetch llv8
 git checkout -b llv8 llv8/llv8
 gclient sync
 ```
