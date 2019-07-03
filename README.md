@@ -63,6 +63,20 @@ Finally, run make (substitute "release" for "debug" if you'd like to test perfor
 ```
 cd $LLV8_ROOT/v8
 export LINK=$CXX
+```
+On ubuntu 16.0.4, before running make do
+```
+mv ./third_party/binutils/Linux_x64/Release/bin/ld.gold ./third_party/binutils/Linux_x64/Release/bin/ld.gold2
+ln -s /usr/bin/ld.gold ./third_party/binutils/Linux_x64/Release/bin/ld.gold
+```
+else you run into an error like
+```
+v8/third_party/binutils/Linux_x64/Release/bin/ld.gold: error: /usr/lib/gcc/x86_64-linux-gnu/5.4.0/../../../x86_64-linux-gnu/crti.o: unsupported reloc 42 against global symbol __gmon_start__
+/usr/lib/gcc/x86_64-linux-gnu/5.4.0/../../../x86_64-linux-gnu/crti.o(.init+0x7): error: unsupported reloc 42
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+```
+Now run make:
+```
 make x64.debug -j9 i18nsupport=off gdbjit=off
 ```
 
