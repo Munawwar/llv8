@@ -64,7 +64,7 @@ Finally, run make (substitute "release" for "debug" if you'd like to test perfor
 cd $LLV8_ROOT/v8
 export LINK=$CXX
 ```
-On ubuntu 16.0.4, before running make do
+On ubuntu 16.04, before running make, do:
 ```
 mv ./third_party/binutils/Linux_x64/Release/bin/ld.gold ./third_party/binutils/Linux_x64/Release/bin/ld.gold2
 ln -s /usr/bin/ld.gold ./third_party/binutils/Linux_x64/Release/bin/ld.gold
